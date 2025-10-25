@@ -1,0 +1,373 @@
+{
+  "commands": [
+    {
+      "name": "print",
+      "argument_count": "Any",
+      "argument_types": "Any",
+      "return_type": "None",
+      "description": "Prints each argument.",
+      "examples": [
+        "{print(\"Hello\", \" \", \"world!\")} = Hello world!"
+      ]
+    },
+    {
+      "name": "copy",
+      "argument_count": "Two or more",
+      "argument_types": "(Int or Float or Text or Bool or Command, ..., Identifier)",
+      "return_type": "None",
+      "description": "Copies any number of values into an Identifier",
+      "examples": [
+        "{copy(\"hello\", h) print(paste(h))} = hello",
+        "{copy(0, 1, 2, 3, numbers) print(paste(numbers))} = [0, 1, 2, 3]"
+      ]
+    },
+    {
+      "name": "paste",
+      "argument_count": "One",
+      "argument_types": "Identifier",
+      "return_type": "Int, Float, Text, Bool, List, or Command",
+      "description": "Pastes the value contained in an Identifer",
+      "examples": [
+        "{copy(\"hello\", h) print(paste(h))} = hello",
+        "{copy(0, 1, 2, 3, numbers) print(paste(numbers))} = [0, 1, 2, 3]"
+      ]
+    },
+    {
+      "name": "add",
+      "argument_count": "Two or more",
+      "argument_types": "Float or Integer",
+      "return_type": "If all arguments are Integer then return Integer otherwise returns Float",
+      "description": "Adds any number of values together and returns the sum.",
+      "examples": [
+        "{print(add(1, 2))} = 3 "
+      ]
+    },
+    {
+      "name": "sub",
+      "argument_count": "Two or more",
+      "argument_types": "Float or Integer",
+      "return_type": "If all arguments are Integer then return Integer otherwise returns Float",
+      "description": "Subtracts any number of values from left to right and returns the sum.",
+      "examples": [
+        "{print(sub(2, 2, 2))} = -2"
+      ]
+    },
+    {
+      "name": "mul",
+      "argument_count": "Two or more",
+      "argument_types": "Float or Integer",
+      "return_type": "If all arguments are Integer then return Integer otherwise returns Float",
+      "description": "Multiplies any number of values together and returns the product.",
+      "examples": [
+        "{print(mul(4, 4))} = 16"
+      ]
+    },
+    {
+      "name": "div",
+      "argument_count": "Two or more",
+      "argument_types": "Float or Integer",
+      "return_type": "If all arguments are Integer then return Integer otherwise return Float",
+      "description": "Divides any number of values from left to right and returns the quotient.",
+      "examples": [
+        "{print(div(10.0, 2.0, 2.0))} = 2.5"
+      ]
+    },
+    {
+      "name": "mod",
+      "argument_count": "Two or more",
+      "argument_types": "Float or Integer",
+      "return_type": "If all arguments are Integer then return Integer otherwise returns Float",
+      "description": "Computes the remainder of any number of values from left to right.",
+      "examples": [
+        "{print(mod(2,4))} = 2"
+      ]
+    },
+    {
+      "name": "random_range",
+      "argument_count": "Two",
+      "argument_types": "(Int, Int), (Int, Float), (Float, Int), (Float, Float)",
+      "return_type": "If all arguments are Integer then return Integer otherwise returns Float",
+      "description": "Returns a random value within the given range.",
+      "examples": [
+        "{print(random_range(1,4))}"
+      ]
+    },
+    {
+      "name": "eq",
+      "argument_count": "Two",
+      "argument_types": "(Text, Text), (Int, Int), (Int, Float), (Float, Int), (Float, Float), (Bool, Bool)",
+      "return_type": "Bool",
+      "description": "Compares two values and returns if they are equal.",
+      "examples": [
+        "{print(eq(1, 2))} = false"
+      ]
+    },
+    {
+      "name": "gt",
+      "argument_count": "Two",
+      "argument_types": "(Int, Int), (Int, Float), (Float, Int), (Float, Float)",
+      "return_type": "Bool",
+      "description": "Compares two values and returns if the first is greater than the second.",
+      "examples": [
+        "{print(gt(1, 2))} = false"
+      ]
+    },
+    {
+      "name": "lt",
+      "argument_count": "Two",
+      "argument_types": "(Int, Int), (Int, Float), (Float, Int), (Float, Float)",
+      "return_type": "Bool",
+      "description": "Compares two values and returns if the first is less than the second.",
+      "examples": [
+        "{print(lt(1, 2))} = true"
+      ]
+    },
+    {
+      "name": "not",
+      "argument_count": "One",
+      "argument_types": "Bool",
+      "return_type": "Bool",
+      "description": "Preforms the logical not operation and returns the result.",
+      "examples": [
+        "{print(not(true))} = false"
+      ]
+    },
+    {
+      "name": "and",
+      "argument_count": "Two or more",
+      "argument_types": "Bool",
+      "return_type": "Bool",
+      "description": "Preforms the logical and operation from left to right and returns the result.",
+      "examples": [
+        "{print(not(true))} = false"
+      ]
+    },
+    {
+      "name": "or",
+      "argument_count": "Two or more",
+      "argument_types": "Bool",
+      "return_type": "Bool",
+      "description": "Preforms the logical or operation from left to right and returns the result.",
+      "examples": [
+        "{print(not(true))} = false"
+      ]
+    },
+    {
+      "name": "if_then",
+      "argument_count": "Two",
+      "argument_types": "(Bool, Command)",
+      "return_type": "None",
+      "description": "Preforms the given command if the given Bool value is true.",
+      "examples": [
+        "{if_then(true, print(\"it's true\"))} = it's true"
+      ]
+    },
+    {
+      "name": "if_then_else",
+      "argument_count": "Three",
+      "argument_types": "(Bool, Command, Command)",
+      "return_type": "None",
+      "description": "Preforms the first command if the given Bool value is true otherwise preforms the second command.",
+      "examples": [
+        "{if_then_else(false, print(\"it's true\"), print(\"it's false\"))} = it's false"
+      ]
+    },
+    {
+      "name": "repeat",
+      "argument_count": "Two or more",
+      "argument_types": "(Int, Command, Command, Command, ...)",
+      "return_type": "None",
+      "description": "Preforms the given commands as many times as the Int that is given.",
+      "examples": [
+        "{repeat(5, print(\"ha\"))} = hahahahaha"
+      ]
+    },
+    {
+      "name": "while",
+      "argument_count": "Two or more",
+      "argument_types": "(Bool, Command, Command, Command, ...)",
+      "return_type": "None",
+      "description": "Preforms the given commands as long as the given Bool is true.",
+      "examples": [
+        "{copy(0, n) while(not(eq(paste(n), 5)), print(\"ha\"), copy(add(1, paste(n)), n))} = hahahahaha"
+      ]
+    },
+    {
+      "name": "capitalize",
+      "argument_count": "One",
+      "argument_types": "Text",
+      "return_type": "Text",
+      "description": "Capitalizes the first letter in the given Text if it can be capitalized.",
+      "examples": [
+        "{print(capitalize(\"hello\"))} = Hello"
+      ]
+    },
+    {
+      "name": "upper",
+      "argument_count": "One",
+      "argument_types": "Text",
+      "return_type": "Text",
+      "description": "Capitalizes all letters in the given Text if they can be capitalized.",
+      "examples": [
+        "{print(upper(\"hello\"))} = HELLO"
+      ]
+    },
+    {
+      "name": "lower",
+      "argument_count": "One",
+      "argument_types": "Text",
+      "return_type": "Text",
+      "description": "Converts all letters within the given Text to lowercase if they can be converted.",
+      "examples": [
+        "{print(lower(\"HELLO\"))} = hello"
+      ]
+    },
+    {
+      "name": "remove_whitespace",
+      "argument_count": "One",
+      "argument_types": "Text",
+      "return_type": "Text",
+      "description": "Removes all whitespace within the given Text.",
+      "examples": [
+        "{print(remove_whitespace(\"No  more  whitespace\"))} = Nomorewhitespace"
+      ]
+    },
+    {
+      "name": "concat",
+      "argument_count": "Any",
+      "argument_types": "Any",
+      "return_type": "Text",
+      "description": "Concatenates all arguments into one piece of Text",
+      "examples": [
+        "{print(concat(1, 2, true, \"hello\", \" world\"))} = 12truehello world"
+      ]
+    },
+    {
+      "name": "starts_with",
+      "argument_count": "Two",
+      "argument_types": "(Text, Text)",
+      "return_type": "Text",
+      "description": "Returns whether or not the Text in the first argument starts with the Text in the second.",
+      "examples": [
+        "{print(starts_with(\"hello\", \"hel\"))} = true"
+      ]
+    },
+    {
+      "name": "ends_with",
+      "argument_count": "Two",
+      "argument_types": "(Text, Text)",
+      "return_type": "Text",
+      "description": "Returns whether or not the Text in the first argument ends with the Text in the second.",
+      "examples": [
+        "{print(ends_with(\"hello\", \"llo\"))} = true"
+      ]
+    },
+    {
+      "name": "nl",
+      "argument_count": "None",
+      "argument_types": "None",
+      "return_type": "Text",
+      "description": "Returns the new line / carriage return character.",
+      "examples": [
+        "{print(\"hello\", nl(), \"world\")} = hello\nworld"
+      ]
+    },
+    {
+      "name": "select_random",
+      "argument_count": "Two or more",
+      "argument_types": "Any",
+      "return_type": "Any",
+      "description": "Randomly returns one of the given arguments.",
+      "examples": [
+        "{print(select_random(\"hello\", 1, \"world\"))}"
+      ]
+    },
+    {
+      "name": "get_sub",
+      "argument_count": "One",
+      "argument_types": "Text",
+      "return_type": "Text",
+      "description": "Attempts to search the funboy database for a substitute for the given Text.",
+      "examples": [
+        "{print(get_sub(\"noun\"))}"
+      ]
+    },
+    {
+      "name": "index",
+      "argument_count": "Two",
+      "argument_types": "(Int, Text), (Int, List)",
+      "return_type": "Int or Float or Text or Command or List",
+      "description": "Returns a character of Text or an element of a List at the given index.",
+      "examples": [
+        "{print(index(1, \"hello\"))} = e",
+        "{copy(1, 2, 3, list) print(index(1, paste(list)))} = 2"
+      ]
+    },
+    {
+      "name": "slice",
+      "argument_count": "Three",
+      "argument_types": "(Int, Int, Text), (Int, Int, List)",
+      "return_type": "Int or Float or Text or Command or List",
+      "description": "Returns a slice of Text or a List from the first index up to the second index.",
+      "examples": [
+        "{print(slice(2, 5, \"hello\"))} = llo",
+        "{copy(1, 2, 3, list) print(slice(0, 2, paste(list)))} = [1, 2]"
+      ]
+    },
+    {
+      "name": "length",
+      "argument_count": "One",
+      "argument_types": "(Text), (List)",
+      "return_type": "Int",
+      "description": "Returns the length of Text or a List.",
+      "examples": [
+        "{print(length(\"hello\"))} = 5",
+        "{copy(1, 2, 3, list) print(length(paste(list)))} = 3"
+      ]
+    },
+    {
+      "name": "swap",
+      "argument_count": "Three",
+      "argument_types": "(Int, Int, Text), (Int, Int, List)",
+      "return_type": "Text or List",
+      "description": "Swaps two characters of Text or two elements of a List from the given indices and returns the result.",
+      "examples": [
+        "{print(swap(0, 4, \"hello\"))} = oellh",
+        "{copy(1, 2, 3, list) print(swap(0, 1, paste(list)))} = [2, 1, 3]"
+      ]
+    },
+    {
+      "name": "insert",
+      "argument_count": "Three",
+      "argument_types": "(Text, Int, Text), (Int or Float or Text or Command or List, Int, List)",
+      "return_type": "Text or List",
+      "description": "Inserts Text into Text or an element into a List at the given index and returns the result.",
+      "examples": [
+        "{print(insert(\"h\", 0, \"ello\"))} = hello",
+        "{copy(1, 2, 3, list) print(insert(4, 3, paste(list)))} = [1, 2, 3, 4]"
+      ]
+    },
+    {
+      "name": "remove",
+      "argument_count": "Two",
+      "argument_types": "(Int, Text), (Int, List)",
+      "return_type": "Text or List",
+      "description": "Removes a character of Text or an element of a List and returns the result.",
+      "examples": [
+        "{print(remove(0, \"hello\"))} = ello",
+        "{copy(1, 2, 3, list) print(remove(0, paste(list)))} = [2, 3]"
+      ]
+    },
+    {
+      "name": "replace",
+      "argument_count": "Three",
+      "argument_types": "(Text, Int, Text), (Int or Float or Text or Command or List, Int, List)",
+      "return_type": "Text or List",
+      "description": "Replaces a character of Text or an element of a List and returns the result.",
+      "examples": [
+        "{print(replace(\"n\", 0, \"hello\"))} = nello",
+        "{copy(1, 2, 3, list) print(replace(3, 0, paste(list)))} = [3, 2, 3]"
+      ]
+    }
+  ]
+}

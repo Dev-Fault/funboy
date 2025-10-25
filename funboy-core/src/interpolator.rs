@@ -47,7 +47,7 @@ impl Default for TextInterpolator {
     /// # Examples
     ///
     /// ```
-    /// use text_interpolator::TextInterpolator;
+    /// use funboy_core::interpolator::TextInterpolator;
     ///
     /// let text_interpolator = TextInterpolator::default();
     /// ```
@@ -66,8 +66,8 @@ impl TextInterpolator {
     /// # Examples
     ///
     /// ```
-    /// use text_interpolator::TextInterpolator;
-    /// use text_interpolator::TemplateSplit;
+    /// use funboy_core::interpolator::TextInterpolator;
+    /// use funboy_core::interpolator::TemplateSplit;
     ///
     /// let text_interpolator = TextInterpolator::new(|_| true, |_|
     ///     TemplateSplit {
@@ -93,7 +93,7 @@ impl TextInterpolator {
     /// # Examples
     ///
     /// ```
-    /// use text_interpolator::TextInterpolator;
+    /// use funboy_core::interpolator::TextInterpolator;
     ///
     /// let mut text_interpolator = TextInterpolator::default();
     ///
@@ -164,7 +164,7 @@ impl TextInterpolator {
     /// # Examples
     ///
     /// ```
-    /// use text_interpolator::TextInterpolator;
+    /// use funboy_core::interpolator::TextInterpolator;
     ///
     /// let text_interpolator = TextInterpolator::default();
     ///
@@ -186,7 +186,7 @@ impl TextInterpolator {
 /// # Examples
 ///
 /// ```
-/// use text_interpolator::defaults::is_template;
+/// use funboy_core::interpolator::is_template;
 ///
 /// let template = "'template";
 /// let not_template = "not_template";
@@ -211,8 +211,8 @@ pub fn is_template(text: &str) -> bool {
 /// # Examples
 ///
 /// ```
-/// use text_interpolator::TemplateSplit;
-/// use text_interpolator::defaults::extract_template;
+/// use funboy_core::interpolator::TemplateSplit;
+/// use funboy_core::interpolator::extract_template;
 ///
 /// let template = "\"^verb^ing\"";
 ///

@@ -1,3 +1,7 @@
+pub mod database;
+pub mod interpolator;
+pub mod interpreter;
+
 pub fn add(left: u64, right: u64) -> u64 {
     left + right
 }
@@ -5,7 +9,7 @@ pub fn add(left: u64, right: u64) -> u64 {
 pub enum FunboyError {
     Interpolator(String),
     Interpreter(String),
-    ai(String),
+    AI(String),
     Database(String),
 }
 
