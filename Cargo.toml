@@ -1,0 +1,7 @@
+[workspace]
+resolver = "3"
+members = [
+	"funboy-core",
+	"funboy-cli",
+	"funboy-discord",
+]
