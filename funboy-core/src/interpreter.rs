@@ -1,4 +1,4 @@
-use crate::database::FunboyDatabase;
+use crate::database_old::FunboyDatabaseOld;
 use crate::interpolator::{TEMPLATE_CARROT, TextInterpolator};
 use async_recursion::async_recursion;
 use lexer::tokenize;
@@ -80,7 +80,7 @@ pub struct Interpreter {
     copy_buffer: ValueType,
     output: String,
     log: Vec<ValueType>,
-    db: Option<Arc<Mutex<FunboyDatabase>>>,
+    db: Option<Arc<Mutex<FunboyDatabaseOld>>>,
     interpolator: TextInterpolator,
 }
 
@@ -96,7 +96,7 @@ impl Interpreter {
         }
     }
 
-    pub fn new_with_db(db: Arc<Mutex<FunboyDatabase>>) -> Self {
+    pub fn new_with_db(db: Arc<Mutex<FunboyDatabaseOld>>) -> Self {
         Self {
             copy_buffer: ValueType::None,
             vars: VarMap::new(),
