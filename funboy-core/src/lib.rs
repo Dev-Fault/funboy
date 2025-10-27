@@ -1,28 +1,76 @@
+use std::str::FromStr;
+
+use rand::{Rng, distributions::uniform::SampleUniform};
+
 pub mod database;
 pub mod interpolator;
 pub mod interpreter;
+pub mod ollama;
 
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
-
+#[derive(Debug, Clone)]
 pub enum FunboyError {
     Interpolator(String),
     Interpreter(String),
     AI(String),
     Database(String),
+    UserInput(String),
 }
 
 pub struct Funboy {}
 
 impl Funboy {
-    pub async fn generate_random_number(min: f64, max: f64) -> f64 {
-        todo!()
+    fn gen_rand_num_inclusive<T: SampleUniform + PartialOrd>(min: T, max: T) -> T {
+        let mut rng = rand::thread_rng();
+        rng.gen_range(min..=max)
+    }
+
+    fn gen_rand_num_exclusive<T: SampleUniform + PartialOrd>(min: T, max: T) -> T {
+        let mut rng = rand::thread_rng();
+        rng.gen_range(min..max)
+    }
+
+    fn gen_rand_num_from_str<T: FromStr + PartialOrd + SampleUniform + ToString>(
+        min: &str,
+        max: &str,
+    ) -> Result<String, &'static str> {
+        match (min.parse(), max.parse()) {
+            (Ok(min), Ok(max)) => {
+                if min >= max {
+                    Err("min must be less than max")
+                } else {
+                    Ok(Self::gen_rand_num_inclusive::<T>(min, max).to_string())
+                }
+            }
+            _ => Err("min and max values must be a number"),
+        }
+    }
+
+    pub async fn random_number(min: &str, max: &str) -> Result<String, FunboyError> {
+        if min.contains('.') || max.contains('.') {
+            match Self::gen_rand_num_from_str::<f64>(min, max) {
+                Ok(result) => Ok(result),
+
+                Err(e) => Err(FunboyError::UserInput(e.to_string())),
+            }
+        } else {
+            match Self::gen_rand_num_from_str::<i64>(min, max) {
+                Ok(result) => Ok(result),
+
+                Err(e) => Err(FunboyError::UserInput(e.to_string())),
+            }
+        }
     }
 
     // Previously "random_word"
-    pub async fn select_random_entry<'a>(list: &[&'a str]) -> &'a str {
-        todo!()
+    pub async fn random_entry<'a>(list: &[&'a str]) -> Result<&'a str, FunboyError> {
+        if list.len() < 2 {
+            Err(FunboyError::UserInput(
+                "list must contain at least two entries".to_string(),
+            ))
+        } else {
+            let output = list[Self::gen_rand_num_inclusive(0, list.len() - 1)];
+            Ok(output)
+        }
     }
 
     pub async fn add_substitutes(
@@ -140,12 +188,87 @@ impl Funboy {
 }
 
 #[cfg(test)]
-mod tests {
+mod core {
     use super::*;
+    use std::panic;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+    #[tokio::test]
+    async fn random_number_produces_int_in_range() {
+        for _ in 0..100 {
+            let result = Funboy::random_number("1", "6")
+                .await
+                .unwrap()
+                .parse::<i64>()
+                .unwrap();
+            assert!((1..=6).contains(&result), "output outside of range");
+        }
+    }
+
+    #[tokio::test]
+    async fn random_number_produces_float() {
+        for _ in 0..100 {
+            let result = Funboy::random_number("1.0", "6.0")
+                .await
+                .unwrap()
+                .parse::<f64>()
+                .unwrap();
+            assert!((1.0..=6.0).contains(&result), "output outside of range");
+        }
+    }
+
+    #[tokio::test]
+    async fn random_number_fails_when_min_greater_than_max() {
+        match Funboy::random_number("6", "1").await {
+            Ok(_) => {
+                panic!("Value should not be Ok");
+            }
+            Err(e) => {
+                assert!(
+                    matches!(e, FunboyError::UserInput(_)),
+                    "error was not UserInput variant"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn random_number_fails_when_min_equal_to_max() {
+        match Funboy::random_number("6", "6").await {
+            Ok(_) => {
+                panic!("Value should not be Ok");
+            }
+            Err(e) => {
+                assert!(
+                    matches!(e, FunboyError::UserInput(_)),
+                    "error was not UserInput variant"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn random_entry_returns_correct_output() {
+        let result = Funboy::random_entry(&["one", "two", "three", "four"])
+            .await
+            .unwrap();
+
+        if !(&["one", "two", "three", "four"].contains(&result)) {
+            panic!("array should contain result");
+        }
+    }
+
+    #[tokio::test]
+    async fn random_entry_fails_with_less_than_two_entries() {
+        match Funboy::random_entry(&["one"]).await {
+            Ok(_) => {
+                panic!("Value should not be Ok");
+            }
+            Err(e) => {
+                assert!(
+                    matches!(e, FunboyError::UserInput(_)),
+                    "error was not UserInput variant"
+                );
+            }
+        }
     }
 }
