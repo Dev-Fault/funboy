@@ -2,11 +2,13 @@ use std::str::FromStr;
 
 use rand::{Rng, distributions::uniform::SampleUniform};
 
-pub mod database;
+use crate::template_database::{Substitute, TdbId, TemplateDatabase};
+
 pub mod database_old;
 pub mod interpolator;
 pub mod interpreter;
 pub mod ollama;
+pub mod template_database;
 
 #[derive(Debug, Clone)]
 pub enum FunboyError {
@@ -17,7 +19,9 @@ pub enum FunboyError {
     UserInput(String),
 }
 
-pub struct Funboy {}
+pub struct Funboy {
+    pub template_db: TemplateDatabase,
+}
 
 impl Funboy {
     fn gen_rand_num_inclusive<T: SampleUniform + PartialOrd>(min: T, max: T) -> T {
@@ -75,23 +79,22 @@ impl Funboy {
     }
 
     pub async fn add_substitutes(
+        &self,
         template_name: &str,
         substitutes: &[&str],
+    ) -> Result<Vec<Substitute>, FunboyError> {
+        todo!()
+    }
+
+    pub async fn delete_substitutes<'a>(
+        &self,
+        template_name: &str,
+        substitutes: &[&'a str],
     ) -> Result<(), FunboyError> {
         todo!()
     }
 
-    pub async fn remove_substitutes(
-        template_name: &str,
-        substitutes: &[&str],
-    ) -> Result<(), FunboyError> {
-        todo!()
-    }
-
-    pub async fn remove_substitutes_by_id(
-        template_name: &str,
-        ids: &[usize],
-    ) -> Result<(), FunboyError> {
+    pub async fn delete_substitutes_by_id<'a>(&self, ids: &[TdbId]) -> Result<(), FunboyError> {
         todo!()
     }
 
