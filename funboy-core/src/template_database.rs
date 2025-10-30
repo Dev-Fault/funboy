@@ -1,10 +1,9 @@
-use sqlx::{Error, FromRow, Pool, Postgres};
+use sqlx::{Error, FromRow, PgPool, Pool, Postgres};
 
 pub type TdbId = i32;
 
 #[derive(Debug)]
 pub struct TemplateDatabase {
-    url: String,
     pool: Pool<Postgres>,
 }
 
@@ -68,12 +67,10 @@ impl OrderBy {
 }
 
 impl TemplateDatabase {
-    pub async fn new(url: String) -> Result<Self, sqlx::Error> {
-        let pool = sqlx::postgres::PgPool::connect(&url).await?;
-
+    pub async fn new(pool: PgPool) -> Result<Self, sqlx::Error> {
         sqlx::migrate!("./migrations").run(&pool).await?;
 
-        Ok(TemplateDatabase { url, pool })
+        Ok(TemplateDatabase { pool })
     }
 
     pub async fn create_template(&self, name: &str) -> Result<Template, Error> {
@@ -339,7 +336,8 @@ mod dbtest {
     async fn get_db_conn() -> TemplateDatabase {
         // TODO: Connect to designated testing database to not affect production data
 
-        let db = TemplateDatabase::new(DB_URL.to_string()).await.unwrap();
+        let pool = PgPool::connect(DB_URL).await.unwrap();
+        let db = TemplateDatabase::new(pool).await.unwrap();
 
         sqlx::query("ALTER SEQUENCE templates_id_seq RESTART WITH 1")
             .execute(&db.pool)
@@ -600,6 +598,9 @@ mod dbtest {
             Ok(_) => panic!("Template collision should return error"),
             Err(e) => dbg!(e),
         };
+        db.delete_template_by_name("template_collision")
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
