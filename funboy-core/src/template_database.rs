@@ -1,23 +1,23 @@
 use sqlx::{Error, FromRow, PgPool, Pool, Postgres};
 
-pub type TdbId = i32;
+pub type KeySize = i32;
 
 #[derive(Debug)]
 pub struct TemplateDatabase {
     pool: Pool<Postgres>,
 }
 
-#[derive(Debug, FromRow)]
+#[derive(Debug, FromRow, Clone)]
 pub struct Template {
-    pub id: TdbId,
+    pub id: KeySize,
     pub name: String,
 }
 
-#[derive(Debug, FromRow)]
+#[derive(Debug, FromRow, Clone)]
 pub struct Substitute {
-    pub id: TdbId,
+    pub id: KeySize,
     pub name: String,
-    pub template_id: TdbId,
+    pub template_id: KeySize,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -36,10 +36,26 @@ impl SortOrder {
 }
 
 #[derive(Debug, Copy, Clone)]
+pub enum Limit {
+    Count(KeySize),
+    None,
+}
+
+impl Limit {
+    pub fn as_sql(&self) -> String {
+        match self {
+            Limit::Count(n) => format!("{}", n),
+            Limit::None => "ALL".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
 pub enum OrderBy {
     Id(SortOrder),
     Name(SortOrder),
     NameIgnoreCase(SortOrder),
+    Random,
     Default,
 }
 
@@ -52,6 +68,7 @@ impl OrderBy {
                 OrderBy::NameIgnoreCase(sort_order) => {
                     format!("LOWER({}.name) {}", alias, sort_order.as_sql())
                 }
+                OrderBy::Random => format!("RANDOM()"),
                 OrderBy::Default => format!("{}.id ASC", alias),
             },
             None => match self {
@@ -60,6 +77,7 @@ impl OrderBy {
                 OrderBy::NameIgnoreCase(sort_order) => {
                     format!("LOWER(name) {}", sort_order.as_sql())
                 }
+                OrderBy::Random => format!("RANDOM()"),
                 OrderBy::Default => format!("id ASC"),
             },
         }
@@ -68,6 +86,7 @@ impl OrderBy {
 
 impl TemplateDatabase {
     pub async fn new(pool: PgPool) -> Result<Self, sqlx::Error> {
+        // TODO figure out of this should be ran outside of struct
         sqlx::migrate!("./migrations").run(&pool).await?;
 
         Ok(TemplateDatabase { pool })
@@ -85,7 +104,7 @@ impl TemplateDatabase {
 
     pub async fn update_template_by_id(
         &self,
-        id: TdbId,
+        id: KeySize,
         new_name: &str,
     ) -> Result<Template, Error> {
         let template = sqlx::query_as::<_, Template>(
@@ -115,10 +134,15 @@ impl TemplateDatabase {
         Ok(template)
     }
 
-    pub async fn read_templates(&self, order_by: OrderBy) -> Result<Vec<Template>, Error> {
+    pub async fn read_templates(
+        &self,
+        order_by: OrderBy,
+        limit: Limit,
+    ) -> Result<Vec<Template>, Error> {
         let templates = sqlx::query_as::<_, Template>(&format!(
-            "SELECT * FROM templates ORDER BY {}",
-            order_by.as_sql(None)
+            "SELECT * FROM templates ORDER BY {} {}",
+            order_by.as_sql(None),
+            limit.as_sql(),
         ))
         .fetch_all(&self.pool)
         .await?;
@@ -126,7 +150,7 @@ impl TemplateDatabase {
         Ok(templates)
     }
 
-    pub async fn delete_template_by_id(&self, id: TdbId) -> Result<(), Error> {
+    pub async fn delete_template_by_id(&self, id: KeySize) -> Result<(), Error> {
         sqlx::query("DELETE FROM templates WHERE id = $1")
             .bind(id)
             .execute(&self.pool)
@@ -204,16 +228,19 @@ impl TemplateDatabase {
         &self,
         template_name: &str,
         order_by: OrderBy,
+        limit: Limit,
     ) -> Result<Vec<Substitute>, Error> {
         let substitutes = sqlx::query_as::<_, Substitute>(&format!(
             "
                  SELECT s.*
-                 FROM SUBSTITUTES s
+                 FROM substitutes s
                  JOIN templates t ON s.template_id = t.id
                  WHERE t.name = $1
                  ORDER BY {}
+                 LIMIT {}
              ",
-            order_by.as_sql("s".into())
+            order_by.as_sql(Some("s")),
+            limit.as_sql(),
         ))
         .bind(template_name)
         .fetch_all(&self.pool)
@@ -224,7 +251,7 @@ impl TemplateDatabase {
 
     pub async fn update_substitute_by_id(
         &self,
-        id: TdbId,
+        id: KeySize,
         new_name: &str,
     ) -> Result<Substitute, Error> {
         let substitute = sqlx::query_as::<_, Substitute>(
@@ -264,7 +291,7 @@ impl TemplateDatabase {
         Ok(substitute)
     }
 
-    pub async fn delete_substitute_by_id(&self, id: TdbId) -> Result<(), Error> {
+    pub async fn delete_substitute_by_id(&self, id: KeySize) -> Result<(), Error> {
         sqlx::query("DELETE FROM substitutes WHERE id = $1")
             .bind(id)
             .execute(&self.pool)
@@ -273,7 +300,7 @@ impl TemplateDatabase {
         Ok(())
     }
 
-    pub async fn delete_substitutes_by_id(&self, id: &[TdbId]) -> Result<(), Error> {
+    pub async fn delete_substitutes_by_id(&self, id: &[KeySize]) -> Result<(), Error> {
         sqlx::query("DELETE FROM substitutes WHERE id = ANY($1)")
             .bind(id)
             .execute(&self.pool)
@@ -369,8 +396,18 @@ mod dbtest {
         let noun = db.create_template("noun").await.unwrap();
         let verb = db.create_template("verb").await.unwrap();
         let adj = db.create_template("adj").await.unwrap();
-        dbg!(db.read_templates(OrderBy::Default).await.unwrap());
-        assert!(db.read_templates(OrderBy::Default).await.unwrap().len() == 3);
+        dbg!(
+            db.read_templates(OrderBy::Default, Limit::None)
+                .await
+                .unwrap()
+        );
+        assert!(
+            db.read_templates(OrderBy::Default, Limit::None)
+                .await
+                .unwrap()
+                .len()
+                == 3
+        );
         let sustantivo = db
             .update_template_by_id(noun.id, "sustantivo")
             .await
@@ -379,8 +416,18 @@ mod dbtest {
         db.delete_template_by_id(sustantivo.id).await.unwrap();
         db.delete_template_by_id(verb.id).await.unwrap();
         db.delete_template_by_id(adj.id).await.unwrap();
-        dbg!(db.read_templates(OrderBy::Default).await.unwrap());
-        assert!(db.read_templates(OrderBy::Default).await.unwrap().len() == 0);
+        dbg!(
+            db.read_templates(OrderBy::Default, Limit::None)
+                .await
+                .unwrap()
+        );
+        assert!(
+            db.read_templates(OrderBy::Default, Limit::None)
+                .await
+                .unwrap()
+                .len()
+                == 0
+        );
     }
 
     #[tokio::test]
@@ -389,8 +436,18 @@ mod dbtest {
         let noun = db.create_template("noun").await.unwrap();
         let verb = db.create_template("verb").await.unwrap();
         let adj = db.create_template("adj").await.unwrap();
-        dbg!(db.read_templates(OrderBy::Default).await.unwrap());
-        assert!(db.read_templates(OrderBy::Default).await.unwrap().len() == 3);
+        dbg!(
+            db.read_templates(OrderBy::Default, Limit::None)
+                .await
+                .unwrap()
+        );
+        assert!(
+            db.read_templates(OrderBy::Default, Limit::None)
+                .await
+                .unwrap()
+                .len()
+                == 3
+        );
         let sustantivo = db
             .update_template_by_name(&noun.name, "sustantivo")
             .await
@@ -399,8 +456,18 @@ mod dbtest {
         db.delete_template_by_name(&sustantivo.name).await.unwrap();
         db.delete_template_by_name(&verb.name).await.unwrap();
         db.delete_template_by_name(&adj.name).await.unwrap();
-        dbg!(db.read_templates(OrderBy::Default).await.unwrap());
-        assert!(db.read_templates(OrderBy::Default).await.unwrap().len() == 0);
+        dbg!(
+            db.read_templates(OrderBy::Default, Limit::None)
+                .await
+                .unwrap()
+        );
+        assert!(
+            db.read_templates(OrderBy::Default, Limit::None)
+                .await
+                .unwrap()
+                .len()
+                == 0
+        );
     }
 
     #[tokio::test]
@@ -412,7 +479,7 @@ mod dbtest {
             assert!(substitute.name == name);
         }
         let substitutes = db
-            .read_substitutes_from_template("animal", OrderBy::Default)
+            .read_substitutes_from_template("animal", OrderBy::Default, Limit::None)
             .await
             .unwrap();
         dbg!(&substitutes);
@@ -429,9 +496,13 @@ mod dbtest {
             db.delete_substitute_by_id(substitute.id).await.unwrap();
         }
         dbg!(&substitutes);
-        dbg!(db.read_templates(OrderBy::Default).await.unwrap());
+        dbg!(
+            db.read_templates(OrderBy::Default, Limit::None)
+                .await
+                .unwrap()
+        );
         assert!(
-            db.read_substitutes_from_template("animal", OrderBy::Default)
+            db.read_substitutes_from_template("animal", OrderBy::Default, Limit::None)
                 .await
                 .unwrap()
                 .len()
@@ -454,7 +525,7 @@ mod dbtest {
             .unwrap();
         dbg!(&apple);
         assert!(
-            db.read_substitutes_from_template("fruit", OrderBy::Default)
+            db.read_substitutes_from_template("fruit", OrderBy::Default, Limit::None)
                 .await
                 .unwrap()
                 .len()
@@ -464,7 +535,7 @@ mod dbtest {
             .await
             .unwrap();
         assert!(
-            db.read_substitutes_from_template("fruit", OrderBy::Default)
+            db.read_substitutes_from_template("fruit", OrderBy::Default, Limit::None)
                 .await
                 .unwrap()
                 .len()
@@ -485,7 +556,7 @@ mod dbtest {
         }
 
         let templates_by_name_asc = db
-            .read_templates(OrderBy::Name(SortOrder::Ascending))
+            .read_templates(OrderBy::Name(SortOrder::Ascending), Limit::None)
             .await
             .unwrap();
 
@@ -517,12 +588,12 @@ mod dbtest {
         }
 
         dbg!(
-            db.read_substitutes_from_template("computer_part", OrderBy::Default)
+            db.read_substitutes_from_template("computer_part", OrderBy::Default, Limit::None)
                 .await
                 .unwrap()
         );
         assert!(
-            db.read_substitutes_from_template("computer_part", OrderBy::Default)
+            db.read_substitutes_from_template("computer_part", OrderBy::Default, Limit::None)
                 .await
                 .unwrap()
                 .len()
@@ -532,14 +603,14 @@ mod dbtest {
             .await
             .unwrap();
         assert!(
-            db.read_substitutes_from_template("computer_part", OrderBy::Default)
+            db.read_substitutes_from_template("computer_part", OrderBy::Default, Limit::None)
                 .await
                 .unwrap()
                 .len()
                 == 0
         );
         dbg!(
-            db.read_substitutes_from_template("computer_part", OrderBy::Default)
+            db.read_substitutes_from_template("computer_part", OrderBy::Default, Limit::None)
                 .await
                 .unwrap()
         );
@@ -554,23 +625,23 @@ mod dbtest {
         }
 
         let subs = db
-            .read_substitutes_from_template("computer_part", OrderBy::Default)
+            .read_substitutes_from_template("computer_part", OrderBy::Default, Limit::None)
             .await
             .unwrap();
 
         dbg!(&subs);
         assert!(subs.len() == 4);
-        let subs: Vec<TdbId> = subs.iter().map(|sub| sub.id).collect();
+        let subs: Vec<KeySize> = subs.iter().map(|sub| sub.id).collect();
         db.delete_substitutes_by_id(&subs).await.unwrap();
         assert!(
-            db.read_substitutes_from_template("computer_part", OrderBy::Default)
+            db.read_substitutes_from_template("computer_part", OrderBy::Default, Limit::None)
                 .await
                 .unwrap()
                 .len()
                 == 0
         );
         dbg!(
-            db.read_substitutes_from_template("computer_part", OrderBy::Default)
+            db.read_substitutes_from_template("computer_part", OrderBy::Default, Limit::None)
                 .await
                 .unwrap()
         );
