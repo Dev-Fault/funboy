@@ -261,7 +261,7 @@ pub fn extract_template<'a>(embedded_template: &'a str) -> TemplateSplit<'a> {
 }
 
 #[cfg(test)]
-mod tests {
+mod interpolator_test {
     use super::*;
 
     fn map_template(template: &str) -> Option<String> {
