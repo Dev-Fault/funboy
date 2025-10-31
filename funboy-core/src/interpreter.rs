@@ -780,22 +780,8 @@ impl Interpreter {
                 } else {
                     match &args[0] {
                         ValueType::Text(sub) => match self.db.clone() {
-                            Some(fdb) => {
-                                let fdb = fdb.lock().await;
-                                let output = self.interpolator.interp(
-                                    &(TEMPLATE_CARROT.to_string() + sub),
-                                    &|template| match fdb.get_random_subs(template) {
-                                        Ok(sub) => Some(sub),
-                                        Err(_) => None,
-                                    },
-                                );
-                                drop(fdb);
-
-                                match output {
-                                    Ok(o) => Ok(ValueType::Text(o)),
-                                    Err(e) => Err(e.to_string()),
-                                }
-                            }
+                            // TODO fix the implementation of this command
+                            Some(fdb) => Ok(ValueType::Text(String::new())),
                             None => {
                                 let error =
                                     "interpreter attempt to use database with no reference.";
