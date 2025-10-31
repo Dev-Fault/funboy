@@ -2,7 +2,10 @@ use std::str::FromStr;
 
 use rand::{Rng, distributions::uniform::SampleUniform};
 
-use crate::template_database::{Substitute, TdbId, TemplateDatabase};
+use crate::{
+    interpolator::TextInterpolator,
+    template_database::{KeySize, Limit, OrderBy, Substitute, Template, TemplateDatabase},
+};
 
 pub mod database_old;
 pub mod interpolator;
@@ -17,6 +20,12 @@ pub enum FunboyError {
     AI(String),
     Database(String),
     UserInput(String),
+}
+
+impl Into<FunboyError> for sqlx::Error {
+    fn into(self) -> FunboyError {
+        FunboyError::Database(self.to_string())
+    }
 }
 
 pub struct Funboy {
@@ -80,22 +89,39 @@ impl Funboy {
 
     pub async fn add_substitutes(
         &self,
-        template_name: &str,
+        template: &str,
         substitutes: &[&str],
     ) -> Result<Vec<Substitute>, FunboyError> {
-        todo!()
+        match self
+            .template_db
+            .create_substitutes(template, substitutes)
+            .await
+        {
+            Ok(subs) => Ok(subs),
+            Err(e) => Err(e.into()),
+        }
     }
 
     pub async fn delete_substitutes<'a>(
         &self,
-        template_name: &str,
+        template: &str,
         substitutes: &[&'a str],
     ) -> Result<(), FunboyError> {
-        todo!()
+        match self
+            .template_db
+            .delete_substitutes_by_name(template, substitutes)
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e.into()),
+        }
     }
 
-    pub async fn delete_substitutes_by_id<'a>(&self, ids: &[TdbId]) -> Result<(), FunboyError> {
-        todo!()
+    pub async fn delete_substitutes_by_id<'a>(&self, ids: &[KeySize]) -> Result<(), FunboyError> {
+        match self.template_db.delete_substitutes_by_id(ids).await {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e.into()),
+        }
     }
 
     pub async fn copy_substitutes(
@@ -106,38 +132,100 @@ impl Funboy {
     }
 
     pub async fn replace_substitute(
+        &self,
         template: &str,
-        substitute: &str,
-        replacement: &str,
-    ) -> Result<(), String> {
-        todo!()
+        old: &str,
+        new: &str,
+    ) -> Result<Substitute, FunboyError> {
+        match self
+            .template_db
+            .update_substitute_by_name(template, old, new)
+            .await
+        {
+            Ok(sub) => Ok(sub),
+            Err(e) => Err(e.into()),
+        }
     }
 
     pub async fn replace_substitute_by_id(
+        &self,
+        id: KeySize,
+        new: &str,
+    ) -> Result<Substitute, FunboyError> {
+        match self.template_db.update_substitute_by_id(id, new).await {
+            Ok(sub) => Ok(sub),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub async fn remove_template(&self, template: &str) -> Result<(), FunboyError> {
+        match self.template_db.delete_template_by_name(template).await {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub async fn rename_template(&self, from: &str, to: &str) -> Result<(), FunboyError> {
+        match self.template_db.update_template_by_name(from, to).await {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub async fn get_templates(
+        &self,
+        order: OrderBy,
+        limit: Limit,
+    ) -> Result<Vec<Template>, FunboyError> {
+        match self.template_db.read_templates(order, limit).await {
+            Ok(templates) => Ok(templates),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub async fn get_substitutes(
+        &self,
         template: &str,
-        id: usize,
-        replacement: &str,
-    ) -> Result<(), String> {
-        todo!()
+        order: OrderBy,
+        limit: Limit,
+    ) -> Result<Vec<Substitute>, FunboyError> {
+        match self
+            .template_db
+            .read_substitutes_from_template(template, order, limit)
+            .await
+        {
+            Ok(substitutes) => Ok(substitutes),
+            Err(e) => Err(e.into()),
+        }
     }
 
-    pub async fn remove_template(template: &str) -> Result<(), FunboyError> {
-        todo!()
+    async fn get_random_substitute(&self, template: &str) -> Result<Substitute, FunboyError> {
+        match self
+            .get_substitutes(template, OrderBy::Random, Limit::Count(1))
+            .await
+        {
+            Ok(subs) => match subs.get(0) {
+                Some(sub) => Ok(sub.clone()),
+                None => Err(FunboyError::Database(format!(
+                    "No substitutes were present in template \"{}\"",
+                    template
+                ))),
+            },
+            Err(e) => Err(e.into()),
+        }
     }
 
-    pub async fn rename_template(from: &str, to: &str) -> Result<(), FunboyError> {
-        todo!()
-    }
+    pub async fn generate(&self, text: &str) -> Result<String, FunboyError> {
+        let mut interpolator = TextInterpolator::default();
 
-    pub async fn generate(input: &str) -> Result<String, FunboyError> {
-        todo!()
-    }
+        /* let interpolated_text = interpolator.interp(text, &|template| match self
+            .get_random_substitute(template)
+            .await
+        {
+            Ok(sub) => Some(Sub),
+            Err(_) => None,
+        }); */
 
-    pub async fn get_templates() -> Result<Vec<String>, FunboyError> {
-        todo!()
-    }
-
-    pub async fn get_substitutes(template: &str) -> Result<Vec<(usize, String)>, FunboyError> {
         todo!()
     }
 
