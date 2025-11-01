@@ -157,7 +157,7 @@ impl Funboy {
         }
     }
 
-    pub async fn remove_template(&self, template: &str) -> Result<(), FunboyError> {
+    pub async fn delete_template(&self, template: &str) -> Result<(), FunboyError> {
         match self.template_db.delete_template_by_name(template).await {
             Ok(_) => Ok(()),
             Err(e) => Err(e.into()),
@@ -219,7 +219,7 @@ impl Funboy {
         let template_substitutor = TemplateSubstitutor::default();
 
         let expanded_text = template_substitutor
-            .run(text.to_string(), |template: String| async move {
+            .substitute_recursively(text.to_string(), |template: String| async move {
                 match self.get_random_substitute(&template).await {
                     Ok(sub) => Some(sub.name.to_string()),
                     Err(_) => None,
