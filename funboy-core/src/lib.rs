@@ -1,10 +1,10 @@
 use std::str::FromStr;
 
-use rand::{Rng, distributions::uniform::SampleUniform};
+use rand::{Rng, distr::uniform::SampleUniform};
 
 use crate::{
-    interpolator::TextInterpolator,
     template_database::{KeySize, Limit, OrderBy, Substitute, Template, TemplateDatabase},
+    template_substitutor::TemplateSubstitutor,
 };
 
 pub mod database_old;
@@ -12,6 +12,7 @@ pub mod interpolator;
 pub mod interpreter;
 pub mod ollama;
 pub mod template_database;
+pub mod template_substitutor;
 
 #[derive(Debug, Clone)]
 pub enum FunboyError {
@@ -34,13 +35,13 @@ pub struct Funboy {
 
 impl Funboy {
     fn gen_rand_num_inclusive<T: SampleUniform + PartialOrd>(min: T, max: T) -> T {
-        let mut rng = rand::thread_rng();
-        rng.gen_range(min..=max)
+        let mut rng = rand::rng();
+        rng.random_range(min..=max)
     }
 
     fn gen_rand_num_exclusive<T: SampleUniform + PartialOrd>(min: T, max: T) -> T {
-        let mut rng = rand::thread_rng();
-        rng.gen_range(min..max)
+        let mut rng = rand::rng();
+        rng.random_range(min..max)
     }
 
     fn gen_rand_num_from_str<T: FromStr + PartialOrd + SampleUniform + ToString>(
@@ -165,6 +166,7 @@ impl Funboy {
         }
     }
 
+    // TODO this should ripple out and rename template instances in substitutes as well
     pub async fn rename_template(&self, from: &str, to: &str) -> Result<(), FunboyError> {
         match self.template_db.update_template_by_name(from, to).await {
             Ok(_) => Ok(()),
@@ -216,17 +218,18 @@ impl Funboy {
     }
 
     pub async fn generate(&self, text: &str) -> Result<String, FunboyError> {
-        let mut interpolator = TextInterpolator::default();
+        let template_substitutor = TemplateSubstitutor::default();
 
-        /* let interpolated_text = interpolator.interp(text, &|template| match self
-            .get_random_substitute(template)
-            .await
-        {
-            Ok(sub) => Some(Sub),
-            Err(_) => None,
-        }); */
+        let expanded_text = template_substitutor
+            .run(text.to_string(), |template: String| async move {
+                match self.get_random_substitute(&template).await {
+                    Ok(sub) => Some(sub.name.to_string()),
+                    Err(_) => None,
+                }
+            })
+            .await;
 
-        todo!()
+        Ok(expanded_text)
     }
 
     pub async fn get_ai_models() -> Result<Vec<String>, FunboyError> {
@@ -362,5 +365,36 @@ mod core {
                 );
             }
         }
+    }
+
+    #[tokio::test]
+    async fn generate_templates() {
+        let funboy = Funboy {
+            template_db: TemplateDatabase::new_debug()
+                .await
+                .expect("Database should exit and connect"),
+        };
+
+        let output = funboy.generate("^sentence").await.unwrap();
+
+        assert!(output == "^sentence");
+        println!("OUTPUT: {}", output);
+
+        funboy
+            .add_substitutes(
+                "sentence",
+                &["A ^adj brown ^noun ^verb^ed over the lazy dog."],
+            )
+            .await
+            .unwrap();
+
+        funboy.add_substitutes("adj", &["quick"]).await.unwrap();
+        funboy.add_substitutes("noun", &["fox"]).await.unwrap();
+        funboy.add_substitutes("verb", &["jump"]).await.unwrap();
+
+        let output = funboy.generate("^sentence").await.unwrap();
+
+        assert!(output == "A quick brown fox jumped over the lazy dog.");
+        println!("OUTPUT: {}", output);
     }
 }
