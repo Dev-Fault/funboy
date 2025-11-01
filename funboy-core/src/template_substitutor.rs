@@ -7,6 +7,7 @@ use regex::Regex;
 
 #[derive(Debug)]
 pub struct TemplateSubstitutor {
+    template_char: char,
     regex: Regex,
     depth_limit: u16,
 }
@@ -15,6 +16,7 @@ impl Default for TemplateSubstitutor {
     fn default() -> Self {
         let pattern = r"\^[\w-]+\^?";
         Self {
+            template_char: '^',
             regex: Regex::new(&pattern).unwrap(),
             depth_limit: 255,
         }
@@ -22,7 +24,34 @@ impl Default for TemplateSubstitutor {
 }
 
 impl TemplateSubstitutor {
-    async fn substitute_templates<F, Fut>(&self, input: &str, template_map: &F) -> String
+    pub fn get_template_char(&self) -> char {
+        self.template_char
+    }
+
+    pub async fn rename_template(&self, input: &str, old_name: &str, new_name: &str) -> String {
+        let mut output = String::new();
+        let mut i = 0;
+        for template in self.regex.find_iter(&input[i..]) {
+            output.push_str(&input[i..template.start()]);
+            let matched = template.as_str();
+            let template_name = matched[1..].trim_end_matches(self.template_char);
+
+            if old_name == template_name {
+                output.push(self.template_char);
+                output.push_str(new_name);
+                output.push_str(&matched[template_name.len() + 1..]);
+            } else {
+                output.push_str(matched);
+            }
+
+            i = template.end();
+        }
+        output.push_str(&input[i..]);
+        output
+    }
+
+    /// Resolves templates with a single pass over input
+    pub async fn substitute<F, Fut>(&self, input: &str, template_mapper: &F) -> String
     where
         F: Fn(String) -> Fut,
         Fut: Future<Output = Option<String>>,
@@ -31,12 +60,13 @@ impl TemplateSubstitutor {
         let mut start = 0;
         let mut end = 0;
         for template in self.regex.find_iter(&input[start..]) {
-            let sub = match template_map(template.as_str()[1..].trim_end_matches('^').to_string())
-                .await
-            {
-                Some(sub) => sub,
-                None => template.as_str().to_string(),
-            };
+            let sub =
+                match template_mapper(template.as_str()[1..].trim_end_matches('^').to_string())
+                    .await
+                {
+                    Some(sub) => sub,
+                    None => template.as_str().to_string(),
+                };
 
             end = template.end();
 
@@ -46,16 +76,17 @@ impl TemplateSubstitutor {
 
             output.push_str(&segment);
         }
-        output.push_str(&input[end..input.len()]);
+        output.push_str(&input[end..]);
         output
     }
 
-    pub async fn run<F, Fut>(&self, input: String, template_map: F) -> String
+    /// Recursively resolves templates until none are present or depth limit or infinte cycle is reached
+    pub async fn substitute_recursively<F, Fut>(&self, input: String, template_mapper: F) -> String
     where
         F: Fn(String) -> Fut,
         Fut: Future<Output = Option<String>>,
     {
-        let mut output = self.substitute_templates(&input, &template_map).await;
+        let mut output = self.substitute(&input, &template_mapper).await;
 
         let mut previous_hashes = HashSet::new();
 
@@ -69,7 +100,7 @@ impl TemplateSubstitutor {
                 break;
             }
 
-            let next_output = self.substitute_templates(&output, &template_map).await;
+            let next_output = self.substitute(&output, &template_mapper).await;
             if next_output == output {
                 break;
             } else {
@@ -102,7 +133,7 @@ mod template_substitutor_test {
         let template_map = Arc::new(template_map);
         let template_substitutor = TemplateSubstitutor::default();
         let output = template_substitutor
-            .run("^sentence".to_string(), |template| {
+            .substitute_recursively("^sentence".to_string(), |template| {
                 let template_map = template_map.clone();
                 async move {
                     match template_map.get(template.as_str()) {
@@ -131,7 +162,7 @@ mod template_substitutor_test {
         let template_map = Arc::new(template_map);
         let template_substitutor = TemplateSubstitutor::default();
         let output = template_substitutor
-            .run("^sentence".to_string(), |template| {
+            .substitute_recursively("^sentence".to_string(), |template| {
                 let template_map = template_map.clone();
                 async move {
                     match template_map.get(template.as_str()) {
@@ -151,7 +182,7 @@ mod template_substitutor_test {
         let template_map = Arc::new(template_map);
         let template_substitutor = TemplateSubstitutor::default();
         let output = template_substitutor
-            .run("^sentence".to_string(), |template| {
+            .substitute_recursively("^sentence".to_string(), |template| {
                 let template_map = template_map.clone();
                 async move {
                     match template_map.get(template.as_str()) {
@@ -174,7 +205,7 @@ mod template_substitutor_test {
         let template_map = Arc::new(template_map);
         let template_substitutor = TemplateSubstitutor::default();
         let output = template_substitutor
-            .run("^over_here".to_string(), |template| {
+            .substitute_recursively("^over_here".to_string(), |template| {
                 let template_map = template_map.clone();
                 async move {
                     match template_map.get(template.as_str()) {
