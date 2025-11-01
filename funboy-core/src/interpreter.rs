@@ -1,5 +1,3 @@
-use crate::database_old::FunboyDatabaseOld;
-use crate::interpolator::{TEMPLATE_CARROT, TextInterpolator};
 use async_recursion::async_recursion;
 use lexer::tokenize;
 use parser::{Command, CommandType, ValueType, parse};
@@ -7,6 +5,8 @@ use rand::{self, Rng};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+
+use crate::template_database::TemplateDatabase;
 
 mod documentation;
 #[allow(dead_code)]
@@ -80,8 +80,7 @@ pub struct Interpreter {
     copy_buffer: ValueType,
     output: String,
     log: Vec<ValueType>,
-    db: Option<Arc<Mutex<FunboyDatabaseOld>>>,
-    interpolator: TextInterpolator,
+    db: Option<Arc<Mutex<TemplateDatabase>>>,
 }
 
 impl Interpreter {
@@ -91,18 +90,16 @@ impl Interpreter {
             vars: VarMap::new(),
             output: String::new(),
             log: Vec::new(),
-            interpolator: TextInterpolator::default(),
             db: None,
         }
     }
 
-    pub fn new_with_db(db: Arc<Mutex<FunboyDatabaseOld>>) -> Self {
+    pub fn new_with_db(db: Arc<Mutex<TemplateDatabase>>) -> Self {
         Self {
             copy_buffer: ValueType::None,
             vars: VarMap::new(),
             output: String::new(),
             log: Vec::new(),
-            interpolator: TextInterpolator::default(),
             db: Some(db),
         }
     }
