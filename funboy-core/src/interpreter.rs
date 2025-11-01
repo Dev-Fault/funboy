@@ -365,8 +365,8 @@ impl Interpreter {
                 if args.len() < 2 {
                     return Err(command_type.gen_err(ERROR_TWO_OR_MORE_ARGS));
                 } else {
-                    let mut rng = rand::thread_rng();
-                    let index = rng.gen_range(0..args.len());
+                    let mut rng = rand::rng();
+                    let index = rng.random_range(0..args.len());
                     Ok(args[index].clone())
                 }
             }
@@ -374,22 +374,24 @@ impl Interpreter {
                 if args.len() != 2 {
                     return Err(command_type.gen_err(ERROR_EXACTLY_TWO_ARGS));
                 } else {
-                    let mut rng = rand::thread_rng();
+                    let mut rng = rand::rng();
                     match &args[0] {
                         ValueType::Int(min) => match &args[1] {
-                            ValueType::Int(max) => Ok(ValueType::Int(rng.gen_range(*min..=*max))),
+                            ValueType::Int(max) => {
+                                Ok(ValueType::Int(rng.random_range(*min..=*max)))
+                            }
                             ValueType::Float(max) => {
-                                Ok(ValueType::Float(rng.gen_range((*min as f64)..=*max)))
+                                Ok(ValueType::Float(rng.random_range((*min as f64)..=*max)))
                             }
 
                             _ => Err(command_type.gen_err(ERROR_ARGS_MUST_BE_NUMBER)),
                         },
                         ValueType::Float(min) => match &args[1] {
                             ValueType::Int(max) => {
-                                Ok(ValueType::Float(rng.gen_range(*min..=(*max as f64))))
+                                Ok(ValueType::Float(rng.random_range(*min..=(*max as f64))))
                             }
                             ValueType::Float(max) => {
-                                Ok(ValueType::Float(rng.gen_range(*min..=*max)))
+                                Ok(ValueType::Float(rng.random_range(*min..=*max)))
                             }
                             _ => Err(command_type.gen_err(ERROR_ARGS_MUST_BE_NUMBER)),
                         },
