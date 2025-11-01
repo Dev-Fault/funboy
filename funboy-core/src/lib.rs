@@ -7,8 +7,6 @@ use crate::{
     template_substitutor::TemplateSubstitutor,
 };
 
-pub mod database_old;
-pub mod interpolator;
 pub mod interpreter;
 pub mod ollama;
 pub mod template_database;

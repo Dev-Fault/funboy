@@ -5,6 +5,7 @@ use std::{
 
 use regex::Regex;
 
+#[derive(Debug)]
 pub struct TemplateSubstitutor {
     regex: Regex,
     depth_limit: u16,
