@@ -1,5 +1,5 @@
-use funboy_core::add;
+use funboy_core;
 
 fn main() {
-    println!("1 + 2 = {}", add(1, 2));
+    println!("Hello, World!");
 }
