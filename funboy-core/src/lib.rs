@@ -93,7 +93,7 @@ impl Funboy {
     ) -> Result<Vec<Substitute>, FunboyError> {
         match self
             .template_db
-            .create_substitutes(template, substitutes)
+            .create_substitutes(&template.to_lowercase(), substitutes)
             .await
         {
             Ok(subs) => Ok(subs),
@@ -108,7 +108,7 @@ impl Funboy {
     ) -> Result<(), FunboyError> {
         match self
             .template_db
-            .delete_substitutes_by_name(template, substitutes)
+            .delete_substitutes_by_name(&template.to_lowercase(), substitutes)
             .await
         {
             Ok(_) => Ok(()),
@@ -124,6 +124,7 @@ impl Funboy {
     }
 
     pub async fn copy_substitutes(
+        &self,
         from_template: &str,
         to_template: &str,
     ) -> Result<(), FunboyError> {
@@ -138,7 +139,7 @@ impl Funboy {
     ) -> Result<Substitute, FunboyError> {
         match self
             .template_db
-            .update_substitute_by_name(template, old, new)
+            .update_substitute_by_name(&template.to_lowercase(), old, new)
             .await
         {
             Ok(sub) => Ok(sub),
@@ -158,7 +159,11 @@ impl Funboy {
     }
 
     pub async fn delete_template(&self, template: &str) -> Result<(), FunboyError> {
-        match self.template_db.delete_template_by_name(template).await {
+        match self
+            .template_db
+            .delete_template_by_name(&template.to_lowercase())
+            .await
+        {
             Ok(_) => Ok(()),
             Err(e) => Err(e.into()),
         }
@@ -166,7 +171,11 @@ impl Funboy {
 
     // TODO this should ripple out and rename template instances in substitutes as well
     pub async fn rename_template(&self, from: &str, to: &str) -> Result<(), FunboyError> {
-        match self.template_db.update_template_by_name(from, to).await {
+        match self
+            .template_db
+            .update_template_by_name(&from.to_lowercase(), &to.to_lowercase())
+            .await
+        {
             Ok(_) => Ok(()),
             Err(e) => Err(e.into()),
         }
@@ -191,7 +200,7 @@ impl Funboy {
     ) -> Result<Vec<Substitute>, FunboyError> {
         match self
             .template_db
-            .read_substitutes_from_template(template, order, limit)
+            .read_substitutes_from_template(&template.to_lowercase(), order, limit)
             .await
         {
             Ok(substitutes) => Ok(substitutes),
@@ -201,7 +210,7 @@ impl Funboy {
 
     async fn get_random_substitute(&self, template: &str) -> Result<Substitute, FunboyError> {
         match self
-            .get_substitutes(template, OrderBy::Random, Limit::Count(1))
+            .get_substitutes(&template.to_lowercase(), OrderBy::Random, Limit::Count(1))
             .await
         {
             Ok(subs) => match subs.get(0) {
@@ -228,6 +237,7 @@ impl Funboy {
             .await;
 
         let mut fsl_interpreter = Interpreter::new();
+
         match fsl_interpreter
             .interpret_embedded_code(&substituted_text)
             .await
