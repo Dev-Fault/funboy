@@ -8,7 +8,7 @@ use ollama_rs::{
 const DEFAULT_SYSTEM_PROMPT: &str = "";
 const DEFAULT_TEMPLATE: &str = "{{ .Prompt }}";
 const DEFAULT_MAX_PREDICT: u16 = 200;
-const PARAMETER_NOT_SET_TEXT: &str = "Default";
+const PARAMETER_NOT_SET_TEXT: &str = "Unset";
 pub const MAX_PREDICT: u16 = 2000;
 
 #[derive(Clone)]
@@ -20,26 +20,30 @@ pub struct OllamaParameters {
 }
 
 impl OllamaParameters {
-    pub fn new() -> Self {
-        Self {
-            temperature: None,
-            repeat_penalty: None,
-            top_k: None,
-            top_p: None,
-        }
-    }
-
     pub fn reset(&mut self) {
         self.temperature = None;
         self.repeat_penalty = None;
         self.top_k = None;
         self.top_p = None;
     }
+
+    pub fn param_to_string<P: ToString>(param: Option<P>) -> String {
+        if param.is_some() {
+            return param.unwrap().to_string();
+        } else {
+            return PARAMETER_NOT_SET_TEXT.to_string();
+        }
+    }
 }
 
 impl Default for OllamaParameters {
     fn default() -> Self {
-        Self::new()
+        Self {
+            temperature: None,
+            repeat_penalty: None,
+            top_k: None,
+            top_p: None,
+        }
     }
 }
 
@@ -52,15 +56,6 @@ pub struct OllamaSettings {
 }
 
 impl OllamaSettings {
-    pub fn new() -> Self {
-        Self {
-            system_prompt: DEFAULT_SYSTEM_PROMPT.to_string(),
-            template: DEFAULT_TEMPLATE.to_string(),
-            output_limit: DEFAULT_MAX_PREDICT,
-            parameters: OllamaParameters::new(),
-        }
-    }
-
     pub fn set_system_prompt(&mut self, prompt: &str) {
         self.system_prompt = prompt.to_string();
     }
@@ -113,7 +108,12 @@ impl OllamaSettings {
 
 impl Default for OllamaSettings {
     fn default() -> Self {
-        Self::new()
+        Self {
+            system_prompt: DEFAULT_SYSTEM_PROMPT.to_string(),
+            template: DEFAULT_TEMPLATE.to_string(),
+            output_limit: DEFAULT_MAX_PREDICT,
+            parameters: OllamaParameters::default(),
+        }
     }
 }
 
@@ -124,26 +124,10 @@ impl ToString for OllamaSettings {
             self.system_prompt,
             self.template,
             self.output_limit,
-            if self.parameters.temperature.is_none() {
-                PARAMETER_NOT_SET_TEXT.to_string()
-            } else {
-                self.parameters.temperature.unwrap().to_string()
-            },
-            if self.parameters.repeat_penalty.is_none() {
-                PARAMETER_NOT_SET_TEXT.to_string()
-            } else {
-                self.parameters.repeat_penalty.unwrap().to_string()
-            },
-            if self.parameters.top_k.is_none() {
-                PARAMETER_NOT_SET_TEXT.to_string()
-            } else {
-                self.parameters.top_k.unwrap().to_string()
-            },
-            if self.parameters.top_p.is_none() {
-                PARAMETER_NOT_SET_TEXT.to_string()
-            } else {
-                self.parameters.top_p.unwrap().to_string()
-            },
+            OllamaParameters::param_to_string(self.parameters.temperature),
+            OllamaParameters::param_to_string(self.parameters.repeat_penalty),
+            OllamaParameters::param_to_string(self.parameters.top_k),
+            OllamaParameters::param_to_string(self.parameters.top_p),
         )
     }
 }
@@ -153,12 +137,6 @@ pub struct OllamaGenerator {
 }
 
 impl OllamaGenerator {
-    pub fn new() -> Self {
-        Self {
-            ollama: Ollama::default(),
-        }
-    }
-
     pub async fn get_models(&self) -> Result<Vec<LocalModel>, OllamaError> {
         self.ollama.list_local_models().await
     }
@@ -223,6 +201,8 @@ impl OllamaGenerator {
 
 impl Default for OllamaGenerator {
     fn default() -> Self {
-        Self::new()
+        Self {
+            ollama: Ollama::default(),
+        }
     }
 }
