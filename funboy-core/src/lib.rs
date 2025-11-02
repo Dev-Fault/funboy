@@ -15,7 +15,6 @@ pub mod template_substitutor;
 
 #[derive(Debug, Clone)]
 pub enum FunboyError {
-    Interpolator(String),
     Interpreter(String),
     AI(String),
     Database(String),
