@@ -117,7 +117,6 @@ impl TemplateDatabase {
         Ok(debug_db)
     }
 
-    // TODO enforce lower case
     pub async fn create_template(&self, name: &str) -> Result<Template, Error> {
         let template =
             sqlx::query_as::<_, Template>("INSERT INTO templates (name) VALUES ($1) RETURNING *")
@@ -377,10 +376,7 @@ impl TemplateDatabase {
         Ok(substitute)
     }
 
-    pub async fn read_substitute_from_template_by_id(
-        &self,
-        substitute_id: KeySize,
-    ) -> Result<Substitute, Error> {
+    pub async fn read_substitute_by_id(&self, substitute_id: KeySize) -> Result<Substitute, Error> {
         let substitute = sqlx::query_as::<_, Substitute>("SELECT * FROM substitutes WHERE id = $1")
             .bind(substitute_id)
             .fetch_one(&self.pool)
@@ -859,12 +855,29 @@ mod template_db_test {
                 .id
                 == test_sub.id
         );
+        assert!(db.read_substitute_by_id(test_sub.id).await.unwrap().id == test_sub.id);
+    }
+
+    #[tokio::test]
+    async fn cascade_on_delete_template() {
+        let db = TemplateDatabase::new_debug().await.unwrap();
+        let test_template = db.create_template("test").await.unwrap();
+        let test_subs = db
+            .create_substitutes("test", &["test1", "test2", "test3"])
+            .await
+            .unwrap();
+        db.delete_template_by_id(test_template.id).await.unwrap();
+
         assert!(
-            db.read_substitute_from_template_by_id(test_sub.id)
+            db.read_templates(OrderBy::Default, Limit::None)
                 .await
                 .unwrap()
-                .id
-                == test_sub.id
+                .len()
+                == 0
         );
+
+        for sub in test_subs {
+            assert!(db.read_substitute_by_id(sub.id).await.is_err());
+        }
     }
 }
