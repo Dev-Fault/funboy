@@ -943,4 +943,14 @@ mod template_db_test {
             assert!(subs[i].name == copied_subs[i].name);
         }
     }
+
+    #[tokio::test]
+    async fn valid_template_names() {
+        let db = TemplateDatabase::new_debug().await.unwrap();
+        assert!(db.create_template("good_name").await.is_ok());
+        assert!(db.create_template("Bad_name").await.is_err());
+        assert!(db.create_template("gr34t_n4m3").await.is_ok());
+        assert!(db.create_template("horrible-name").await.is_err());
+        assert!(db.create_template("*horrible-name").await.is_err());
+    }
 }

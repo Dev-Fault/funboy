@@ -1,6 +1,6 @@
 CREATE TABLE templates (
 	id SERIAL PRIMARY KEY,
-	name TEXT NOT NULL UNIQUE CHECK (name = LOWER(name))
+	name TEXT NOT NULL UNIQUE CHECK (name ~ '^[a-z0-9_]+$')
 );
 
 CREATE TABLE IF NOT EXISTS substitutes (
