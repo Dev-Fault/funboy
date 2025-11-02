@@ -1,4 +1,4 @@
-use sqlx::{Error, FromRow, PgPool, Pool, Postgres};
+use sqlx::{Error, FromRow, PgPool, Pool, Postgres, Transaction};
 use strum::IntoEnumIterator;
 
 use crate::template_substitutor::{TemplateDelimiter, TemplateSubstitutor};
@@ -128,18 +128,18 @@ impl TemplateDatabase {
         Ok(template)
     }
 
-    // TODO handle renaming templates inside get_sub()
     async fn update_template_references_in_substitutes(
         &self,
+        mut tx: Transaction<'static, Postgres>,
         old_name: &str,
         new_name: &str,
-    ) -> Result<(), Error> {
+    ) -> Result<Transaction<'static, Postgres>, Error> {
         for delimiter in TemplateDelimiter::iter() {
             // Fetch substitutes that might contain old template
             let substitutes =
                 sqlx::query_as::<_, Substitute>("SELECT * FROM substitutes WHERE name LIKE $1")
                     .bind(format!("%{}{}%", delimiter.to_char(), old_name))
-                    .fetch_all(&self.pool)
+                    .fetch_all(&mut *tx)
                     .await?;
 
             let substitutor = TemplateSubstitutor::new(delimiter);
@@ -152,12 +152,18 @@ impl TemplateDatabase {
 
                 // Avoid useless updates
                 if sub.name != new_sub_name {
-                    self.update_substitute_by_id(sub.id, &new_sub_name).await?;
+                    sqlx::query_as::<_, Substitute>(
+                        "UPDATE substitutes SET name = $1 WHERE id = $2 RETURNING *",
+                    )
+                    .bind(&new_sub_name)
+                    .bind(sub.id)
+                    .fetch_one(&mut *tx)
+                    .await?;
                 }
             }
         }
 
-        Ok(())
+        Ok(tx)
     }
 
     pub async fn update_template_by_id(
@@ -165,6 +171,8 @@ impl TemplateDatabase {
         id: KeySize,
         new_name: &str,
     ) -> Result<Template, Error> {
+        let mut tx = self.pool.begin().await?;
+
         // Check if template actually exists
         let old_template = self.read_template_by_id(id).await?;
 
@@ -174,19 +182,14 @@ impl TemplateDatabase {
         )
         .bind(new_name)
         .bind(&old_template.name)
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await?;
 
-        if let Err(e) = self
-            .update_template_references_in_substitutes(&old_template.name, new_name)
-            .await
-        {
-            eprintln!(
-                "Warning: failed to rename all template references to template \"{}\" due to: {}",
-                old_template.name.to_string(),
-                e.to_string()
-            );
-        }
+        let tx = self
+            .update_template_references_in_substitutes(tx, &old_template.name, new_name)
+            .await?;
+
+        tx.commit().await?;
 
         Ok(template)
     }
@@ -196,6 +199,8 @@ impl TemplateDatabase {
         old_name: &str,
         new_name: &str,
     ) -> Result<Template, Error> {
+        let mut tx = self.pool.begin().await?;
+
         // Check if template actually exists
         self.read_template_by_name(old_name).await?;
 
@@ -205,19 +210,14 @@ impl TemplateDatabase {
         )
         .bind(new_name)
         .bind(old_name)
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await?;
 
-        if let Err(e) = self
-            .update_template_references_in_substitutes(old_name, new_name)
-            .await
-        {
-            eprintln!(
-                "Warning: failed to rename all template references to template \"{}\" due to: {}",
-                old_name.to_string(),
-                e.to_string()
-            );
-        }
+        let tx = self
+            .update_template_references_in_substitutes(tx, old_name, new_name)
+            .await?;
+
+        tx.commit().await?;
 
         Ok(template)
     }
