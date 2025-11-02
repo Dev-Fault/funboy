@@ -149,8 +149,18 @@ impl Funboy {
         &self,
         from_template: &str,
         to_template: &str,
-    ) -> Result<(), FunboyError> {
-        todo!()
+    ) -> Result<Vec<Substitute>, FunboyError> {
+        self.validate_template(from_template)?;
+        self.validate_template(to_template)?;
+
+        match self
+            .template_db
+            .copy_substitutes_from_template_to_template(from_template, to_template)
+            .await
+        {
+            Ok(subs) => Ok(subs),
+            Err(e) => Err(e.into()),
+        }
     }
 
     pub async fn replace_substitute(
