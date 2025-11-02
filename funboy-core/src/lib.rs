@@ -1,11 +1,12 @@
 use std::str::FromStr;
 
 use rand::{Rng, distr::uniform::SampleUniform};
+use regex::Regex;
 
 use crate::{
     interpreter::Interpreter,
     template_database::{KeySize, Limit, OrderBy, Substitute, Template, TemplateDatabase},
-    template_substitutor::{TemplateDelimiter, TemplateSubstitutor},
+    template_substitutor::{TemplateDelimiter, TemplateSubstitutor, VALID_TEMPLATE_CHARS},
 };
 
 pub mod interpreter;
@@ -29,9 +30,17 @@ impl Into<FunboyError> for sqlx::Error {
 
 pub struct Funboy {
     pub template_db: TemplateDatabase,
+    valid_template_regex: Regex,
 }
 
 impl Funboy {
+    pub fn new(template_db: TemplateDatabase) -> Self {
+        Self {
+            template_db,
+            valid_template_regex: Regex::new(&format!("^[{}]+$", VALID_TEMPLATE_CHARS)).unwrap(),
+        }
+    }
+
     fn gen_rand_num_inclusive<T: SampleUniform + PartialOrd>(min: T, max: T) -> T {
         let mut rng = rand::rng();
         rng.random_range(min..=max)
@@ -86,14 +95,25 @@ impl Funboy {
         }
     }
 
+    fn validate_template(&self, template: &str) -> Result<(), FunboyError> {
+        if !self.valid_template_regex.is_match(template) {
+            return Err(FunboyError::UserInput(
+                "template must be lowercase containing only characters a-z, 0-9, and _".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
     pub async fn add_substitutes(
         &self,
         template: &str,
         substitutes: &[&str],
     ) -> Result<Vec<Substitute>, FunboyError> {
+        self.validate_template(template)?;
+
         match self
             .template_db
-            .create_substitutes(&template.to_lowercase(), substitutes)
+            .create_substitutes(template, substitutes)
             .await
         {
             Ok(subs) => Ok(subs),
@@ -106,9 +126,11 @@ impl Funboy {
         template: &str,
         substitutes: &[&'a str],
     ) -> Result<(), FunboyError> {
+        self.validate_template(template)?;
+
         match self
             .template_db
-            .delete_substitutes_by_name(&template.to_lowercase(), substitutes)
+            .delete_substitutes_by_name(template, substitutes)
             .await
         {
             Ok(_) => Ok(()),
@@ -137,9 +159,11 @@ impl Funboy {
         old: &str,
         new: &str,
     ) -> Result<Substitute, FunboyError> {
+        self.validate_template(template)?;
+
         match self
             .template_db
-            .update_substitute_by_name(&template.to_lowercase(), old, new)
+            .update_substitute_by_name(template, old, new)
             .await
         {
             Ok(sub) => Ok(sub),
@@ -159,23 +183,19 @@ impl Funboy {
     }
 
     pub async fn delete_template(&self, template: &str) -> Result<(), FunboyError> {
-        match self
-            .template_db
-            .delete_template_by_name(&template.to_lowercase())
-            .await
-        {
+        self.validate_template(template)?;
+
+        match self.template_db.delete_template_by_name(template).await {
             Ok(_) => Ok(()),
             Err(e) => Err(e.into()),
         }
     }
 
-    // TODO this should ripple out and rename template instances in substitutes as well
     pub async fn rename_template(&self, from: &str, to: &str) -> Result<(), FunboyError> {
-        match self
-            .template_db
-            .update_template_by_name(&from.to_lowercase(), &to.to_lowercase())
-            .await
-        {
+        self.validate_template(from)?;
+        self.validate_template(to)?;
+
+        match self.template_db.update_template_by_name(from, to).await {
             Ok(_) => Ok(()),
             Err(e) => Err(e.into()),
         }
@@ -198,9 +218,11 @@ impl Funboy {
         order: OrderBy,
         limit: Limit,
     ) -> Result<Vec<Substitute>, FunboyError> {
+        self.validate_template(template)?;
+
         match self
             .template_db
-            .read_substitutes_from_template(&template.to_lowercase(), order, limit)
+            .read_substitutes_from_template(template, order, limit)
             .await
         {
             Ok(substitutes) => Ok(substitutes),
@@ -209,8 +231,10 @@ impl Funboy {
     }
 
     async fn get_random_substitute(&self, template: &str) -> Result<Substitute, FunboyError> {
+        self.validate_template(template)?;
+
         match self
-            .get_substitutes(&template.to_lowercase(), OrderBy::Random, Limit::Count(1))
+            .get_substitutes(template, OrderBy::Random, Limit::Count(1))
             .await
         {
             Ok(subs) => match subs.get(0) {
@@ -394,11 +418,11 @@ mod core {
     }
 
     async fn get_funboy() -> Funboy {
-        Funboy {
-            template_db: TemplateDatabase::new_debug()
-                .await
-                .expect("Database should exit and connect"),
-        }
+        let db = TemplateDatabase::new_debug()
+            .await
+            .expect("Database should exit and connect");
+
+        Funboy::new(db)
     }
 
     #[tokio::test]
@@ -464,5 +488,35 @@ mod core {
 
         println!("OUTPUT: {}", output);
         assert!(output == "quickquick");
+    }
+
+    #[tokio::test]
+    async fn validate_template_names() {
+        let funboy = get_funboy().await;
+
+        assert!(funboy.add_substitutes("NoGood", &["blah"]).await.is_err());
+
+        assert!(funboy.add_substitutes("very_good", &["blah"]).await.is_ok());
+
+        assert!(
+            funboy
+                .rename_template("notReal", "notRealEither")
+                .await
+                .is_err_and(|e| matches!(e, FunboyError::UserInput(_)))
+        );
+
+        assert!(
+            funboy
+                .rename_template("real", "notRealEither")
+                .await
+                .is_err_and(|e| matches!(e, FunboyError::UserInput(_)))
+        );
+
+        assert!(
+            funboy
+                .rename_template("real", "totally_real_too")
+                .await
+                .is_err_and(|e| matches!(e, FunboyError::Database(_)))
+        );
     }
 }
