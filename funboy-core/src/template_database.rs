@@ -329,6 +329,29 @@ impl TemplateDatabase {
         Ok(substitutes)
     }
 
+    pub async fn copy_substitutes_from_template_to_template(
+        &self,
+        from_template: &str,
+        to_template: &str,
+    ) -> Result<Vec<Substitute>, Error> {
+        let substitutes = sqlx::query_as::<_, Substitute>(
+            "
+                INSERT INTO substitutes (name, template_id)
+                SELECT s.name, t_dest.id
+                FROM substitutes s
+                JOIN templates t_source ON s.template_id = t_source.id
+                JOIN templates t_dest ON t_dest.name = $1
+                WHERE t_source.name = $2
+            ",
+        )
+        .bind(to_template)
+        .bind(from_template)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(substitutes)
+    }
+
     pub async fn read_substitutes_from_template(
         &self,
         template_name: &str,
@@ -878,6 +901,46 @@ mod template_db_test {
 
         for sub in test_subs {
             assert!(db.read_substitute_by_id(sub.id).await.is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn copy_subs_from_one_template_to_another() {
+        let db = TemplateDatabase::new_debug().await.unwrap();
+        let from_template = db.create_template("from_template").await.unwrap();
+        let to_template = db.create_template("to_template").await.unwrap();
+        let subs = db
+            .create_substitutes("from_template", &["one", "two", "three", "four"])
+            .await
+            .unwrap();
+        db.copy_substitutes_from_template_to_template("from_template", "to_template")
+            .await
+            .unwrap();
+
+        let subs = db
+            .read_substitutes_from_template(
+                "from_template",
+                OrderBy::Id(SortOrder::Ascending),
+                Limit::None,
+            )
+            .await
+            .unwrap();
+
+        let copied_subs = db
+            .read_substitutes_from_template(
+                "to_template",
+                OrderBy::Id(SortOrder::Ascending),
+                Limit::None,
+            )
+            .await
+            .unwrap();
+
+        println!(
+            "ORIGINAL SUBS: \n{:?}\nCOPIED SUBS: \n{:?}\n",
+            &subs, &copied_subs
+        );
+        for i in 0..subs.len() {
+            assert!(subs[i].name == copied_subs[i].name);
         }
     }
 }
