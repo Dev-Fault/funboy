@@ -283,16 +283,6 @@
       ]
     },
     {
-      "name": "get_sub",
-      "argument_count": "One",
-      "argument_types": "Text",
-      "return_type": "Text",
-      "description": "Attempts to search the funboy database for a substitute for the given Text.",
-      "examples": [
-        "{print(get_sub(\"noun\"))}"
-      ]
-    },
-    {
       "name": "index",
       "argument_count": "Two",
       "argument_types": "(Int, Text), (Int, List)",

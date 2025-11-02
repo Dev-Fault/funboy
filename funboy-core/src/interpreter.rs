@@ -3,10 +3,6 @@ use lexer::tokenize;
 use parser::{Command, CommandType, ValueType, parse};
 use rand::{self, Rng};
 use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::Mutex;
-
-use crate::template_database::TemplateDatabase;
 
 mod documentation;
 #[allow(dead_code)]
@@ -27,13 +23,13 @@ const ERROR_ARGS_MUST_BE_NUMBER: &str = "all arguments must be of type Number";
 const ERROR_ARGS_MUST_BE_BOOL: &str = "all arguments must be of type Bool";
 const ERROR_ARGS_MUST_BE_TEXT: &str = "all arguments must be of type Text";
 const ERROR_ARG_MUST_BE_TEXT: &str = "argument must be of type Text";
-const ERROR_ARG_MUST_BE_NUMBER: &str = "argument must be of type Number";
+// const ERROR_ARG_MUST_BE_NUMBER: &str = "argument must be of type Number";
 const ERROR_ARG_MUST_BE_IDENTIFIER: &str = "argument must be of type Identifier";
 const ERROR_ARG_ONE_MUST_BE_WHOLE_NUMBER: &str = "first argument must be a whole number";
 const ERROR_ARG_ONE_MUST_BE_BOOL: &str = "first argument must be of type Bool";
 const ERROR_ARG_ONE_MUST_BE_COMMAND_BOOL: &str =
     "first argument must be a command that evaluates to a boolean value";
-const ERROR_ARG_ONE_MUST_BE_COMMAND: &str = "first argument must be of type Command";
+// const ERROR_ARG_ONE_MUST_BE_COMMAND: &str = "first argument must be of type Command";
 
 const ERROR_ARGS_AFTER_ARG_ONE_MUST_BE_COMMAND: &str =
     "arguments following first argument must be of type Command";
@@ -80,7 +76,6 @@ pub struct Interpreter {
     copy_buffer: ValueType,
     output: String,
     log: Vec<ValueType>,
-    db: Option<Arc<Mutex<TemplateDatabase>>>,
 }
 
 impl Interpreter {
@@ -90,17 +85,6 @@ impl Interpreter {
             vars: VarMap::new(),
             output: String::new(),
             log: Vec::new(),
-            db: None,
-        }
-    }
-
-    pub fn new_with_db(db: Arc<Mutex<TemplateDatabase>>) -> Self {
-        Self {
-            copy_buffer: ValueType::None,
-            vars: VarMap::new(),
-            output: String::new(),
-            log: Vec::new(),
-            db: Some(db),
         }
     }
 
@@ -770,25 +754,6 @@ impl Interpreter {
                             Ok(ValueType::Bool(value_a.ends_with(value_b)))
                         }
                         _ => Err(command_type.gen_err(ERROR_ARGS_MUST_BE_TEXT)),
-                    }
-                }
-            }
-            CommandType::GetSub => {
-                if args.len() != 1 {
-                    return Err(command_type.gen_err(ERROR_EXACTLY_ONE_ARG));
-                } else {
-                    match &args[0] {
-                        ValueType::Text(sub) => match self.db.clone() {
-                            // TODO fix the implementation of this command
-                            Some(fdb) => Ok(ValueType::Text(String::new())),
-                            None => {
-                                let error =
-                                    "interpreter attempt to use database with no reference.";
-                                eprintln!("Error: {}", error);
-                                Err(error.to_string())
-                            }
-                        },
-                        _ => Err(command_type.gen_err(ERROR_ARG_MUST_BE_TEXT)),
                     }
                 }
             }
