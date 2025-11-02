@@ -1,6 +1,7 @@
 use sqlx::{Error, FromRow, PgPool, Pool, Postgres};
+use strum::IntoEnumIterator;
 
-use crate::template_substitutor::TemplateSubstitutor;
+use crate::template_substitutor::{TemplateDelimiter, TemplateSubstitutor};
 
 pub type KeySize = i32;
 
@@ -116,6 +117,7 @@ impl TemplateDatabase {
         Ok(debug_db)
     }
 
+    // TODO enforce lower case
     pub async fn create_template(&self, name: &str) -> Result<Template, Error> {
         let template =
             sqlx::query_as::<_, Template>("INSERT INTO templates (name) VALUES ($1) RETURNING *")
@@ -132,24 +134,26 @@ impl TemplateDatabase {
         old_name: &str,
         new_name: &str,
     ) -> Result<(), Error> {
-        // Fetch substitutes that might contain old template
-        let substitutes =
-            sqlx::query_as::<_, Substitute>("SELECT * FROM substitutes WHERE name LIKE $1")
-                .bind(format!("%^{}%", old_name))
-                .fetch_all(&self.pool)
-                .await?;
+        for delimiter in TemplateDelimiter::iter() {
+            // Fetch substitutes that might contain old template
+            let substitutes =
+                sqlx::query_as::<_, Substitute>("SELECT * FROM substitutes WHERE name LIKE $1")
+                    .bind(format!("%{}{}%", delimiter.to_char(), old_name))
+                    .fetch_all(&self.pool)
+                    .await?;
 
-        let substitutor = TemplateSubstitutor::default();
+            let substitutor = TemplateSubstitutor::new(delimiter);
 
-        // Replace references to old template with new template
-        for sub in substitutes {
-            let new_sub_name = substitutor
-                .rename_template(&sub.name, old_name, new_name)
-                .await;
+            // Replace references to old template with new template
+            for sub in substitutes {
+                let new_sub_name = substitutor
+                    .rename_template(&sub.name, old_name, new_name)
+                    .await;
 
-            // Avoid useless updates
-            if sub.name != new_sub_name {
-                self.update_substitute_by_id(sub.id, &new_sub_name).await?;
+                // Avoid useless updates
+                if sub.name != new_sub_name {
+                    self.update_substitute_by_id(sub.id, &new_sub_name).await?;
+                }
             }
         }
 
@@ -173,9 +177,16 @@ impl TemplateDatabase {
         .fetch_one(&self.pool)
         .await?;
 
-        // TODO handle error here
-        self.update_template_references_in_substitutes(&old_template.name, new_name)
-            .await?;
+        if let Err(e) = self
+            .update_template_references_in_substitutes(&old_template.name, new_name)
+            .await
+        {
+            eprintln!(
+                "Warning: failed to rename all template references to template \"{}\" due to: {}",
+                old_template.name.to_string(),
+                e.to_string()
+            );
+        }
 
         Ok(template)
     }
@@ -197,14 +208,20 @@ impl TemplateDatabase {
         .fetch_one(&self.pool)
         .await?;
 
-        // TODO handle error here
-        self.update_template_references_in_substitutes(old_name, new_name)
-            .await?;
+        if let Err(e) = self
+            .update_template_references_in_substitutes(old_name, new_name)
+            .await
+        {
+            eprintln!(
+                "Warning: failed to rename all template references to template \"{}\" due to: {}",
+                old_name.to_string(),
+                e.to_string()
+            );
+        }
 
         Ok(template)
     }
 
-    // TODO add test case
     pub async fn read_template_by_name(&self, template_name: &str) -> Result<Template, Error> {
         let template = sqlx::query_as::<_, Template>("SELECT * FROM templates WHERE name = $1")
             .bind(template_name)
@@ -214,7 +231,6 @@ impl TemplateDatabase {
         Ok(template)
     }
 
-    // TODO add test case
     pub async fn read_template_by_id(&self, id: KeySize) -> Result<Template, Error> {
         let template = sqlx::query_as::<_, Template>("SELECT * FROM templates WHERE id = $1")
             .bind(id)
@@ -314,7 +330,6 @@ impl TemplateDatabase {
         Ok(substitutes)
     }
 
-    // TODO add read for single sub by name and id
     pub async fn read_substitutes_from_template(
         &self,
         template_name: &str,
@@ -338,6 +353,40 @@ impl TemplateDatabase {
         .await?;
 
         Ok(substitutes)
+    }
+
+    pub async fn read_substitute_from_template_by_name(
+        &self,
+        template_name: &str,
+        substitute_name: &str,
+    ) -> Result<Substitute, Error> {
+        let substitute = sqlx::query_as::<_, Substitute>(&format!(
+            "
+                 SELECT s.*
+                 FROM substitutes s
+                 JOIN templates t ON s.template_id = t.id
+                 WHERE t.name = $1
+                 AND s.name = $2
+             ",
+        ))
+        .bind(template_name)
+        .bind(substitute_name)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(substitute)
+    }
+
+    pub async fn read_substitute_from_template_by_id(
+        &self,
+        substitute_id: KeySize,
+    ) -> Result<Substitute, Error> {
+        let substitute = sqlx::query_as::<_, Substitute>("SELECT * FROM substitutes WHERE id = $1")
+            .bind(substitute_id)
+            .fetch_one(&self.pool)
+            .await?;
+
+        Ok(substitute)
     }
 
     pub async fn update_substitute_by_id(
@@ -611,34 +660,37 @@ mod template_db_test {
 
     #[tokio::test]
     async fn ripple_rename_template_by_name() {
-        let db = TemplateDatabase::new_debug().await.unwrap();
-        let fruit_template = db.create_template("fruit").await.unwrap();
-        db.create_template("references_fruit").await.unwrap();
-        db.create_substitute(
-            "references_fruit",
-            "^fruit fruit ^fruit^^fruit^^fruit deeplyembedded^fruit^template ^fruit_extra",
-        )
-        .await
-        .unwrap();
-
-        db.update_template_by_name("fruit", "new_fruit")
+        for delim in TemplateDelimiter::iter() {
+            let db = TemplateDatabase::new_debug().await.unwrap();
+            let fruit_template = db.create_template("fruit").await.unwrap();
+            db.create_template("references_fruit").await.unwrap();
+            db.create_substitute(
+                "references_fruit",
+                &"^fruit fruit ^fruit^^fruit^^fruit deeplyembedded^fruit^template ^fruit_extra"
+                    .replace("^", &delim.to_char().to_string()),
+            )
             .await
             .unwrap();
 
-        let fruit_template = db.read_template_by_id(fruit_template.id).await.unwrap();
-        dbg!(&fruit_template);
-        assert!(fruit_template.name == "new_fruit");
+            db.update_template_by_name("fruit", "new_fruit")
+                .await
+                .unwrap();
 
-        let fruit_reference = &db
-            .read_substitutes_from_template("references_fruit", OrderBy::Default, Limit::None)
-            .await
-            .unwrap()[0];
+            let fruit_template = db.read_template_by_id(fruit_template.id).await.unwrap();
+            dbg!(&fruit_template);
+            assert!(fruit_template.name == "new_fruit");
 
-        dbg!(fruit_reference);
-        assert!(
-            fruit_reference.name
-                == "^new_fruit fruit ^new_fruit^^new_fruit^^new_fruit deeplyembedded^new_fruit^template ^fruit_extra"
-        );
+            let fruit_reference = &db
+                .read_substitutes_from_template("references_fruit", OrderBy::Default, Limit::None)
+                .await
+                .unwrap()[0];
+
+            dbg!(fruit_reference);
+            assert!(
+                fruit_reference.name
+                    == "^new_fruit fruit ^new_fruit^^new_fruit^^new_fruit deeplyembedded^new_fruit^template ^fruit_extra".replace("^", &delim.to_char().to_string())
+            );
+        }
     }
 
     #[tokio::test]
@@ -785,5 +837,34 @@ mod template_db_test {
             Ok(_) => panic!("Substitute collision should return error"),
             Err(e) => dbg!(e),
         };
+    }
+
+    #[tokio::test]
+    async fn read_single_template() {
+        let db = TemplateDatabase::new_debug().await.unwrap();
+        let test = db.create_template("test").await.unwrap();
+        assert!(db.read_template_by_name("test").await.unwrap().id == test.id);
+        assert!(db.read_template_by_id(test.id).await.unwrap().id == test.id);
+    }
+
+    #[tokio::test]
+    async fn read_single_substitute() {
+        let db = TemplateDatabase::new_debug().await.unwrap();
+        db.create_template("test").await.unwrap();
+        let test_sub = db.create_substitute("test", "test_sub").await.unwrap();
+        assert!(
+            db.read_substitute_from_template_by_name("test", "test_sub")
+                .await
+                .unwrap()
+                .id
+                == test_sub.id
+        );
+        assert!(
+            db.read_substitute_from_template_by_id(test_sub.id)
+                .await
+                .unwrap()
+                .id
+                == test_sub.id
+        );
     }
 }

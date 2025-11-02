@@ -4,40 +4,69 @@ use std::{
 };
 
 use regex::Regex;
+use strum_macros::EnumIter;
+
+#[derive(Debug, Copy, Clone, EnumIter)]
+pub enum TemplateDelimiter {
+    Caret,
+    BackTick,
+}
+
+impl TemplateDelimiter {
+    pub fn to_char(&self) -> char {
+        match self {
+            TemplateDelimiter::Caret => '^',
+            TemplateDelimiter::BackTick => '`',
+        }
+    }
+
+    pub fn to_regex_pattern(&self) -> &str {
+        match self {
+            TemplateDelimiter::Caret => r"\^[\w-]+\^?",
+            TemplateDelimiter::BackTick => r"\`[\w-]+\`?",
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct TemplateSubstitutor {
-    template_char: char,
+    delimiter: TemplateDelimiter,
     regex: Regex,
     depth_limit: u16,
 }
 
 impl Default for TemplateSubstitutor {
     fn default() -> Self {
-        let pattern = r"\^[\w-]+\^?";
+        let delimiter = TemplateDelimiter::Caret;
         Self {
-            template_char: '^',
-            regex: Regex::new(&pattern).unwrap(),
+            delimiter,
+            regex: Regex::new(delimiter.to_regex_pattern()).unwrap(),
             depth_limit: 255,
         }
     }
 }
 
 impl TemplateSubstitutor {
-    pub fn get_template_char(&self) -> char {
-        self.template_char
+    pub fn new(delimiter: TemplateDelimiter) -> Self {
+        Self {
+            delimiter,
+            regex: Regex::new(delimiter.to_regex_pattern()).unwrap(),
+            ..Default::default()
+        }
     }
+}
 
+impl TemplateSubstitutor {
     pub async fn rename_template(&self, input: &str, old_name: &str, new_name: &str) -> String {
         let mut output = String::new();
         let mut i = 0;
         for template in self.regex.find_iter(&input[i..]) {
             output.push_str(&input[i..template.start()]);
             let matched = template.as_str();
-            let template_name = matched[1..].trim_end_matches(self.template_char);
+            let template_name = matched[1..].trim_end_matches(self.delimiter.to_char());
 
             if old_name == template_name {
-                output.push(self.template_char);
+                output.push(self.delimiter.to_char());
                 output.push_str(new_name);
                 output.push_str(&matched[template_name.len() + 1..]);
             } else {
@@ -60,13 +89,16 @@ impl TemplateSubstitutor {
         let mut start = 0;
         let mut end = 0;
         for template in self.regex.find_iter(&input[start..]) {
-            let sub =
-                match template_mapper(template.as_str()[1..].trim_end_matches('^').to_string())
-                    .await
-                {
-                    Some(sub) => sub,
-                    None => template.as_str().to_string(),
-                };
+            let sub = match template_mapper(
+                template.as_str()[1..]
+                    .trim_end_matches(self.delimiter.to_char())
+                    .to_string(),
+            )
+            .await
+            {
+                Some(sub) => sub,
+                None => template.as_str().to_string(),
+            };
 
             end = template.end();
 

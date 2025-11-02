@@ -3,8 +3,9 @@ use std::str::FromStr;
 use rand::{Rng, distr::uniform::SampleUniform};
 
 use crate::{
+    interpreter::Interpreter,
     template_database::{KeySize, Limit, OrderBy, Substitute, Template, TemplateDatabase},
-    template_substitutor::TemplateSubstitutor,
+    template_substitutor::{TemplateDelimiter, TemplateSubstitutor},
 };
 
 pub mod interpreter;
@@ -218,7 +219,7 @@ impl Funboy {
     pub async fn generate(&self, text: &str) -> Result<String, FunboyError> {
         let template_substitutor = TemplateSubstitutor::default();
 
-        let expanded_text = template_substitutor
+        let substituted_text = template_substitutor
             .substitute_recursively(text.to_string(), |template: String| async move {
                 match self.get_random_substitute(&template).await {
                     Ok(sub) => Some(sub.name.to_string()),
@@ -227,7 +228,25 @@ impl Funboy {
             })
             .await;
 
-        Ok(expanded_text)
+        let mut fsl_interpreter = Interpreter::new();
+        match fsl_interpreter
+            .interpret_embedded_code(&substituted_text)
+            .await
+        {
+            Ok(interpreted_text) => {
+                let lazy_substitutor = TemplateSubstitutor::new(TemplateDelimiter::BackTick);
+
+                Ok(lazy_substitutor
+                    .substitute_recursively(interpreted_text, |template: String| async move {
+                        match self.get_random_substitute(&template).await {
+                            Ok(sub) => Some(sub.name.to_string()),
+                            Err(_) => None,
+                        }
+                    })
+                    .await)
+            }
+            Err(e) => Err(FunboyError::Interpreter(e)),
+        }
     }
 
     pub async fn get_ai_models() -> Result<Vec<String>, FunboyError> {
@@ -365,13 +384,17 @@ mod core {
         }
     }
 
-    #[tokio::test]
-    async fn generate_templates() {
-        let funboy = Funboy {
+    async fn get_funboy() -> Funboy {
+        Funboy {
             template_db: TemplateDatabase::new_debug()
                 .await
                 .expect("Database should exit and connect"),
-        };
+        }
+    }
+
+    #[tokio::test]
+    async fn generate_templates() {
+        let funboy = get_funboy().await;
 
         let output = funboy.generate("^sentence").await.unwrap();
 
@@ -392,7 +415,45 @@ mod core {
 
         let output = funboy.generate("^sentence").await.unwrap();
 
-        assert!(output == "A quick brown fox jumped over the lazy dog.");
         println!("OUTPUT: {}", output);
+        assert!(output == "A quick brown fox jumped over the lazy dog.");
+    }
+
+    #[tokio::test]
+    async fn generate_code() {
+        let funboy = get_funboy().await;
+
+        let output = funboy
+            .generate("{repeat(5, print(\"again\"))}")
+            .await
+            .unwrap();
+
+        println!("OUTPUT: {}", output);
+        assert!(output == "againagainagainagainagain");
+    }
+
+    #[tokio::test]
+    async fn generate_lazy_templates() {
+        let funboy = get_funboy().await;
+
+        funboy.add_substitutes("adj", &["quick"]).await.unwrap();
+        funboy.add_substitutes("noun", &["fox"]).await.unwrap();
+        funboy.add_substitutes("verb", &["jump"]).await.unwrap();
+
+        let output = funboy
+            .generate("{copy(\"`adj\", adj) print(concat(paste(adj), paste(adj)))}")
+            .await
+            .unwrap();
+
+        println!("OUTPUT: {}", output);
+        assert!(output == "quickadj");
+
+        let output = funboy
+            .generate("{copy(\"^adj\", adj) print(concat(paste(adj), paste(adj)))}")
+            .await
+            .unwrap();
+
+        println!("OUTPUT: {}", output);
+        assert!(output == "quickquick");
     }
 }
