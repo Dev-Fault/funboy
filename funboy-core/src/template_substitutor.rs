@@ -6,6 +6,8 @@ use std::{
 use regex::Regex;
 use strum_macros::EnumIter;
 
+pub const VALID_TEMPLATE_CHARS: &str = "a-z0-9_";
+
 #[derive(Debug, Copy, Clone, EnumIter)]
 pub enum TemplateDelimiter {
     Caret,
@@ -20,10 +22,10 @@ impl TemplateDelimiter {
         }
     }
 
-    pub fn to_regex_pattern(&self) -> &str {
+    pub fn to_regex_pattern(&self) -> String {
         match self {
-            TemplateDelimiter::Caret => r"\^[\w-]+\^?",
-            TemplateDelimiter::BackTick => r"\`[\w-]+\`?",
+            TemplateDelimiter::Caret => format!(r"\^[{}]+\^?", VALID_TEMPLATE_CHARS),
+            TemplateDelimiter::BackTick => format!(r"\`[{}]+\`?", VALID_TEMPLATE_CHARS),
         }
     }
 }
@@ -40,7 +42,7 @@ impl Default for TemplateSubstitutor {
         let delimiter = TemplateDelimiter::Caret;
         Self {
             delimiter,
-            regex: Regex::new(delimiter.to_regex_pattern()).unwrap(),
+            regex: Regex::new(&delimiter.to_regex_pattern()).unwrap(),
             depth_limit: 255,
         }
     }
@@ -50,7 +52,7 @@ impl TemplateSubstitutor {
     pub fn new(delimiter: TemplateDelimiter) -> Self {
         Self {
             delimiter,
-            regex: Regex::new(delimiter.to_regex_pattern()).unwrap(),
+            regex: Regex::new(&delimiter.to_regex_pattern()).unwrap(),
             ..Default::default()
         }
     }
