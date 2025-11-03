@@ -11,7 +11,7 @@ const DEFAULT_MAX_PREDICT: u16 = 200;
 const PARAMETER_NOT_SET_TEXT: &str = "Unset";
 pub const MAX_PREDICT: u16 = 2000;
 
-#[derive(Clone)]
+#[derive(Copy, Clone)]
 pub struct OllamaParameters {
     pub temperature: Option<f32>,
     pub repeat_penalty: Option<f32>,
@@ -20,6 +20,20 @@ pub struct OllamaParameters {
 }
 
 impl OllamaParameters {
+    pub fn new(
+        temperature: Option<f32>,
+        repeat_penalty: Option<f32>,
+        top_k: Option<u32>,
+        top_p: Option<f32>,
+    ) -> Self {
+        Self {
+            temperature,
+            repeat_penalty,
+            top_k,
+            top_p,
+        }
+    }
+
     pub fn reset(&mut self) {
         self.temperature = None;
         self.repeat_penalty = None;
