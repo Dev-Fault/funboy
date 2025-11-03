@@ -4,3 +4,30 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+poise = "0.6.1"
+tokio = {version = "1.39.2", features = ["full"]}
+rand = "0.9.2"
+serde = { version = "1.0.210", features = ["derive"] }
+serde_json = "1.0.132"
+reqwest = {version = "0.11", features = ["json"]}
+ollama-rs = "0.3.2"
+async-recursion = "1.1.1"
+
+[dependencies.serenity]
+default-features = false
+features = ["cache", "builder", "client", "gateway", "model", "utils", "collector", "framework"]
+version = "0.12.2"
+
+[dependencies.songbird]
+version = "0.4.6"
+features = ["builtin-queue"]
+
+[dependencies.symphonia]
+version = "0.5.2"
+features = ["mp3", "aac", "isomp4", "alac"]
+
+[dependencies.uuid]
+version = "1.10.0"
+features = [
+    "v4",                # Lets you generate random UUIDs
+]
