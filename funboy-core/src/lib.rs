@@ -303,12 +303,13 @@ impl Funboy {
         }
     }
 
+    /// Resolves templates and fsl code until output is complete or depth limit is reached
     pub async fn generate(&self, input: &str) -> Result<String, FunboyError> {
         let mut output = input.to_string();
         let mut prev_hashes = HashSet::new();
 
-        const MAX_GENERATIONS: u8 = 16;
-        for i in 0..MAX_GENERATIONS {
+        const MAX_GENERATIONS: u8 = 255;
+        for _ in 0..MAX_GENERATIONS {
             let mut hasher = DefaultHasher::new();
             output.hash(&mut hasher);
             let hash = hasher.finish();
