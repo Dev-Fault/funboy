@@ -130,7 +130,6 @@ impl TemplateSubstitutor {
             let hash = hasher.finish();
 
             if !previous_hashes.insert(hash) {
-                eprintln!("Warning: cycle detected in template expansion");
                 break;
             } else {
                 output = self.substitute(&output, &template_mapper).await;
