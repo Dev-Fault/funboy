@@ -1,4 +1,4 @@
-**/*.env
+*.env
 target/
 **/*.rs.bk
 *.pdb
