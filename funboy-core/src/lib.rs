@@ -34,6 +34,25 @@ impl Into<FunboyError> for sqlx::Error {
     }
 }
 
+impl Into<String> for FunboyError {
+    fn into(self) -> String {
+        match self {
+            FunboyError::Interpreter(e) => {
+                format!("FSL interpreter error:\n{}", e)
+            }
+            FunboyError::Ollama(e) => {
+                format!("Ollama error:\n{}", e)
+            }
+            FunboyError::Database(e) => {
+                format!("Database error:\n{}", e)
+            }
+            FunboyError::UserInput(e) => {
+                format!("User input error:\n{}", e)
+            }
+        }
+    }
+}
+
 pub struct Funboy {
     template_db: TemplateDatabase,
     ollama_generator: OllamaGenerator,
