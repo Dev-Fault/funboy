@@ -132,13 +132,8 @@ impl TemplateSubstitutor {
             if !previous_hashes.insert(hash) {
                 eprintln!("Warning: cycle detected in template expansion");
                 break;
-            }
-
-            let next_output = self.substitute(&output, &template_mapper).await;
-            if next_output == output {
-                break;
             } else {
-                output = next_output;
+                output = self.substitute(&output, &template_mapper).await;
             }
         }
 

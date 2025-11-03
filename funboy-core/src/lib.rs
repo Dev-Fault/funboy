@@ -1,10 +1,16 @@
-use std::str::FromStr;
+use std::{
+    collections::HashSet,
+    hash::{DefaultHasher, Hash, Hasher},
+    str::FromStr,
+};
 
+use ollama_rs::{generation::completion::GenerationResponse, models::ModelInfo};
 use rand::{Rng, distr::uniform::SampleUniform};
 use regex::Regex;
 
 use crate::{
     interpreter::Interpreter,
+    ollama::{OllamaGenerator, OllamaSettings},
     template_database::{KeySize, Limit, OrderBy, Substitute, Template, TemplateDatabase},
     template_substitutor::{TemplateDelimiter, TemplateSubstitutor, VALID_TEMPLATE_CHARS},
 };
@@ -17,7 +23,7 @@ pub mod template_substitutor;
 #[derive(Debug, Clone)]
 pub enum FunboyError {
     Interpreter(String),
-    AI(String),
+    Ollama(String),
     Database(String),
     UserInput(String),
 }
@@ -29,14 +35,18 @@ impl Into<FunboyError> for sqlx::Error {
 }
 
 pub struct Funboy {
-    pub template_db: TemplateDatabase,
+    template_db: TemplateDatabase,
+    ollama_generator: OllamaGenerator,
     valid_template_regex: Regex,
+    pub ollama_settings: OllamaSettings,
 }
 
 impl Funboy {
     pub fn new(template_db: TemplateDatabase) -> Self {
         Self {
             template_db,
+            ollama_settings: OllamaSettings::default(),
+            ollama_generator: OllamaGenerator::default(),
             valid_template_regex: Regex::new(&format!("^[{}]+$", VALID_TEMPLATE_CHARS)).unwrap(),
         }
     }
@@ -54,28 +64,37 @@ impl Funboy {
     fn gen_rand_num_from_str<T: FromStr + PartialOrd + SampleUniform + ToString>(
         min: &str,
         max: &str,
+        inclusive: bool,
     ) -> Result<String, &'static str> {
         match (min.parse(), max.parse()) {
             (Ok(min), Ok(max)) => {
                 if min >= max {
                     Err("min must be less than max")
                 } else {
-                    Ok(Self::gen_rand_num_inclusive::<T>(min, max).to_string())
+                    if inclusive {
+                        Ok(Self::gen_rand_num_inclusive::<T>(min, max).to_string())
+                    } else {
+                        Ok(Self::gen_rand_num_exclusive::<T>(min, max).to_string())
+                    }
                 }
             }
             _ => Err("min and max values must be a number"),
         }
     }
 
-    pub async fn random_number(min: &str, max: &str) -> Result<String, FunboyError> {
+    pub async fn random_number(
+        min: &str,
+        max: &str,
+        inclusive: bool,
+    ) -> Result<String, FunboyError> {
         if min.contains('.') || max.contains('.') {
-            match Self::gen_rand_num_from_str::<f64>(min, max) {
+            match Self::gen_rand_num_from_str::<f64>(min, max, inclusive) {
                 Ok(result) => Ok(result),
 
                 Err(e) => Err(FunboyError::UserInput(e.to_string())),
             }
         } else {
-            match Self::gen_rand_num_from_str::<i64>(min, max) {
+            match Self::gen_rand_num_from_str::<i64>(min, max, inclusive) {
                 Ok(result) => Ok(result),
 
                 Err(e) => Err(FunboyError::UserInput(e.to_string())),
@@ -258,11 +277,14 @@ impl Funboy {
         }
     }
 
-    pub async fn generate(&self, text: &str) -> Result<String, FunboyError> {
-        let template_substitutor = TemplateSubstitutor::default();
-
+    /// Resolves templates and interprets embeded code in input with a single pass
+    async fn interpret_input(
+        &self,
+        input: String,
+        template_substitutor: TemplateSubstitutor,
+    ) -> Result<String, FunboyError> {
         let substituted_text = template_substitutor
-            .substitute_recursively(text.to_string(), |template: String| async move {
+            .substitute_recursively(input, |template: String| async move {
                 match self.get_random_substitute(&template).await {
                     Ok(sub) => Some(sub.name.to_string()),
                     Err(_) => None,
@@ -271,74 +293,74 @@ impl Funboy {
             .await;
 
         let mut fsl_interpreter = Interpreter::new();
-
-        match fsl_interpreter
+        let interpreter_result = fsl_interpreter
             .interpret_embedded_code(&substituted_text)
-            .await
-        {
-            Ok(interpreted_text) => {
-                let lazy_substitutor = TemplateSubstitutor::new(TemplateDelimiter::BackTick);
+            .await;
 
-                Ok(lazy_substitutor
-                    .substitute_recursively(interpreted_text, |template: String| async move {
-                        match self.get_random_substitute(&template).await {
-                            Ok(sub) => Some(sub.name.to_string()),
-                            Err(_) => None,
-                        }
-                    })
-                    .await)
-            }
+        match interpreter_result {
+            Ok(interpreted_text) => Ok(interpreted_text),
             Err(e) => Err(FunboyError::Interpreter(e)),
         }
     }
 
-    pub async fn get_ai_models() -> Result<Vec<String>, FunboyError> {
-        todo!()
+    pub async fn generate(&self, input: &str) -> Result<String, FunboyError> {
+        let mut output = input.to_string();
+        let mut prev_hashes = HashSet::new();
+
+        const MAX_GENERATIONS: u8 = 16;
+        for i in 0..MAX_GENERATIONS {
+            let mut hasher = DefaultHasher::new();
+            output.hash(&mut hasher);
+            let hash = hasher.finish();
+
+            if !prev_hashes.insert(hash) {
+                break;
+            } else {
+                output = self
+                    .interpret_input(output, TemplateSubstitutor::new(TemplateDelimiter::Caret))
+                    .await?;
+
+                output = self
+                    .interpret_input(
+                        output,
+                        TemplateSubstitutor::new(TemplateDelimiter::BackTick),
+                    )
+                    .await?;
+            }
+        }
+
+        Ok(output)
     }
 
-    pub async fn set_ai_models(model_name: &str) -> Result<(), FunboyError> {
-        todo!()
+    pub async fn get_ollama_models(&self) -> Result<Vec<String>, FunboyError> {
+        let models = self.ollama_generator.get_models().await;
+        match models {
+            Ok(models) => Ok(models.iter().map(|m| m.name.to_string()).collect()),
+            Err(e) => Err(FunboyError::Ollama(e.to_string())),
+        }
     }
 
-    pub async fn get_ai_settings() -> Result<String, FunboyError> {
-        todo!()
+    pub async fn get_ollama_model_info(&self, model: String) -> Result<ModelInfo, FunboyError> {
+        match self.ollama_generator.get_model_info(model).await {
+            Ok(info) => Ok(info),
+            Err(e) => Err(FunboyError::Ollama(e.to_string())),
+        }
     }
 
-    pub async fn set_ai_token_limit(limit: u16) -> Result<(), FunboyError> {
-        todo!()
-    }
-
-    pub async fn set_ai_parameters(
-        temperature: Option<f32>,
-        repeat_penalty: Option<f32>,
-        top_k: Option<u32>,
-        top_p: Option<f32>,
-    ) -> Result<(), FunboyError> {
-        todo!()
-    }
-
-    pub async fn reset_ai_parameters() {
-        todo!()
-    }
-
-    pub async fn set_ai_system_prompt(system_prompt: &str) -> Result<(), FunboyError> {
-        todo!()
-    }
-
-    pub async fn reset_ai_system_prompt() -> Result<(), FunboyError> {
-        todo!()
-    }
-
-    pub async fn set_ai_template(template: &str) -> Result<(), FunboyError> {
-        todo!()
-    }
-
-    pub async fn reset_ai_template() -> Result<(), FunboyError> {
-        todo!()
-    }
-
-    pub async fn generate_ai(prompt: &str) -> Result<String, FunboyError> {
-        todo!()
+    pub async fn generate_ollama(
+        &self,
+        model: Option<String>,
+        prompt: &str,
+    ) -> Result<GenerationResponse, FunboyError> {
+        let prompt = self.generate(prompt).await?;
+        match self
+            .ollama_generator
+            .generate(&prompt, self.ollama_settings.clone(), model)
+            .await
+        {
+            Ok(output) => Ok(output),
+            Err(e) => Err(FunboyError::Ollama(e.to_string())),
+        }
     }
 }
 
@@ -350,7 +372,7 @@ mod core {
     #[tokio::test]
     async fn random_number_produces_int_in_range() {
         for _ in 0..100 {
-            let result = Funboy::random_number("1", "6")
+            let result = Funboy::random_number("1", "6", true)
                 .await
                 .unwrap()
                 .parse::<i64>()
@@ -362,7 +384,7 @@ mod core {
     #[tokio::test]
     async fn random_number_produces_float() {
         for _ in 0..100 {
-            let result = Funboy::random_number("1.0", "6.0")
+            let result = Funboy::random_number("1.0", "6.0", true)
                 .await
                 .unwrap()
                 .parse::<f64>()
@@ -373,7 +395,7 @@ mod core {
 
     #[tokio::test]
     async fn random_number_fails_when_min_greater_than_max() {
-        match Funboy::random_number("6", "1").await {
+        match Funboy::random_number("6", "1", true).await {
             Ok(_) => {
                 panic!("Value should not be Ok");
             }
@@ -388,7 +410,7 @@ mod core {
 
     #[tokio::test]
     async fn random_number_fails_when_min_equal_to_max() {
-        match Funboy::random_number("6", "6").await {
+        match Funboy::random_number("6", "6", true).await {
             Ok(_) => {
                 panic!("Value should not be Ok");
             }
@@ -501,6 +523,31 @@ mod core {
     }
 
     #[tokio::test]
+    async fn generate_lazy_templates_that_contain_code() {
+        let funboy = get_funboy().await;
+
+        funboy.add_substitutes("adj", &["quick"]).await.unwrap();
+        funboy.add_substitutes("color", &["brown"]).await.unwrap();
+        funboy.add_substitutes("noun", &["fox"]).await.unwrap();
+        funboy.add_substitutes("verb", &["jump"]).await.unwrap();
+        funboy
+            .add_substitutes(
+                "quick_brown_fox",
+                &["{print(\"The ^adj ^color ^noun ^verb^ed over the lazy dog.\")}"],
+            )
+            .await
+            .unwrap();
+
+        let output = funboy
+            .generate("{print(\"`quick_brown_fox`\")}")
+            .await
+            .unwrap();
+
+        println!("OUTPUT: {}", output);
+        assert!(output == "The quick brown fox jumped over the lazy dog.");
+    }
+
+    #[tokio::test]
     async fn validate_template_names() {
         let funboy = get_funboy().await;
 
@@ -528,5 +575,25 @@ mod core {
                 .await
                 .is_err_and(|e| matches!(e, FunboyError::Database(_)))
         );
+    }
+
+    #[tokio::test]
+    async fn generate_ollama_response() {
+        let funboy = get_funboy().await;
+
+        funboy
+            .add_substitutes("adj", &["funny", "evil", "small", "big"])
+            .await
+            .unwrap();
+
+        let generation_response = funboy
+            .generate_ollama(
+                Some("tinyllama".to_string()),
+                "{print(\"You are very ^adj you know that?\")}",
+            )
+            .await
+            .unwrap();
+
+        println!("Ollama response: {}", generation_response.response);
     }
 }
