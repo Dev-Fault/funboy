@@ -920,7 +920,7 @@ mod template_db_test {
         let subs = db
             .read_substitutes_from_template(
                 "from_template",
-                OrderBy::Id(SortOrder::Ascending),
+                OrderBy::Name(SortOrder::Ascending),
                 Limit::None,
             )
             .await
@@ -929,7 +929,7 @@ mod template_db_test {
         let copied_subs = db
             .read_substitutes_from_template(
                 "to_template",
-                OrderBy::Id(SortOrder::Ascending),
+                OrderBy::Name(SortOrder::Ascending),
                 Limit::None,
             )
             .await
