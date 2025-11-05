@@ -101,11 +101,7 @@ impl Funboy {
         }
     }
 
-    pub async fn random_number(
-        min: &str,
-        max: &str,
-        inclusive: bool,
-    ) -> Result<String, FunboyError> {
+    pub fn random_number(min: &str, max: &str, inclusive: bool) -> Result<String, FunboyError> {
         if min.contains('.') || max.contains('.') {
             match Self::gen_rand_num_from_str::<f64>(min, max, inclusive) {
                 Ok(result) => Ok(result),
@@ -122,7 +118,7 @@ impl Funboy {
     }
 
     // Previously "random_word"
-    pub async fn random_entry<'b>(list: &[&'b str]) -> Result<&'b str, FunboyError> {
+    pub fn random_entry<'b>(list: &[&'b str]) -> Result<&'b str, FunboyError> {
         if list.len() < 2 {
             Err(FunboyError::UserInput(
                 "list must contain at least two entries".to_string(),
@@ -409,7 +405,6 @@ mod core {
     async fn random_number_produces_int_in_range() {
         for _ in 0..100 {
             let result = Funboy::random_number("1", "6", true)
-                .await
                 .unwrap()
                 .parse::<i64>()
                 .unwrap();
@@ -421,7 +416,6 @@ mod core {
     async fn random_number_produces_float() {
         for _ in 0..100 {
             let result = Funboy::random_number("1.0", "6.0", true)
-                .await
                 .unwrap()
                 .parse::<f64>()
                 .unwrap();
@@ -431,7 +425,7 @@ mod core {
 
     #[tokio::test]
     async fn random_number_fails_when_min_greater_than_max() {
-        match Funboy::random_number("6", "1", true).await {
+        match Funboy::random_number("6", "1", true) {
             Ok(_) => {
                 panic!("Value should not be Ok");
             }
@@ -446,7 +440,7 @@ mod core {
 
     #[tokio::test]
     async fn random_number_fails_when_min_equal_to_max() {
-        match Funboy::random_number("6", "6", true).await {
+        match Funboy::random_number("6", "6", true) {
             Ok(_) => {
                 panic!("Value should not be Ok");
             }
@@ -461,9 +455,7 @@ mod core {
 
     #[tokio::test]
     async fn random_entry_returns_correct_output() {
-        let result = Funboy::random_entry(&["one", "two", "three", "four"])
-            .await
-            .unwrap();
+        let result = Funboy::random_entry(&["one", "two", "three", "four"]).unwrap();
 
         if !(&["one", "two", "three", "four"].contains(&result)) {
             panic!("array should contain result");
@@ -472,7 +464,7 @@ mod core {
 
     #[tokio::test]
     async fn random_entry_fails_with_less_than_two_entries() {
-        match Funboy::random_entry(&["one"]).await {
+        match Funboy::random_entry(&["one"]) {
             Ok(_) => {
                 panic!("Value should not be Ok");
             }

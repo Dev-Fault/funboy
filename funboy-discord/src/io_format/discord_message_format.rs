@@ -2,6 +2,16 @@ use super::quote_filter::QuoteFilter;
 
 pub const DISCORD_CHARACTER_LIMIT: usize = 2000;
 
+pub trait StringVecToRef {
+    fn to_ref(&self) -> Vec<&str>;
+}
+
+impl StringVecToRef for Vec<String> {
+    fn to_ref(&self) -> Vec<&str> {
+        self.iter().map(|i| i.as_str()).collect()
+    }
+}
+
 /// Split input by whitespace unless surrounded by quotes
 pub fn split_by_whitespace_unless_quoted(input: &str) -> Vec<&str> {
     let quote_filter = &QuoteFilter::from(input);

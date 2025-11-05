@@ -11,7 +11,7 @@ use crate::{
     io_format::{
         context_extension::ContextExtension,
         discord_message_format::{
-            SeperatedListOptions, ellipsize_if_long, format_as_item_seperated_list,
+            SeperatedListOptions, StringVecToRef, ellipsize_if_long, format_as_item_seperated_list,
             format_as_numeric_list, split_by_whitespace_unless_quoted,
         },
     },
@@ -222,11 +222,7 @@ pub async fn add_subs(
                 let appended_text = format!("\nalready in `{}`", template);
 
                 ctx.say_list(
-                    &sub_record
-                        .ignored
-                        .iter()
-                        .map(|s| s.as_str())
-                        .collect::<Vec<&str>>()[..],
+                    &sub_record.ignored.to_ref(),
                     true,
                     Some(Box::new(move |items| {
                         format_as_item_seperated_list(
@@ -343,11 +339,7 @@ pub async fn delete_subs(
                 let appended_text = format!("\nnot present in `{}`", template);
 
                 ctx.say_list(
-                    &sub_record
-                        .ignored
-                        .iter()
-                        .map(|s| s.as_str())
-                        .collect::<Vec<&str>>(),
+                    &sub_record.ignored.to_ref(),
                     true,
                     Some(Box::new(move |items| {
                         format_as_item_seperated_list(
@@ -415,7 +407,7 @@ pub async fn list_subs(
                 subs.iter().map(|sub| sub.name.clone()).collect()
             };
 
-            let subs = &subs.iter().map(|s| s.as_str()).collect::<Vec<&str>>()[..];
+            let subs = subs.to_ref();
 
             let list_style = if list_style.is_none() {
                 ListStyle::Default
@@ -499,7 +491,7 @@ pub async fn list_templates(
                     .collect()
             };
 
-            let templates = &templates.iter().map(|s| s.as_str()).collect::<Vec<&str>>()[..];
+            let templates = templates.to_ref();
 
             let list_style = if list_style.is_none() {
                 ListStyle::Default

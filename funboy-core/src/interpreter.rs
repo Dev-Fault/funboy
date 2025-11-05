@@ -4,7 +4,7 @@ use parser::{Command, CommandType, ValueType, parse};
 use rand::{self, Rng};
 use std::collections::HashMap;
 
-mod documentation;
+pub mod documentation;
 #[allow(dead_code)]
 mod lexer;
 #[allow(dead_code)]
