@@ -1,48 +1,29 @@
+use std::{collections::HashMap, sync::Arc};
+
 use dotenvy::dotenv;
 use funboy_core::{Funboy, template_database::TemplateDatabase};
 use poise::serenity_prelude as serenity;
 use sqlx::PgPool;
 
+mod commands;
+mod components;
+mod io_format;
+
 struct Data {
-    pub funboy: Funboy,
+    funboy: Funboy,
 } // User data, which is stored and accessible in all command invocations
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type Context<'a> = poise::Context<'a, Data, Error>;
 
-#[poise::command(slash_command, prefix_command)]
-async fn generate(ctx: Context<'_>, input: String) -> Result<(), Error> {
-    let output = ctx.data().funboy.generate(&input).await;
-
-    match output {
-        Ok(output) => ctx.say(output).await?,
-        Err(e) => ctx.say(e).await?,
-    };
-    Ok(())
+impl Data {
+    pub fn get_funboy(&self) -> &Funboy {
+        &self.funboy
+    }
 }
 
-#[poise::command(slash_command, prefix_command)]
-async fn add_sub(ctx: Context<'_>, template: String, sub: String) -> Result<(), Error> {
-    let result = ctx.data().funboy.add_substitutes(&template, &[&sub]).await;
-
-    match result {
-        Ok(subs) => ctx.say(format!("Added sub {}", subs[0].name)).await?,
-        Err(e) => ctx.say(e).await?,
-    };
-    Ok(())
-}
-
-#[poise::command(slash_command, prefix_command)]
-async fn delete_sub(ctx: Context<'_>, template: String, sub: String) -> Result<(), Error> {
-    let result = ctx
-        .data()
-        .funboy
-        .delete_substitutes(&template, &[&sub])
-        .await;
-
-    match result {
-        Ok(_) => ctx.say(format!("Deleted sub {}", sub)).await?,
-        Err(e) => ctx.say(e).await?,
-    };
+#[poise::command(prefix_command)]
+pub async fn register(ctx: Context<'_>) -> Result<(), Error> {
+    poise::builtins::register_application_commands_buttons(ctx).await?;
     Ok(())
 }
 
@@ -55,24 +36,37 @@ async fn main() {
 
     let db_url = std::env::var("DATABASE_URL").expect("missing DATABASE_URL");
 
-    let pool = PgPool::connect(&db_url)
-        .await
-        .expect("failed to connect to database");
+    let pool = Arc::new(
+        PgPool::connect(&db_url)
+            .await
+            .expect("failed to connect to database"),
+    );
 
-    let template_db = TemplateDatabase::new(pool)
+    TemplateDatabase::migrate(&pool)
         .await
-        .expect("failed to create a connection to the template database");
+        .expect("sqlx migration failed");
 
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
-            commands: vec![generate(), add_sub(), delete_sub()],
+            commands: vec![
+                register(),
+                commands::templates::generate(),
+                commands::templates::rename_template(),
+                commands::templates::add_subs(),
+                commands::templates::copy_subs(),
+                commands::templates::replace_sub(),
+                commands::templates::delete_subs(),
+                commands::templates::delete_template(),
+                commands::templates::list_subs(),
+                commands::templates::list_templates(),
+            ],
             ..Default::default()
         })
         .setup(|ctx, _ready, framework| {
             Box::pin(async move {
-                poise::builtins::register_globally(ctx, &framework.options().commands).await?;
+                //poise::builtins::register_globally(ctx, &framework.options().commands).await?;
                 Ok(Data {
-                    funboy: Funboy::new(template_db),
+                    funboy: Funboy::new(TemplateDatabase::new(pool.clone())),
                 })
             })
         })

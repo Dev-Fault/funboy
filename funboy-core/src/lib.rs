@@ -11,7 +11,9 @@ use regex::Regex;
 use crate::{
     interpreter::Interpreter,
     ollama::{OllamaGenerator, OllamaSettings},
-    template_database::{KeySize, Limit, OrderBy, Substitute, Template, TemplateDatabase},
+    template_database::{
+        KeySize, Limit, OrderBy, Substitute, SubstituteRecord, Template, TemplateDatabase,
+    },
     template_substitutor::{TemplateDelimiter, TemplateSubstitutor, VALID_TEMPLATE_CHARS},
 };
 
@@ -28,14 +30,8 @@ pub enum FunboyError {
     UserInput(String),
 }
 
-impl Into<FunboyError> for sqlx::Error {
-    fn into(self) -> FunboyError {
-        FunboyError::Database(self.to_string())
-    }
-}
-
-impl Into<String> for FunboyError {
-    fn into(self) -> String {
+impl ToString for FunboyError {
+    fn to_string(&self) -> String {
         match self {
             FunboyError::Interpreter(e) => {
                 format!("FSL interpreter error:\n{}", e)
@@ -53,18 +49,22 @@ impl Into<String> for FunboyError {
     }
 }
 
+impl Into<FunboyError> for sqlx::Error {
+    fn into(self) -> FunboyError {
+        FunboyError::Database(self.to_string())
+    }
+}
+
 pub struct Funboy {
     template_db: TemplateDatabase,
     ollama_generator: OllamaGenerator,
     valid_template_regex: Regex,
-    pub ollama_settings: OllamaSettings,
 }
 
 impl Funboy {
     pub fn new(template_db: TemplateDatabase) -> Self {
         Self {
             template_db,
-            ollama_settings: OllamaSettings::default(),
             ollama_generator: OllamaGenerator::default(),
             valid_template_regex: Regex::new(&format!("^[{}]+$", VALID_TEMPLATE_CHARS)).unwrap(),
         }
@@ -122,7 +122,7 @@ impl Funboy {
     }
 
     // Previously "random_word"
-    pub async fn random_entry<'a>(list: &[&'a str]) -> Result<&'a str, FunboyError> {
+    pub async fn random_entry<'b>(list: &[&'b str]) -> Result<&'b str, FunboyError> {
         if list.len() < 2 {
             Err(FunboyError::UserInput(
                 "list must contain at least two entries".to_string(),
@@ -142,11 +142,11 @@ impl Funboy {
         Ok(())
     }
 
-    pub async fn add_substitutes(
+    pub async fn add_substitutes<'a>(
         &self,
         template: &str,
-        substitutes: &[&str],
-    ) -> Result<Vec<Substitute>, FunboyError> {
+        substitutes: &[&'a str],
+    ) -> Result<SubstituteRecord<'a>, FunboyError> {
         self.validate_template(template)?;
 
         match self
@@ -163,7 +163,7 @@ impl Funboy {
         &self,
         template: &str,
         substitutes: &[&'a str],
-    ) -> Result<(), FunboyError> {
+    ) -> Result<SubstituteRecord<'a>, FunboyError> {
         self.validate_template(template)?;
 
         match self
@@ -171,14 +171,17 @@ impl Funboy {
             .delete_substitutes_by_name(template, substitutes)
             .await
         {
-            Ok(_) => Ok(()),
+            Ok(sub_record) => Ok(sub_record),
             Err(e) => Err(e.into()),
         }
     }
 
-    pub async fn delete_substitutes_by_id<'a>(&self, ids: &[KeySize]) -> Result<(), FunboyError> {
+    pub async fn delete_substitutes_by_id(
+        &self,
+        ids: &[KeySize],
+    ) -> Result<Vec<Substitute>, FunboyError> {
         match self.template_db.delete_substitutes_by_id(ids).await {
-            Ok(_) => Ok(()),
+            Ok(subs) => Ok(subs),
             Err(e) => Err(e.into()),
         }
     }
@@ -206,7 +209,7 @@ impl Funboy {
         template: &str,
         old: &str,
         new: &str,
-    ) -> Result<Substitute, FunboyError> {
+    ) -> Result<Option<Substitute>, FunboyError> {
         self.validate_template(template)?;
 
         match self
@@ -223,38 +226,47 @@ impl Funboy {
         &self,
         id: KeySize,
         new: &str,
-    ) -> Result<Substitute, FunboyError> {
+    ) -> Result<Option<Substitute>, FunboyError> {
         match self.template_db.update_substitute_by_id(id, new).await {
             Ok(sub) => Ok(sub),
             Err(e) => Err(e.into()),
         }
     }
 
-    pub async fn delete_template(&self, template: &str) -> Result<(), FunboyError> {
+    pub async fn delete_template(&self, template: &str) -> Result<Option<Template>, FunboyError> {
         self.validate_template(template)?;
 
         match self.template_db.delete_template_by_name(template).await {
-            Ok(_) => Ok(()),
+            Ok(template) => Ok(template),
             Err(e) => Err(e.into()),
         }
     }
 
-    pub async fn rename_template(&self, from: &str, to: &str) -> Result<(), FunboyError> {
+    pub async fn rename_template(
+        &self,
+        from: &str,
+        to: &str,
+    ) -> Result<Option<Template>, FunboyError> {
         self.validate_template(from)?;
         self.validate_template(to)?;
 
         match self.template_db.update_template_by_name(from, to).await {
-            Ok(_) => Ok(()),
+            Ok(template) => Ok(template),
             Err(e) => Err(e.into()),
         }
     }
 
     pub async fn get_templates(
         &self,
+        search_term: Option<&str>,
         order: OrderBy,
         limit: Limit,
     ) -> Result<Vec<Template>, FunboyError> {
-        match self.template_db.read_templates(order, limit).await {
+        match self
+            .template_db
+            .read_templates(search_term, order, limit)
+            .await
+        {
             Ok(templates) => Ok(templates),
             Err(e) => Err(e.into()),
         }
@@ -263,6 +275,7 @@ impl Funboy {
     pub async fn get_substitutes(
         &self,
         template: &str,
+        search_term: Option<&str>,
         order: OrderBy,
         limit: Limit,
     ) -> Result<Vec<Substitute>, FunboyError> {
@@ -270,7 +283,7 @@ impl Funboy {
 
         match self
             .template_db
-            .read_substitutes_from_template(template, order, limit)
+            .read_substitutes_from_template(template, search_term, order, limit)
             .await
         {
             Ok(substitutes) => Ok(substitutes),
@@ -282,7 +295,7 @@ impl Funboy {
         self.validate_template(template)?;
 
         match self
-            .get_substitutes(template, OrderBy::Random, Limit::Count(1))
+            .get_substitutes(template, None, OrderBy::Random, Limit::Count(1))
             .await
         {
             Ok(subs) => match subs.get(0) {
@@ -370,12 +383,13 @@ impl Funboy {
     pub async fn generate_ollama(
         &self,
         model: Option<String>,
+        ollama_settings: &OllamaSettings,
         prompt: &str,
     ) -> Result<GenerationResponse, FunboyError> {
         let prompt = self.generate(prompt).await?;
         match self
             .ollama_generator
-            .generate(&prompt, self.ollama_settings.clone(), model)
+            .generate(&prompt, ollama_settings, model)
             .await
         {
             Ok(output) => Ok(output),
@@ -387,7 +401,9 @@ impl Funboy {
 #[cfg(test)]
 mod core {
     use super::*;
-    use std::panic;
+    use sqlx::PgPool;
+    use std::{panic, sync::Arc};
+    use template_database::template_db_test::create_debug_db;
 
     #[tokio::test]
     async fn random_number_produces_int_in_range() {
@@ -469,17 +485,23 @@ mod core {
         }
     }
 
-    async fn get_funboy() -> Funboy {
-        let db = TemplateDatabase::new_debug()
-            .await
-            .expect("Database should exit and connect");
+    async fn get_pool() -> Arc<PgPool> {
+        Arc::new(
+            PgPool::connect(template_database::DEBUG_DB_URL)
+                .await
+                .unwrap(),
+        )
+    }
 
+    async fn get_funboy(pool: Arc<PgPool>) -> Funboy {
+        let db = create_debug_db(pool).await.unwrap();
         Funboy::new(db)
     }
 
     #[tokio::test]
     async fn generate_templates() {
-        let funboy = get_funboy().await;
+        let pool = get_pool().await;
+        let funboy = get_funboy(pool).await;
 
         let output = funboy.generate("^sentence").await.unwrap();
 
@@ -506,7 +528,8 @@ mod core {
 
     #[tokio::test]
     async fn generate_code() {
-        let funboy = get_funboy().await;
+        let pool = get_pool().await;
+        let funboy = get_funboy(pool).await;
 
         let output = funboy
             .generate("{repeat(5, print(\"again\"))}")
@@ -519,7 +542,8 @@ mod core {
 
     #[tokio::test]
     async fn generate_lazy_templates() {
-        let funboy = get_funboy().await;
+        let pool = get_pool().await;
+        let funboy = get_funboy(pool).await;
 
         funboy.add_substitutes("adj", &["quick"]).await.unwrap();
         funboy.add_substitutes("noun", &["fox"]).await.unwrap();
@@ -544,7 +568,8 @@ mod core {
 
     #[tokio::test]
     async fn generate_lazy_templates_that_contain_code() {
-        let funboy = get_funboy().await;
+        let pool = get_pool().await;
+        let funboy = get_funboy(pool).await;
 
         funboy.add_substitutes("adj", &["quick"]).await.unwrap();
         funboy.add_substitutes("color", &["brown"]).await.unwrap();
@@ -569,7 +594,8 @@ mod core {
 
     #[tokio::test]
     async fn validate_template_names() {
-        let funboy = get_funboy().await;
+        let pool = get_pool().await;
+        let funboy = get_funboy(pool).await;
 
         assert!(funboy.add_substitutes("NoGood", &["blah"]).await.is_err());
 
@@ -593,13 +619,15 @@ mod core {
             funboy
                 .rename_template("real", "totally_real_too")
                 .await
-                .is_err_and(|e| matches!(e, FunboyError::Database(_)))
+                .unwrap()
+                .is_none()
         );
     }
 
     #[tokio::test]
     async fn generate_ollama_response() {
-        let funboy = get_funboy().await;
+        let pool = get_pool().await;
+        let funboy = get_funboy(pool).await;
 
         funboy
             .add_substitutes("adj", &["funny", "evil", "small", "big"])
@@ -609,6 +637,7 @@ mod core {
         let generation_response = funboy
             .generate_ollama(
                 Some("tinyllama".to_string()),
+                &OllamaSettings::default(),
                 "{print(\"You are very ^adj you know that?\")}",
             )
             .await

@@ -189,7 +189,7 @@ impl OllamaGenerator {
     pub async fn generate(
         &self,
         prompt: &str,
-        ollama_settings: OllamaSettings,
+        ollama_settings: &OllamaSettings,
         model: Option<String>,
     ) -> Result<GenerationResponse, OllamaError> {
         let override_options = self.generate_options(&ollama_settings);

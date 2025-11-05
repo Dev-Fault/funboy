@@ -1,14 +1,12 @@
+use std::{collections::HashSet, sync::Arc};
+
 use sqlx::{Error, FromRow, PgPool, Pool, Postgres, Transaction};
 use strum::IntoEnumIterator;
 
 use crate::template_substitutor::{TemplateDelimiter, TemplateSubstitutor};
+pub const DEBUG_DB_URL: &str = "postgres://funboy:funboy@localhost/funboy_db";
 
 pub type KeySize = i32;
-
-#[derive(Debug)]
-pub struct TemplateDatabase {
-    pool: Pool<Postgres>,
-}
 
 #[derive(Debug, FromRow, Clone)]
 pub struct Template {
@@ -87,42 +85,75 @@ impl OrderBy {
     }
 }
 
+pub struct SubstituteRecord<'a> {
+    pub updated: Vec<Substitute>,
+    pub ignored: Vec<&'a str>,
+}
+
+impl<'a> SubstituteRecord<'a> {
+    pub fn new() -> Self {
+        Self {
+            updated: Vec::new(),
+            ignored: Vec::new(),
+        }
+    }
+
+    pub fn updated_to_string(&self) -> String {
+        self.updated
+            .iter()
+            .map(|sub| {
+                if sub.name.contains(char::is_whitespace) {
+                    format!("{}{}{}", '\"', sub.name, '\"')
+                } else {
+                    sub.name.clone()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    pub fn ignored_to_string(&self) -> String {
+        self.ignored
+            .iter()
+            .map(|sub| {
+                if sub.contains(char::is_whitespace) {
+                    format!("{}{}{}", '\"', sub, '\"')
+                } else {
+                    sub.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+#[derive(Debug)]
+pub struct TemplateDatabase {
+    pool: Arc<Pool<Postgres>>,
+}
+
 impl TemplateDatabase {
-    pub async fn new(pool: PgPool) -> Result<Self, sqlx::Error> {
-        // TODO figure out if this should be ran outside of struct
-        sqlx::migrate!("./migrations").run(&pool).await?;
-
-        Ok(TemplateDatabase { pool })
+    /// Creates a wrapper around pool to handle Template and Substitute queries
+    pub fn new(pool: Arc<PgPool>) -> Self {
+        TemplateDatabase { pool }
     }
 
-    /// Creates a connection with the debug database used for testing
-    pub async fn new_debug() -> Result<Self, sqlx::Error> {
-        const DEBUG_DB_URL: &str = "postgres://funboy:funboy@localhost/funboy_db";
-
-        let pool = PgPool::connect(DEBUG_DB_URL).await?;
-        let debug_db = TemplateDatabase::new(pool).await?;
-
-        sqlx::query("ALTER SEQUENCE templates_id_seq RESTART WITH 1")
-            .execute(&debug_db.pool)
-            .await?;
-
-        sqlx::query("ALTER SEQUENCE substitutes_id_seq RESTART WITH 1")
-            .execute(&debug_db.pool)
-            .await?;
-
-        sqlx::query("TRUNCATE TABLE templates CASCADE")
-            .execute(&debug_db.pool)
-            .await?;
-
-        Ok(debug_db)
+    pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
+        sqlx::migrate!("./migrations").run(pool).await?;
+        Ok(())
     }
 
-    pub async fn create_template(&self, name: &str) -> Result<Template, Error> {
-        let template =
-            sqlx::query_as::<_, Template>("INSERT INTO templates (name) VALUES ($1) RETURNING *")
-                .bind(name)
-                .fetch_one(&self.pool)
-                .await?;
+    pub async fn create_template(&self, name: &str) -> Result<Option<Template>, Error> {
+        let template = sqlx::query_as::<_, Template>(
+            "
+                    INSERT INTO templates (name) VALUES ($1)
+                    ON CONFLICT (name) DO NOTHING
+                    RETURNING *
+                ",
+        )
+        .bind(name)
+        .fetch_optional(self.pool.as_ref())
+        .await?;
 
         Ok(template)
     }
@@ -169,11 +200,17 @@ impl TemplateDatabase {
         &self,
         id: KeySize,
         new_name: &str,
-    ) -> Result<Template, Error> {
+    ) -> Result<Option<Template>, Error> {
         let mut tx = self.pool.begin().await?;
 
         // Check if template actually exists
         let old_template = self.read_template_by_id(id).await?;
+        let old_template = match old_template {
+            Some(old_template) => old_template,
+            None => {
+                return Ok(None);
+            }
+        };
 
         // Rename template
         let template = sqlx::query_as::<_, Template>(
@@ -181,7 +218,7 @@ impl TemplateDatabase {
         )
         .bind(new_name)
         .bind(&old_template.name)
-        .fetch_one(&mut *tx)
+        .fetch_optional(&mut *tx)
         .await?;
 
         let tx = self
@@ -197,7 +234,7 @@ impl TemplateDatabase {
         &self,
         old_name: &str,
         new_name: &str,
-    ) -> Result<Template, Error> {
+    ) -> Result<Option<Template>, Error> {
         let mut tx = self.pool.begin().await?;
 
         // Check if template actually exists
@@ -209,7 +246,7 @@ impl TemplateDatabase {
         )
         .bind(new_name)
         .bind(old_name)
-        .fetch_one(&mut *tx)
+        .fetch_optional(&mut *tx)
         .await?;
 
         let tx = self
@@ -221,19 +258,22 @@ impl TemplateDatabase {
         Ok(template)
     }
 
-    pub async fn read_template_by_name(&self, template_name: &str) -> Result<Template, Error> {
+    pub async fn read_template_by_name(
+        &self,
+        template_name: &str,
+    ) -> Result<Option<Template>, Error> {
         let template = sqlx::query_as::<_, Template>("SELECT * FROM templates WHERE name = $1")
             .bind(template_name)
-            .fetch_one(&self.pool)
+            .fetch_optional(self.pool.as_ref())
             .await?;
 
         Ok(template)
     }
 
-    pub async fn read_template_by_id(&self, id: KeySize) -> Result<Template, Error> {
+    pub async fn read_template_by_id(&self, id: KeySize) -> Result<Option<Template>, Error> {
         let template = sqlx::query_as::<_, Template>("SELECT * FROM templates WHERE id = $1")
             .bind(id)
-            .fetch_one(&self.pool)
+            .fetch_optional(self.pool.as_ref())
             .await?;
 
         Ok(template)
@@ -241,36 +281,45 @@ impl TemplateDatabase {
 
     pub async fn read_templates(
         &self,
+        search_term: Option<&str>,
         order_by: OrderBy,
         limit: Limit,
     ) -> Result<Vec<Template>, Error> {
+        let search_term = match search_term {
+            Some(search_term) => format!("%{}%", search_term),
+            None => "%".to_string(),
+        };
+
         let templates = sqlx::query_as::<_, Template>(&format!(
-            "SELECT * FROM templates ORDER BY {} LIMIT {}",
+            "SELECT * FROM templates WHERE name LIKE $1 ORDER BY {} LIMIT {}",
             order_by.as_sql(None),
             limit.as_sql(),
         ))
-        .fetch_all(&self.pool)
+        .bind(search_term)
+        .fetch_all(self.pool.as_ref())
         .await?;
 
         Ok(templates)
     }
 
-    pub async fn delete_template_by_id(&self, id: KeySize) -> Result<(), Error> {
-        sqlx::query("DELETE FROM templates WHERE id = $1")
-            .bind(id)
-            .execute(&self.pool)
-            .await?;
+    pub async fn delete_template_by_id(&self, id: KeySize) -> Result<Option<Template>, Error> {
+        let template =
+            sqlx::query_as::<_, Template>("DELETE FROM templates WHERE id = $1 RETURNING *")
+                .bind(id)
+                .fetch_optional(self.pool.as_ref())
+                .await?;
 
-        Ok(())
+        Ok(template)
     }
 
-    pub async fn delete_template_by_name(&self, name: &str) -> Result<(), Error> {
-        sqlx::query("DELETE FROM templates WHERE name = $1")
-            .bind(name)
-            .execute(&self.pool)
-            .await?;
+    pub async fn delete_template_by_name(&self, name: &str) -> Result<Option<Template>, Error> {
+        let template =
+            sqlx::query_as::<_, Template>("DELETE FROM templates WHERE name = $1 RETURNING *")
+                .bind(name)
+                .fetch_optional(self.pool.as_ref())
+                .await?;
 
-        Ok(())
+        Ok(template)
     }
 
     async fn read_or_create_template(&self, template_name: &str) -> Result<Template, Error> {
@@ -280,7 +329,7 @@ impl TemplateDatabase {
              RETURNING *",
         )
         .bind(template_name)
-        .fetch_one(&self.pool)
+        .fetch_one(self.pool.as_ref())
         .await?;
         Ok(template)
     }
@@ -289,7 +338,7 @@ impl TemplateDatabase {
         &self,
         template_name: &str,
         substitute_name: &str,
-    ) -> Result<Substitute, Error> {
+    ) -> Result<Option<Substitute>, Error> {
         let template = self.read_or_create_template(template_name).await?;
 
         let substitute = sqlx::query_as::<_, Substitute>(
@@ -297,44 +346,51 @@ impl TemplateDatabase {
         )
         .bind(substitute_name)
         .bind(template.id)
-        .fetch_one(&self.pool)
+        .fetch_optional(self.pool.as_ref())
         .await?;
 
         Ok(substitute)
     }
 
-    pub async fn create_substitutes(
+    pub async fn create_substitutes<'a>(
         &self,
         template_name: &str,
-        substitute_names: &[&str],
-    ) -> Result<Vec<Substitute>, Error> {
-        let mut tx = self.pool.begin().await?;
-
-        let mut substitutes = Vec::with_capacity(substitute_names.len());
+        substitute_names: &[&'a str],
+    ) -> Result<SubstituteRecord<'a>, Error> {
+        let mut tx = self.pool.as_ref().begin().await?;
+        let mut sub_record = SubstituteRecord::new();
 
         let template = self.read_or_create_template(template_name).await?;
 
         for substitute_name in substitute_names {
             let substitute = sqlx::query_as::<_, Substitute>(
-                "INSERT INTO substitutes (name, template_id) VALUES ($1, $2) RETURNING *",
+                "
+                    INSERT INTO substitutes (name, template_id) VALUES ($1, $2)
+                    ON CONFLICT (name, template_id) DO NOTHING
+                    RETURNING *
+                ",
             )
             .bind(substitute_name)
             .bind(template.id)
-            .fetch_one(&mut *tx)
+            .fetch_optional(&mut *tx)
             .await?;
-            substitutes.push(substitute);
+
+            match substitute {
+                Some(sub) => sub_record.updated.push(sub),
+                None => sub_record.ignored.push(substitute_name),
+            }
         }
 
         tx.commit().await?;
-        Ok(substitutes)
+        Ok(sub_record)
     }
 
-    pub async fn copy_substitutes_from_template_to_template(
+    pub async fn copy_substitutes_from_template_to_template<'a>(
         &self,
         from_template: &str,
         to_template: &str,
     ) -> Result<Vec<Substitute>, Error> {
-        let substitutes = sqlx::query_as::<_, Substitute>(
+        let copied_subs = sqlx::query_as::<_, Substitute>(
             "
                 INSERT INTO substitutes (name, template_id)
                 SELECT s.name, t_dest.id
@@ -342,28 +398,37 @@ impl TemplateDatabase {
                 JOIN templates t_source ON s.template_id = t_source.id
                 JOIN templates t_dest ON t_dest.name = $1
                 WHERE t_source.name = $2
+                ON CONFLICT (name, template_id) DO NOTHING
+                RETURNING *
             ",
         )
         .bind(to_template)
         .bind(from_template)
-        .fetch_all(&self.pool)
+        .fetch_all(self.pool.as_ref())
         .await?;
 
-        Ok(substitutes)
+        Ok(copied_subs)
     }
 
     pub async fn read_substitutes_from_template(
         &self,
         template_name: &str,
+        search_term: Option<&str>,
         order_by: OrderBy,
         limit: Limit,
     ) -> Result<Vec<Substitute>, Error> {
+        let search_term = match search_term {
+            Some(search_term) => format!("%{}%", search_term),
+            None => "%".to_string(),
+        };
+
         let substitutes = sqlx::query_as::<_, Substitute>(&format!(
             "
                  SELECT s.*
                  FROM substitutes s
                  JOIN templates t ON s.template_id = t.id
                  WHERE t.name = $1
+                 AND s.name LIKE $2
                  ORDER BY {}
                  LIMIT {}
              ",
@@ -371,7 +436,8 @@ impl TemplateDatabase {
             limit.as_sql(),
         ))
         .bind(template_name)
-        .fetch_all(&self.pool)
+        .bind(search_term)
+        .fetch_all(self.pool.as_ref())
         .await?;
 
         Ok(substitutes)
@@ -381,7 +447,7 @@ impl TemplateDatabase {
         &self,
         template_name: &str,
         substitute_name: &str,
-    ) -> Result<Substitute, Error> {
+    ) -> Result<Option<Substitute>, Error> {
         let substitute = sqlx::query_as::<_, Substitute>(&format!(
             "
                  SELECT s.*
@@ -393,16 +459,19 @@ impl TemplateDatabase {
         ))
         .bind(template_name)
         .bind(substitute_name)
-        .fetch_one(&self.pool)
+        .fetch_optional(self.pool.as_ref())
         .await?;
 
         Ok(substitute)
     }
 
-    pub async fn read_substitute_by_id(&self, substitute_id: KeySize) -> Result<Substitute, Error> {
+    pub async fn read_substitute_by_id(
+        &self,
+        substitute_id: KeySize,
+    ) -> Result<Option<Substitute>, Error> {
         let substitute = sqlx::query_as::<_, Substitute>("SELECT * FROM substitutes WHERE id = $1")
             .bind(substitute_id)
-            .fetch_one(&self.pool)
+            .fetch_optional(self.pool.as_ref())
             .await?;
 
         Ok(substitute)
@@ -412,13 +481,13 @@ impl TemplateDatabase {
         &self,
         id: KeySize,
         new_name: &str,
-    ) -> Result<Substitute, Error> {
+    ) -> Result<Option<Substitute>, Error> {
         let substitute = sqlx::query_as::<_, Substitute>(
             "UPDATE substitutes SET name = $1 WHERE id = $2 RETURNING *",
         )
         .bind(new_name)
         .bind(id)
-        .fetch_one(&self.pool)
+        .fetch_optional(self.pool.as_ref())
         .await?;
 
         Ok(substitute)
@@ -429,7 +498,7 @@ impl TemplateDatabase {
         template_name: &str,
         old_name: &str,
         new_name: &str,
-    ) -> Result<Substitute, Error> {
+    ) -> Result<Option<Substitute>, Error> {
         let substitute = sqlx::query_as::<_, Substitute>(
             "
                 UPDATE substitutes s
@@ -444,98 +513,133 @@ impl TemplateDatabase {
         .bind(new_name)
         .bind(template_name)
         .bind(old_name)
-        .fetch_one(&self.pool)
+        .fetch_optional(self.pool.as_ref())
         .await?;
 
         Ok(substitute)
     }
 
-    pub async fn delete_substitute_by_id(&self, id: KeySize) -> Result<(), Error> {
-        sqlx::query("DELETE FROM substitutes WHERE id = $1")
-            .bind(id)
-            .execute(&self.pool)
-            .await?;
+    pub async fn delete_substitute_by_id(&self, id: KeySize) -> Result<Option<Substitute>, Error> {
+        let deleted_sub =
+            sqlx::query_as::<_, Substitute>("DELETE FROM substitutes WHERE id = $1 RETURNING *")
+                .bind(id)
+                .fetch_optional(self.pool.as_ref())
+                .await?;
 
-        Ok(())
+        Ok(deleted_sub)
     }
 
-    pub async fn delete_substitutes_by_id(&self, id: &[KeySize]) -> Result<(), Error> {
-        sqlx::query("DELETE FROM substitutes WHERE id = ANY($1)")
-            .bind(id)
-            .execute(&self.pool)
-            .await?;
+    pub async fn delete_substitutes_by_id(&self, id: &[KeySize]) -> Result<Vec<Substitute>, Error> {
+        let subs = sqlx::query_as::<_, Substitute>(
+            "DELETE FROM substitutes WHERE id = ANY($1) RETURNING *",
+        )
+        .bind(id)
+        .fetch_all(self.pool.as_ref())
+        .await?;
 
-        Ok(())
+        Ok(subs)
     }
 
     pub async fn delete_substitute_by_name(
         &self,
         template_name: &str,
         substitute_name: &str,
-    ) -> Result<(), Error> {
-        sqlx::query(
+    ) -> Result<Option<Substitute>, Error> {
+        let deleted_sub = sqlx::query_as::<_, Substitute>(
             "
                  DELETE FROM substitutes s
                  USING templates t        
                  WHERE s.template_id = t.id
                  AND t.name = $1
                  AND s.name = $2
+                 RETURNING s.*
             ",
         )
         .bind(template_name)
         .bind(substitute_name)
-        .execute(&self.pool)
+        .fetch_optional(self.pool.as_ref())
         .await?;
 
-        Ok(())
+        Ok(deleted_sub)
     }
 
-    pub async fn delete_substitutes_by_name(
+    pub async fn delete_substitutes_by_name<'a>(
         &self,
         template_name: &str,
-        substitute_names: &[&str],
-    ) -> Result<(), Error> {
-        sqlx::query(
+        substitute_names: &[&'a str],
+    ) -> Result<SubstituteRecord<'a>, Error> {
+        let mut sub_record = SubstituteRecord::new();
+        sub_record.updated = sqlx::query_as::<_, Substitute>(
             "
                  DELETE FROM substitutes s
                  USING templates t        
                  WHERE s.template_id = t.id
                  AND t.name = $1
                  AND s.name = ANY($2)
+                 RETURNING s.*
             ",
         )
         .bind(template_name)
         .bind(substitute_names)
-        .execute(&self.pool)
+        .fetch_all(self.pool.as_ref())
         .await?;
 
-        Ok(())
+        let deleted: HashSet<&str> = sub_record.updated.iter().map(|s| s.name.as_str()).collect();
+
+        sub_record.ignored = substitute_names
+            .iter()
+            .filter(|sub| !deleted.contains(*sub))
+            .copied()
+            .collect();
+
+        Ok(sub_record)
     }
 }
 
 #[cfg(test)]
-mod template_db_test {
+pub mod template_db_test {
     use crate::template_database::*;
+
+    /// Creates a connection with the debug database used for testing
+    pub async fn create_debug_db(pool: Arc<PgPool>) -> Result<TemplateDatabase, sqlx::Error> {
+        let debug_db = TemplateDatabase::new(pool);
+
+        sqlx::query("ALTER SEQUENCE templates_id_seq RESTART WITH 1")
+            .execute(debug_db.pool.as_ref())
+            .await?;
+
+        sqlx::query("ALTER SEQUENCE substitutes_id_seq RESTART WITH 1")
+            .execute(debug_db.pool.as_ref())
+            .await?;
+
+        sqlx::query("TRUNCATE TABLE templates CASCADE")
+            .execute(debug_db.pool.as_ref())
+            .await?;
+
+        Ok(debug_db)
+    }
 
     #[tokio::test]
     async fn connect_to_database() {
-        let db = TemplateDatabase::new_debug().await.unwrap();
+        let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+        let db = create_debug_db(pool).await.unwrap();
         dbg!(db);
     }
 
     #[tokio::test]
     async fn crud_template_by_id() {
-        let db = TemplateDatabase::new_debug().await.unwrap();
-        let noun = db.create_template("noun").await.unwrap();
-        let verb = db.create_template("verb").await.unwrap();
-        let adj = db.create_template("adj").await.unwrap();
+        let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+        let db = create_debug_db(pool).await.unwrap();
+        let noun = db.create_template("noun").await.unwrap().unwrap();
+        let verb = db.create_template("verb").await.unwrap().unwrap();
+        let adj = db.create_template("adj").await.unwrap().unwrap();
         dbg!(
-            db.read_templates(OrderBy::Default, Limit::None)
+            db.read_templates(None, OrderBy::Default, Limit::None)
                 .await
                 .unwrap()
         );
         assert!(
-            db.read_templates(OrderBy::Default, Limit::None)
+            db.read_templates(None, OrderBy::Default, Limit::None)
                 .await
                 .unwrap()
                 .len()
@@ -544,18 +648,19 @@ mod template_db_test {
         let sustantivo = db
             .update_template_by_id(noun.id, "sustantivo")
             .await
+            .unwrap()
             .unwrap();
         assert!(sustantivo.name == "sustantivo");
         db.delete_template_by_id(sustantivo.id).await.unwrap();
         db.delete_template_by_id(verb.id).await.unwrap();
         db.delete_template_by_id(adj.id).await.unwrap();
         dbg!(
-            db.read_templates(OrderBy::Default, Limit::None)
+            db.read_templates(None, OrderBy::Default, Limit::None)
                 .await
                 .unwrap()
         );
         assert!(
-            db.read_templates(OrderBy::Default, Limit::None)
+            db.read_templates(None, OrderBy::Default, Limit::None)
                 .await
                 .unwrap()
                 .len()
@@ -565,17 +670,18 @@ mod template_db_test {
 
     #[tokio::test]
     async fn crud_template_by_name() {
-        let db = TemplateDatabase::new_debug().await.unwrap();
-        let noun = db.create_template("noun").await.unwrap();
-        let verb = db.create_template("verb").await.unwrap();
-        let adj = db.create_template("adj").await.unwrap();
+        let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+        let db = create_debug_db(pool).await.unwrap();
+        let noun = db.create_template("noun").await.unwrap().unwrap();
+        let verb = db.create_template("verb").await.unwrap().unwrap();
+        let adj = db.create_template("adj").await.unwrap().unwrap();
         dbg!(
-            db.read_templates(OrderBy::Default, Limit::None)
+            db.read_templates(None, OrderBy::Default, Limit::None)
                 .await
                 .unwrap()
         );
         assert!(
-            db.read_templates(OrderBy::Default, Limit::None)
+            db.read_templates(None, OrderBy::Default, Limit::None)
                 .await
                 .unwrap()
                 .len()
@@ -584,18 +690,19 @@ mod template_db_test {
         let sustantivo = db
             .update_template_by_name(&noun.name, "sustantivo")
             .await
+            .unwrap()
             .unwrap();
         assert!(sustantivo.name == "sustantivo");
         db.delete_template_by_name(&sustantivo.name).await.unwrap();
         db.delete_template_by_name(&verb.name).await.unwrap();
         db.delete_template_by_name(&adj.name).await.unwrap();
         dbg!(
-            db.read_templates(OrderBy::Default, Limit::None)
+            db.read_templates(None, OrderBy::Default, Limit::None)
                 .await
                 .unwrap()
         );
         assert!(
-            db.read_templates(OrderBy::Default, Limit::None)
+            db.read_templates(None, OrderBy::Default, Limit::None)
                 .await
                 .unwrap()
                 .len()
@@ -605,14 +712,15 @@ mod template_db_test {
 
     #[tokio::test]
     async fn crud_substitute_by_id() {
-        let db = TemplateDatabase::new_debug().await.unwrap();
-        let noun_template = db.create_template("animal").await.unwrap();
+        let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+        let db = create_debug_db(pool).await.unwrap();
+        let noun_template = db.create_template("animal").await.unwrap().unwrap();
         for name in ["cat", "dog", "bat"] {
-            let substitute = db.create_substitute("animal", name).await.unwrap();
+            let substitute = db.create_substitute("animal", name).await.unwrap().unwrap();
             assert!(substitute.name == name);
         }
         let substitutes = db
-            .read_substitutes_from_template("animal", OrderBy::Default, Limit::None)
+            .read_substitutes_from_template("animal", None, OrderBy::Default, Limit::None)
             .await
             .unwrap();
         dbg!(&substitutes);
@@ -622,6 +730,7 @@ mod template_db_test {
             let substitute = db
                 .update_substitute_by_id(substitute.id, &substitute.name.to_uppercase())
                 .await
+                .unwrap()
                 .unwrap();
             assert!(substitute.name == prev_name.to_uppercase());
         }
@@ -630,12 +739,12 @@ mod template_db_test {
         }
         dbg!(&substitutes);
         dbg!(
-            db.read_templates(OrderBy::Default, Limit::None)
+            db.read_templates(None, OrderBy::Default, Limit::None)
                 .await
                 .unwrap()
         );
         assert!(
-            db.read_substitutes_from_template("animal", OrderBy::Default, Limit::None)
+            db.read_substitutes_from_template("animal", None, OrderBy::Default, Limit::None)
                 .await
                 .unwrap()
                 .len()
@@ -648,7 +757,8 @@ mod template_db_test {
 
     #[tokio::test]
     async fn crud_substitute_by_name() {
-        let db = TemplateDatabase::new_debug().await.unwrap();
+        let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+        let db = create_debug_db(pool).await.unwrap();
         let _ = db.create_template("fruit").await.unwrap();
         let banana = db.create_substitute("fruit", "banana").await.unwrap();
         dbg!(&banana);
@@ -658,7 +768,7 @@ mod template_db_test {
             .unwrap();
         dbg!(&apple);
         assert!(
-            db.read_substitutes_from_template("fruit", OrderBy::Default, Limit::None)
+            db.read_substitutes_from_template("fruit", None, OrderBy::Default, Limit::None)
                 .await
                 .unwrap()
                 .len()
@@ -668,7 +778,7 @@ mod template_db_test {
             .await
             .unwrap();
         assert!(
-            db.read_substitutes_from_template("fruit", OrderBy::Default, Limit::None)
+            db.read_substitutes_from_template("fruit", None, OrderBy::Default, Limit::None)
                 .await
                 .unwrap()
                 .len()
@@ -680,8 +790,9 @@ mod template_db_test {
     #[tokio::test]
     async fn ripple_rename_template_by_name() {
         for delim in TemplateDelimiter::iter() {
-            let db = TemplateDatabase::new_debug().await.unwrap();
-            let fruit_template = db.create_template("fruit").await.unwrap();
+            let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+            let db = create_debug_db(pool).await.unwrap();
+            let fruit_template = db.create_template("fruit").await.unwrap().unwrap();
             db.create_template("references_fruit").await.unwrap();
             db.create_substitute(
                 "references_fruit",
@@ -695,12 +806,21 @@ mod template_db_test {
                 .await
                 .unwrap();
 
-            let fruit_template = db.read_template_by_id(fruit_template.id).await.unwrap();
+            let fruit_template = db
+                .read_template_by_id(fruit_template.id)
+                .await
+                .unwrap()
+                .unwrap();
             dbg!(&fruit_template);
             assert!(fruit_template.name == "new_fruit");
 
             let fruit_reference = &db
-                .read_substitutes_from_template("references_fruit", OrderBy::Default, Limit::None)
+                .read_substitutes_from_template(
+                    "references_fruit",
+                    None,
+                    OrderBy::Default,
+                    Limit::None,
+                )
                 .await
                 .unwrap()[0];
 
@@ -714,7 +834,8 @@ mod template_db_test {
 
     #[tokio::test]
     async fn sort_templates() {
-        let db = TemplateDatabase::new_debug().await.unwrap();
+        let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+        let db = create_debug_db(pool).await.unwrap();
         let templates = [
             "food", "vehicle", "clothes", "number", "adj", "noun", "verb",
         ];
@@ -724,7 +845,7 @@ mod template_db_test {
         }
 
         let templates_by_name_asc = db
-            .read_templates(OrderBy::Name(SortOrder::Ascending), Limit::None)
+            .read_templates(None, OrderBy::Name(SortOrder::Ascending), Limit::None)
             .await
             .unwrap();
 
@@ -749,19 +870,20 @@ mod template_db_test {
 
     #[tokio::test]
     async fn delete_substitutes_by_name() {
-        let db = TemplateDatabase::new_debug().await.unwrap();
+        let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+        let db = create_debug_db(pool).await.unwrap();
         let subs = ["mouse", "keyboard", "monitor", "microphone"];
         for sub in subs {
             db.create_substitute("computer_part", sub).await.unwrap();
         }
 
         dbg!(
-            db.read_substitutes_from_template("computer_part", OrderBy::Default, Limit::None)
+            db.read_substitutes_from_template("computer_part", None, OrderBy::Default, Limit::None)
                 .await
                 .unwrap()
         );
         assert!(
-            db.read_substitutes_from_template("computer_part", OrderBy::Default, Limit::None)
+            db.read_substitutes_from_template("computer_part", None, OrderBy::Default, Limit::None)
                 .await
                 .unwrap()
                 .len()
@@ -771,14 +893,14 @@ mod template_db_test {
             .await
             .unwrap();
         assert!(
-            db.read_substitutes_from_template("computer_part", OrderBy::Default, Limit::None)
+            db.read_substitutes_from_template("computer_part", None, OrderBy::Default, Limit::None)
                 .await
                 .unwrap()
                 .len()
                 == 0
         );
         dbg!(
-            db.read_substitutes_from_template("computer_part", OrderBy::Default, Limit::None)
+            db.read_substitutes_from_template("computer_part", None, OrderBy::Default, Limit::None)
                 .await
                 .unwrap()
         );
@@ -786,14 +908,15 @@ mod template_db_test {
 
     #[tokio::test]
     async fn delete_substitutes_by_id() {
-        let db = TemplateDatabase::new_debug().await.unwrap();
+        let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+        let db = create_debug_db(pool).await.unwrap();
         let subs = ["mouse", "keyboard", "monitor", "microphone"];
         for sub in subs {
             db.create_substitute("computer_part", sub).await.unwrap();
         }
 
         let subs = db
-            .read_substitutes_from_template("computer_part", OrderBy::Default, Limit::None)
+            .read_substitutes_from_template("computer_part", None, OrderBy::Default, Limit::None)
             .await
             .unwrap();
 
@@ -802,14 +925,14 @@ mod template_db_test {
         let subs: Vec<KeySize> = subs.iter().map(|sub| sub.id).collect();
         db.delete_substitutes_by_id(&subs).await.unwrap();
         assert!(
-            db.read_substitutes_from_template("computer_part", OrderBy::Default, Limit::None)
+            db.read_substitutes_from_template("computer_part", None, OrderBy::Default, Limit::None)
                 .await
                 .unwrap()
                 .len()
                 == 0
         );
         dbg!(
-            db.read_substitutes_from_template("computer_part", OrderBy::Default, Limit::None)
+            db.read_substitutes_from_template("computer_part", None, OrderBy::Default, Limit::None)
                 .await
                 .unwrap()
         );
@@ -817,11 +940,16 @@ mod template_db_test {
 
     #[tokio::test]
     async fn create_substitutes() {
-        let db = TemplateDatabase::new_debug().await.unwrap();
+        let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+        let db = create_debug_db(pool).await.unwrap();
 
         let sub_names = ["a", "b", "c", "d"];
 
-        let subs = db.create_substitutes("example", &sub_names).await.unwrap();
+        let subs = db
+            .create_substitutes("example", &sub_names)
+            .await
+            .unwrap()
+            .updated;
         assert!(subs.len() == 4);
         dbg!(&subs);
         db.delete_substitutes_by_name("example", &sub_names)
@@ -831,11 +959,13 @@ mod template_db_test {
 
     #[tokio::test]
     async fn template_collision() {
-        let db = TemplateDatabase::new_debug().await.unwrap();
+        let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+        let db = create_debug_db(pool).await.unwrap();
+
         db.create_template("template_collision").await.unwrap();
-        match db.create_template("template_collision").await {
-            Ok(_) => panic!("Template collision should return error"),
-            Err(e) => dbg!(e),
+        match db.create_template("template_collision").await.unwrap() {
+            Some(_) => panic!("Template collision should cause None to be returned"),
+            None => {}
         };
         db.delete_template_by_name("template_collision")
             .await
@@ -844,7 +974,8 @@ mod template_db_test {
 
     #[tokio::test]
     async fn substitute_collision() {
-        let db = TemplateDatabase::new_debug().await.unwrap();
+        let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+        let db = create_debug_db(pool).await.unwrap();
         db.create_template("template").await.unwrap();
         db.create_substitute("template", "substitute_collision")
             .await
@@ -860,31 +991,46 @@ mod template_db_test {
 
     #[tokio::test]
     async fn read_single_template() {
-        let db = TemplateDatabase::new_debug().await.unwrap();
-        let test = db.create_template("test").await.unwrap();
-        assert!(db.read_template_by_name("test").await.unwrap().id == test.id);
-        assert!(db.read_template_by_id(test.id).await.unwrap().id == test.id);
+        let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+        let db = create_debug_db(pool).await.unwrap();
+        let test = db.create_template("test").await.unwrap().unwrap();
+        assert!(db.read_template_by_name("test").await.unwrap().unwrap().id == test.id);
+        assert!(db.read_template_by_id(test.id).await.unwrap().unwrap().id == test.id);
     }
 
     #[tokio::test]
     async fn read_single_substitute() {
-        let db = TemplateDatabase::new_debug().await.unwrap();
+        let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+        let db = create_debug_db(pool).await.unwrap();
         db.create_template("test").await.unwrap();
-        let test_sub = db.create_substitute("test", "test_sub").await.unwrap();
+        let test_sub = db
+            .create_substitute("test", "test_sub")
+            .await
+            .unwrap()
+            .unwrap();
         assert!(
             db.read_substitute_from_template_by_name("test", "test_sub")
                 .await
                 .unwrap()
+                .unwrap()
                 .id
                 == test_sub.id
         );
-        assert!(db.read_substitute_by_id(test_sub.id).await.unwrap().id == test_sub.id);
+        assert!(
+            db.read_substitute_by_id(test_sub.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .id
+                == test_sub.id
+        );
     }
 
     #[tokio::test]
     async fn cascade_on_delete_template() {
-        let db = TemplateDatabase::new_debug().await.unwrap();
-        let test_template = db.create_template("test").await.unwrap();
+        let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+        let db = create_debug_db(pool).await.unwrap();
+        let test_template = db.create_template("test").await.unwrap().unwrap();
         let test_subs = db
             .create_substitutes("test", &["test1", "test2", "test3"])
             .await
@@ -892,24 +1038,25 @@ mod template_db_test {
         db.delete_template_by_id(test_template.id).await.unwrap();
 
         assert!(
-            db.read_templates(OrderBy::Default, Limit::None)
+            db.read_templates(None, OrderBy::Default, Limit::None)
                 .await
                 .unwrap()
                 .len()
                 == 0
         );
 
-        for sub in test_subs {
-            assert!(db.read_substitute_by_id(sub.id).await.is_err());
+        for sub in test_subs.updated {
+            assert!(db.read_substitute_by_id(sub.id).await.unwrap().is_none());
         }
     }
 
     #[tokio::test]
     async fn copy_subs_from_one_template_to_another() {
-        let db = TemplateDatabase::new_debug().await.unwrap();
-        let from_template = db.create_template("from_template").await.unwrap();
-        let to_template = db.create_template("to_template").await.unwrap();
-        let subs = db
+        let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+        let db = create_debug_db(pool).await.unwrap();
+        let _ = db.create_template("from_template").await.unwrap();
+        let _ = db.create_template("to_template").await.unwrap();
+        let _ = db
             .create_substitutes("from_template", &["one", "two", "three", "four"])
             .await
             .unwrap();
@@ -920,6 +1067,7 @@ mod template_db_test {
         let subs = db
             .read_substitutes_from_template(
                 "from_template",
+                None,
                 OrderBy::Name(SortOrder::Ascending),
                 Limit::None,
             )
@@ -929,6 +1077,7 @@ mod template_db_test {
         let copied_subs = db
             .read_substitutes_from_template(
                 "to_template",
+                None,
                 OrderBy::Name(SortOrder::Ascending),
                 Limit::None,
             )
@@ -946,7 +1095,8 @@ mod template_db_test {
 
     #[tokio::test]
     async fn valid_template_names() {
-        let db = TemplateDatabase::new_debug().await.unwrap();
+        let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+        let db = create_debug_db(pool).await.unwrap();
         assert!(db.create_template("good_name").await.is_ok());
         assert!(db.create_template("Bad_name").await.is_err());
         assert!(db.create_template("gr34t_n4m3").await.is_ok());
