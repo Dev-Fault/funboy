@@ -146,7 +146,7 @@ impl Funboy {
         &self,
         template: &str,
         substitutes: &[&'a str],
-    ) -> Result<SubstituteRecord<'a>, FunboyError> {
+    ) -> Result<SubstituteRecord, FunboyError> {
         self.validate_template(template)?;
 
         match self
@@ -163,7 +163,7 @@ impl Funboy {
         &self,
         template: &str,
         substitutes: &[&'a str],
-    ) -> Result<SubstituteRecord<'a>, FunboyError> {
+    ) -> Result<SubstituteRecord, FunboyError> {
         self.validate_template(template)?;
 
         match self
@@ -179,7 +179,7 @@ impl Funboy {
     pub async fn delete_substitutes_by_id(
         &self,
         ids: &[KeySize],
-    ) -> Result<Vec<Substitute>, FunboyError> {
+    ) -> Result<SubstituteRecord, FunboyError> {
         match self.template_db.delete_substitutes_by_id(ids).await {
             Ok(subs) => Ok(subs),
             Err(e) => Err(e.into()),

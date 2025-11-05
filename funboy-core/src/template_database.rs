@@ -85,12 +85,12 @@ impl OrderBy {
     }
 }
 
-pub struct SubstituteRecord<'a> {
+pub struct SubstituteRecord {
     pub updated: Vec<Substitute>,
-    pub ignored: Vec<&'a str>,
+    pub ignored: Vec<String>,
 }
 
-impl<'a> SubstituteRecord<'a> {
+impl SubstituteRecord {
     pub fn new() -> Self {
         Self {
             updated: Vec::new(),
@@ -116,10 +116,11 @@ impl<'a> SubstituteRecord<'a> {
         self.ignored
             .iter()
             .map(|sub| {
+                let sub = sub.to_string();
                 if sub.contains(char::is_whitespace) {
                     format!("{}{}{}", '\"', sub, '\"')
                 } else {
-                    sub.to_string()
+                    sub
                 }
             })
             .collect::<Vec<_>>()
@@ -356,7 +357,7 @@ impl TemplateDatabase {
         &self,
         template_name: &str,
         substitute_names: &[&'a str],
-    ) -> Result<SubstituteRecord<'a>, Error> {
+    ) -> Result<SubstituteRecord, Error> {
         let mut tx = self.pool.as_ref().begin().await?;
         let mut sub_record = SubstituteRecord::new();
 
@@ -377,7 +378,7 @@ impl TemplateDatabase {
 
             match substitute {
                 Some(sub) => sub_record.updated.push(sub),
-                None => sub_record.ignored.push(substitute_name),
+                None => sub_record.ignored.push(substitute_name.to_string()),
             }
         }
 
@@ -529,15 +530,31 @@ impl TemplateDatabase {
         Ok(deleted_sub)
     }
 
-    pub async fn delete_substitutes_by_id(&self, id: &[KeySize]) -> Result<Vec<Substitute>, Error> {
-        let subs = sqlx::query_as::<_, Substitute>(
+    pub async fn delete_substitutes_by_id(
+        &self,
+        ids: &[KeySize],
+    ) -> Result<SubstituteRecord, Error> {
+        let mut sub_record = SubstituteRecord::new();
+        sub_record.updated = sqlx::query_as::<_, Substitute>(
             "DELETE FROM substitutes WHERE id = ANY($1) RETURNING *",
         )
-        .bind(id)
+        .bind(ids)
         .fetch_all(self.pool.as_ref())
         .await?;
 
-        Ok(subs)
+        let deleted: HashSet<String> = sub_record
+            .updated
+            .iter()
+            .map(|s| s.id.to_string())
+            .collect();
+
+        sub_record.ignored = ids
+            .iter()
+            .map(|s| s.to_string())
+            .filter(|sub| !deleted.contains(sub))
+            .collect::<Vec<String>>();
+
+        Ok(sub_record)
     }
 
     pub async fn delete_substitute_by_name(
@@ -567,7 +584,7 @@ impl TemplateDatabase {
         &self,
         template_name: &str,
         substitute_names: &[&'a str],
-    ) -> Result<SubstituteRecord<'a>, Error> {
+    ) -> Result<SubstituteRecord, Error> {
         let mut sub_record = SubstituteRecord::new();
         sub_record.updated = sqlx::query_as::<_, Substitute>(
             "
@@ -584,13 +601,13 @@ impl TemplateDatabase {
         .fetch_all(self.pool.as_ref())
         .await?;
 
-        let deleted: HashSet<&str> = sub_record.updated.iter().map(|s| s.name.as_str()).collect();
+        let deleted: HashSet<&String> = sub_record.updated.iter().map(|s| &s.name).collect();
 
         sub_record.ignored = substitute_names
             .iter()
-            .filter(|sub| !deleted.contains(*sub))
-            .copied()
-            .collect();
+            .map(|s| s.to_string())
+            .filter(|sub| !deleted.contains(&sub))
+            .collect::<Vec<String>>();
 
         Ok(sub_record)
     }

@@ -113,19 +113,48 @@ pub fn ellipsize_if_long(item: &str, limit: usize) -> String {
     }
 }
 
-// TODO: generalize this so that MARKDOWN and ITEM_SEPERATOR can be passed to function
-pub const MARKDOWN: &str = "```";
-pub const ITEM_SEPERATOR: &str = ", ";
-pub fn format_as_item_seperated_list(items: &[&str], appended_text: &str) -> Vec<String> {
+#[derive(Copy, Clone)]
+pub struct SeperatedListOptions<'a> {
+    pub item_seperator: &'a str,
+    pub markdown: &'a str,
+    pub quote_on_whitespace: bool,
+    pub ellipsize_if_long: bool,
+}
+
+impl SeperatedListOptions<'_> {
+    pub fn as_id_list() -> Self {
+        Self {
+            item_seperator: "",
+            markdown: "",
+            quote_on_whitespace: false,
+            ellipsize_if_long: false,
+        }
+    }
+}
+
+impl Default for SeperatedListOptions<'_> {
+    fn default() -> Self {
+        Self {
+            item_seperator: ", ",
+            markdown: "```",
+            quote_on_whitespace: true,
+            ellipsize_if_long: true,
+        }
+    }
+}
+
+pub fn format_as_item_seperated_list(
+    items: &[&str],
+    appended_text: &str,
+    options: SeperatedListOptions,
+) -> Vec<String> {
     let mut messages: Vec<String> = Vec::new();
     messages.push(String::with_capacity(DISCORD_CHARACTER_LIMIT));
     let mut current_msg = 0;
 
-    messages[current_msg].push_str(MARKDOWN);
+    messages[current_msg].push_str(options.markdown);
     for (i, item) in items.iter().enumerate() {
-        let item = item.to_string();
-
-        let item = if item.contains(char::is_whitespace) {
+        let item = if options.quote_on_whitespace && item.contains(char::is_whitespace) {
             format!("\"{}\"", item)
         } else {
             format!("{}", item)
@@ -133,37 +162,41 @@ pub fn format_as_item_seperated_list(items: &[&str], appended_text: &str) -> Vec
 
         let item = if item.len()
             > DISCORD_CHARACTER_LIMIT
-                - (MARKDOWN.len() * 2)
+                - (options.markdown.len() * 2)
                 - appended_text.len()
-                - ITEM_SEPERATOR.len()
+                - options.item_seperator.len()
         {
-            format!("\"{}\"", ellipsize_if_long(&item, 255))
+            if options.ellipsize_if_long {
+                format!("{}", ellipsize_if_long(&item, 255))
+            } else {
+                item
+            }
         } else {
             item
         };
 
-        let addition_len = messages[current_msg].len() + item.len() + MARKDOWN.len();
+        let addition_len = messages[current_msg].len() + item.len() + options.markdown.len();
 
         let seperator = if i == items.len() - 1 {
             ""
         } else {
-            ITEM_SEPERATOR
+            options.item_seperator
         };
 
         if addition_len + seperator.len() <= DISCORD_CHARACTER_LIMIT {
             messages[current_msg].push_str(&format!("{}{}", item, seperator));
         } else {
-            messages[current_msg].push_str(MARKDOWN);
+            messages[current_msg].push_str(options.markdown);
             messages.push(String::with_capacity(DISCORD_CHARACTER_LIMIT));
             current_msg += 1;
-            messages[current_msg].push_str(&format!("{}{}{}", MARKDOWN, &item, seperator));
+            messages[current_msg].push_str(&format!("{}{}{}", options.markdown, &item, seperator));
         }
     }
 
-    if messages[current_msg].len() + MARKDOWN.len() + " ".len() + appended_text.len()
+    if messages[current_msg].len() + options.markdown.len() + " ".len() + appended_text.len()
         != DISCORD_CHARACTER_LIMIT
     {
-        messages[current_msg].push_str(MARKDOWN);
+        messages[current_msg].push_str(options.markdown);
         messages[current_msg].push_str(&format!(" {}", appended_text));
     } else {
         messages.push(appended_text.to_string());
@@ -215,6 +248,8 @@ pub fn extract_image_urls(input: &str) -> Vec<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const ITEM_SEPERATOR: &str = ", ";
 
     #[test]
     fn mixed_quote_input() {
@@ -330,6 +365,7 @@ mod tests {
         }
     }
 
+    const MARKDOWN: &str = "```";
     const NOTIFY_TEXT: &str = "added to `nothing`";
     const LIMIT: usize = 2000 - NOTIFY_TEXT.len() - (MARKDOWN.len() * 2) - ITEM_SEPERATOR.len();
 
@@ -342,7 +378,11 @@ mod tests {
 
         let test_subs: Vec<&str> = test_subs.iter().map(|s| s.as_str()).collect();
 
-        let messages = format_as_item_seperated_list(&test_subs, "added to `nothing`");
+        let messages = format_as_item_seperated_list(
+            &test_subs,
+            "added to `nothing`",
+            SeperatedListOptions::default(),
+        );
 
         for message in messages {
             dbg!(&message);
@@ -367,7 +407,8 @@ mod tests {
 
         test_subs.push(test_sub.as_str());
 
-        let messages = format_as_item_seperated_list(&test_subs, NOTIFY_TEXT);
+        let messages =
+            format_as_item_seperated_list(&test_subs, NOTIFY_TEXT, SeperatedListOptions::default());
 
         dbg!(&messages[1]);
         assert!(messages[1].ends_with(&format!("x{} {}", MARKDOWN, NOTIFY_TEXT)));
@@ -381,7 +422,8 @@ mod tests {
     async fn format_sub_log_seperator_second_block() {
         const TEST_CASE: &str = "from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx from: xxxxxxx";
         let test_case: Vec<&str> = TEST_CASE.split_whitespace().collect();
-        let messages = format_as_item_seperated_list(&test_case, NOTIFY_TEXT);
+        let messages =
+            format_as_item_seperated_list(&test_case, NOTIFY_TEXT, SeperatedListOptions::default());
         dbg!(&messages[1]);
         assert!(messages[1].starts_with("```xxxxxxx, from:"));
     }
@@ -393,7 +435,11 @@ mod tests {
             test_sub.push_str("s ");
         }
 
-        let messages = format_as_item_seperated_list(&[&test_sub], NOTIFY_TEXT);
+        let messages = format_as_item_seperated_list(
+            &[&test_sub],
+            NOTIFY_TEXT,
+            SeperatedListOptions::default(),
+        );
 
         for message in messages {
             dbg!(&message);
@@ -405,7 +451,11 @@ mod tests {
             test_sub.push_str("s");
         }
 
-        let messages = format_as_item_seperated_list(&[&test_sub], NOTIFY_TEXT);
+        let messages = format_as_item_seperated_list(
+            &[&test_sub],
+            NOTIFY_TEXT,
+            SeperatedListOptions::default(),
+        );
 
         for message in messages {
             dbg!(&message);
@@ -418,7 +468,11 @@ mod tests {
             test_sub.push_str("s");
         }
 
-        let messages = format_as_item_seperated_list(&[&test_sub], NOTIFY_TEXT);
+        let messages = format_as_item_seperated_list(
+            &[&test_sub],
+            NOTIFY_TEXT,
+            SeperatedListOptions::default(),
+        );
 
         for message in messages {
             dbg!(&message);

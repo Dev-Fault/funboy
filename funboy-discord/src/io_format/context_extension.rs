@@ -26,6 +26,7 @@ pub trait ContextExtension {
     async fn say_long(&self, message: &str, ephemeral: bool) -> Result<(), Error>;
 }
 
+const MESSAGE_DELAY_MS: u64 = 500;
 impl<'a> ContextExtension for Context<'a> {
     async fn say_list(
         &self,
@@ -68,7 +69,7 @@ impl<'a> ContextExtension for Context<'a> {
             )
             .await?;
             if i != 0 {
-                sleep(Duration::from_millis(1000)).await;
+                sleep(Duration::from_millis(MESSAGE_DELAY_MS)).await;
             }
         }
 

@@ -1,4 +1,7 @@
-use funboy_core::template_database::{Limit, OrderBy, SortOrder};
+use funboy_core::{
+    FunboyError,
+    template_database::{KeySize, Limit, OrderBy, SortOrder},
+};
 use poise::ChoiceParameter;
 use serenity::all::{ComponentInteraction, EditInteractionResponse};
 
@@ -8,8 +11,8 @@ use crate::{
     io_format::{
         context_extension::ContextExtension,
         discord_message_format::{
-            ellipsize_if_long, format_as_item_seperated_list, format_as_numeric_list,
-            split_by_whitespace_unless_quoted,
+            SeperatedListOptions, ellipsize_if_long, format_as_item_seperated_list,
+            format_as_numeric_list, split_by_whitespace_unless_quoted,
         },
     },
 };
@@ -205,7 +208,11 @@ pub async fn add_subs(
                     &subs,
                     true,
                     Some(Box::new(move |subs| {
-                        format_as_item_seperated_list(subs, &appended_text)
+                        format_as_item_seperated_list(
+                            subs,
+                            &appended_text,
+                            SeperatedListOptions::default(),
+                        )
                     })),
                 )
                 .await?;
@@ -215,10 +222,18 @@ pub async fn add_subs(
                 let appended_text = format!("\nalready in `{}`", template);
 
                 ctx.say_list(
-                    &sub_record.ignored,
+                    &sub_record
+                        .ignored
+                        .iter()
+                        .map(|s| s.as_str())
+                        .collect::<Vec<&str>>()[..],
                     true,
                     Some(Box::new(move |items| {
-                        format_as_item_seperated_list(items, &appended_text)
+                        format_as_item_seperated_list(
+                            items,
+                            &appended_text,
+                            SeperatedListOptions::default(),
+                        )
                     })),
                 )
                 .await?;
@@ -264,18 +279,44 @@ pub async fn delete_subs(
     template: String,
     subs: String,
     delete_as_single_sub: Option<bool>,
+    delete_by_id: Option<bool>,
 ) -> Result<(), Error> {
+    let delete_by_id = match delete_by_id {
+        Some(delete_by_id) => delete_by_id,
+        None => false,
+    };
+
     let result = if delete_as_single_sub.is_some_and(|is_true| is_true) {
-        ctx.data()
-            .get_funboy()
-            .delete_substitutes(&template, &[&subs])
-            .await
+        if delete_by_id {
+            match subs.parse::<KeySize>() {
+                Ok(id) => ctx.data().funboy.delete_substitutes_by_id(&[id]).await,
+                Err(_) => Err(FunboyError::UserInput(
+                    "ID must be a valid number.".to_string(),
+                )),
+            }
+        } else {
+            ctx.data()
+                .get_funboy()
+                .delete_substitutes(&template, &[&subs])
+                .await
+        }
     } else {
         let subs: Vec<&str> = split_by_whitespace_unless_quoted(&subs);
-        ctx.data()
-            .get_funboy()
-            .delete_substitutes(&template, &subs)
-            .await
+
+        if delete_by_id {
+            let ids: Result<Vec<KeySize>, _> = subs.iter().map(|s| s.parse::<KeySize>()).collect();
+            match ids {
+                Ok(ids) => ctx.data().funboy.delete_substitutes_by_id(&ids).await,
+                Err(_) => Err(FunboyError::UserInput(
+                    "Id must be a valid number.".to_string(),
+                )),
+            }
+        } else {
+            ctx.data()
+                .get_funboy()
+                .delete_substitutes(&template, &subs)
+                .await
+        }
     };
 
     match result {
@@ -288,7 +329,11 @@ pub async fn delete_subs(
                     &subs,
                     true,
                     Some(Box::new(move |subs| {
-                        format_as_item_seperated_list(subs, &appended_text)
+                        format_as_item_seperated_list(
+                            subs,
+                            &appended_text,
+                            SeperatedListOptions::default(),
+                        )
                     })),
                 )
                 .await?;
@@ -298,10 +343,18 @@ pub async fn delete_subs(
                 let appended_text = format!("\nnot present in `{}`", template);
 
                 ctx.say_list(
-                    &sub_record.ignored,
+                    &sub_record
+                        .ignored
+                        .iter()
+                        .map(|s| s.as_str())
+                        .collect::<Vec<&str>>(),
                     true,
                     Some(Box::new(move |items| {
-                        format_as_item_seperated_list(items, &appended_text)
+                        format_as_item_seperated_list(
+                            items,
+                            &appended_text,
+                            SeperatedListOptions::default(),
+                        )
                     })),
                 )
                 .await?;
@@ -318,6 +371,7 @@ pub async fn delete_subs(
 pub enum ListStyle {
     Default,
     Numeric,
+    ID,
 }
 
 #[poise::command(slash_command, prefix_command)]
@@ -337,34 +391,70 @@ pub async fn list_subs(
             Limit::Count(1000),
         )
         .await;
+
     match result {
         Ok(subs) => {
             if subs.len() == 0 {
                 ctx.say_ephemeral(&format!("No substitutes found in `{}`", template))
                     .await?;
+                return Ok(());
             }
+
+            let subs: Vec<String> = if matches!(list_style, Some(ListStyle::ID)) {
+                subs.iter()
+                    .map(|sub| {
+                        format!(
+                            "\nID: {}\nValue: {}{}\n",
+                            sub.id,
+                            if sub.name.len() > 100 { "\n" } else { "" },
+                            sub.name,
+                        )
+                    })
+                    .collect()
+            } else {
+                subs.iter().map(|sub| sub.name.clone()).collect()
+            };
+
+            let subs = &subs.iter().map(|s| s.as_str()).collect::<Vec<&str>>()[..];
+
             let list_style = if list_style.is_none() {
                 ListStyle::Default
             } else {
                 list_style.unwrap()
             };
 
-            let subs: Vec<&str> = subs.iter().map(|sub| sub.name.as_str()).collect();
-
             match list_style {
                 ListStyle::Default => {
-                    if subs.len() > 0 {
-                        ctx.say_list(
-                            &subs,
-                            true,
-                            Some(Box::new(|items| format_as_item_seperated_list(items, ""))),
-                        )
-                        .await?;
-                    }
+                    ctx.say_list(
+                        &subs,
+                        true,
+                        Some(Box::new(|items| {
+                            format_as_item_seperated_list(
+                                items,
+                                "",
+                                SeperatedListOptions::default(),
+                            )
+                        })),
+                    )
+                    .await?;
                 }
                 ListStyle::Numeric => {
                     ctx.say_list(&subs, true, Some(Box::new(format_as_numeric_list)))
                         .await?;
+                }
+                ListStyle::ID => {
+                    ctx.say_list(
+                        &subs,
+                        true,
+                        Some(Box::new(|items| {
+                            format_as_item_seperated_list(
+                                items,
+                                "",
+                                SeperatedListOptions::as_id_list(),
+                            )
+                        })),
+                    )
+                    .await?;
                 }
             }
         }
@@ -394,7 +484,22 @@ pub async fn list_templates(
         Ok(templates) => {
             if templates.len() == 0 {
                 ctx.say_ephemeral(&format!("No templates found.")).await?;
+                return Ok(());
             }
+
+            let templates: Vec<String> = if matches!(list_style, Some(ListStyle::ID)) {
+                templates
+                    .iter()
+                    .map(|template| format!("\nID: {}\nValue: {}\n", template.id, template.name,))
+                    .collect()
+            } else {
+                templates
+                    .iter()
+                    .map(|template| template.name.clone())
+                    .collect()
+            };
+
+            let templates = &templates.iter().map(|s| s.as_str()).collect::<Vec<&str>>()[..];
 
             let list_style = if list_style.is_none() {
                 ListStyle::Default
@@ -402,18 +507,17 @@ pub async fn list_templates(
                 list_style.unwrap()
             };
 
-            let templates: Vec<&str> = templates
-                .iter()
-                .map(|template| template.name.as_str())
-                .collect();
-
             match list_style {
                 ListStyle::Default => {
                     ctx.say_list(
                         &templates,
                         true,
                         Some(Box::new(|templates| {
-                            format_as_item_seperated_list(templates, "")
+                            format_as_item_seperated_list(
+                                templates,
+                                "",
+                                SeperatedListOptions::default(),
+                            )
                         })),
                     )
                     .await?;
@@ -421,6 +525,20 @@ pub async fn list_templates(
                 ListStyle::Numeric => {
                     ctx.say_list(&templates, true, Some(Box::new(format_as_numeric_list)))
                         .await?;
+                }
+                ListStyle::ID => {
+                    ctx.say_list(
+                        &templates,
+                        true,
+                        Some(Box::new(|items| {
+                            format_as_item_seperated_list(
+                                items,
+                                "",
+                                SeperatedListOptions::as_id_list(),
+                            )
+                        })),
+                    )
+                    .await?;
                 }
             }
         }
