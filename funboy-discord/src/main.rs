@@ -95,11 +95,20 @@ async fn main() {
 
     let intents = serenity::GatewayIntents::non_privileged();
     let token = std::env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN");
-    let db_url = std::env::var("DATABASE_URL").expect("missing DATABASE_URL");
-    let debug_db_url = std::env::var("DEBUG_DATABASE_URL").expect("missing DATABASE_URL");
+    let debug_mode = std::env::var("DEBUG_MODE")
+        .unwrap_or("false".to_string())
+        .parse::<bool>()
+        .expect("DEBUG_MODE must be of type bool");
+    let db_url = if debug_mode == false {
+        println!("Launching in release mode.");
+        std::env::var("DATABASE_URL").expect("missing DATABASE_URL")
+    } else {
+        println!("Launching in debug mode.");
+        std::env::var("DEBUG_DATABASE_URL").expect("missing DATABASE_URL")
+    };
 
     let pool = Arc::new(
-        PgPool::connect(&debug_db_url)
+        PgPool::connect(&db_url)
             .await
             .expect("failed to connect to database"),
     );
