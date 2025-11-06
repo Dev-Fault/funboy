@@ -11,6 +11,7 @@ pub const VALID_TEMPLATE_CHARS: &str = "a-z0-9_";
 #[derive(Debug, Copy, Clone, EnumIter)]
 pub enum TemplateDelimiter {
     Caret,
+    SingleQuote,
     BackTick,
 }
 
@@ -18,6 +19,7 @@ impl TemplateDelimiter {
     pub fn to_char(&self) -> char {
         match self {
             TemplateDelimiter::Caret => '^',
+            TemplateDelimiter::SingleQuote => '\'',
             TemplateDelimiter::BackTick => '`',
         }
     }
@@ -25,6 +27,7 @@ impl TemplateDelimiter {
     pub fn to_regex_pattern(&self) -> String {
         match self {
             TemplateDelimiter::Caret => format!(r"\^[{}]+\^?", VALID_TEMPLATE_CHARS),
+            TemplateDelimiter::SingleQuote => format!(r"\'[{}]+\'?", VALID_TEMPLATE_CHARS),
             TemplateDelimiter::BackTick => format!(r"\`[{}]+\`?", VALID_TEMPLATE_CHARS),
         }
     }

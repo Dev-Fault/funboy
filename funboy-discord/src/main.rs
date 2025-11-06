@@ -93,13 +93,13 @@ pub async fn register(ctx: Context<'_>) -> Result<(), Error> {
 async fn main() {
     dotenv().ok();
 
-    let token = std::env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN");
     let intents = serenity::GatewayIntents::non_privileged();
-
+    let token = std::env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN");
     let db_url = std::env::var("DATABASE_URL").expect("missing DATABASE_URL");
+    let debug_db_url = std::env::var("DEBUG_DATABASE_URL").expect("missing DATABASE_URL");
 
     let pool = Arc::new(
-        PgPool::connect(&db_url)
+        PgPool::connect(&debug_db_url)
             .await
             .expect("failed to connect to database"),
     );

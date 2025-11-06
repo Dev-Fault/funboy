@@ -309,16 +309,19 @@ impl Funboy {
     async fn interpret_input(
         &self,
         input: String,
-        template_substitutor: TemplateSubstitutor,
+        template_substitutors: Vec<TemplateSubstitutor>,
     ) -> Result<String, FunboyError> {
-        let substituted_text = template_substitutor
-            .substitute_recursively(input, |template: String| async move {
-                match self.get_random_substitute(&template).await {
-                    Ok(sub) => Some(sub.name.to_string()),
-                    Err(_) => None,
-                }
-            })
-            .await;
+        let mut substituted_text = input.clone();
+        for template_substitutor in template_substitutors {
+            substituted_text = template_substitutor
+                .substitute_recursively(substituted_text, |template: String| async move {
+                    match self.get_random_substitute(&template).await {
+                        Ok(sub) => Some(sub.name.to_string()),
+                        Err(_) => None,
+                    }
+                })
+                .await;
+        }
 
         let mut fsl_interpreter = Interpreter::new();
         let interpreter_result = fsl_interpreter
@@ -346,13 +349,19 @@ impl Funboy {
                 break;
             } else {
                 output = self
-                    .interpret_input(output, TemplateSubstitutor::new(TemplateDelimiter::Caret))
+                    .interpret_input(
+                        output,
+                        vec![
+                            TemplateSubstitutor::new(TemplateDelimiter::Caret),
+                            TemplateSubstitutor::new(TemplateDelimiter::SingleQuote),
+                        ],
+                    )
                     .await?;
 
                 output = self
                     .interpret_input(
                         output,
-                        TemplateSubstitutor::new(TemplateDelimiter::BackTick),
+                        vec![TemplateSubstitutor::new(TemplateDelimiter::BackTick)],
                     )
                     .await?;
             }
