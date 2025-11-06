@@ -414,13 +414,25 @@ pub async fn on_track_button_click(
             .create_response(ctx.http(), CreateInteractionResponse::Acknowledge)
             .await?;
 
-        track_component
-            .get_interaction()
-            .edit_response(
-                ctx.http(),
-                EditInteractionResponse::default().content(track.get_description().await),
-            )
-            .await?;
+        if track_component.get_track_command() == STOP {
+            track_component
+                .get_interaction()
+                .edit_response(
+                    ctx.http(),
+                    EditInteractionResponse::default()
+                        .content(track.get_description().await)
+                        .components(vec![]),
+                )
+                .await?;
+        } else {
+            track_component
+                .get_interaction()
+                .edit_response(
+                    ctx.http(),
+                    EditInteractionResponse::default().content(track.get_description().await),
+                )
+                .await?;
+        }
     } else {
         track_component
             .get_interaction()
@@ -429,6 +441,7 @@ pub async fn on_track_button_click(
                 CreateInteractionResponse::Message(
                     CreateInteractionResponseMessage::new()
                         .content(NON_EXISTANT_TRACK_ERROR)
+                        .components(vec![])
                         .ephemeral(true),
                 ),
             )
