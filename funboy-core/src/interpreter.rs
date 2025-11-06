@@ -65,8 +65,132 @@ impl VarMap {
         }
     }
 
-    pub fn get_var(&mut self, name: &String) -> Option<&mut ValueType> {
+    pub fn get_var_mut(&mut self, name: &String) -> Option<&mut ValueType> {
         self.data.get_mut(name)
+    }
+
+    pub fn get_var(&self, name: &String) -> Option<&ValueType> {
+        self.data.get(name)
+    }
+
+    pub fn get_var_or_err(&self, name: &String) -> Result<&ValueType, String> {
+        match self.data.get(name) {
+            Some(value) => Ok(value),
+            None => Err(format!("identifier {} did not contain a value", name)),
+        }
+    }
+
+    pub fn get_var_or_err_mut(&mut self, name: &String) -> Result<&mut ValueType, String> {
+        match self.data.get_mut(name) {
+            Some(value) => Ok(value),
+            None => Err(format!("identifier {} did not contain a value", name)),
+        }
+    }
+}
+
+impl ValueType {
+    fn to_string(&self, var_map: &VarMap) -> Result<String, String> {
+        let result = match self {
+            ValueType::Text(value) => value.to_string(),
+            ValueType::Int(value) => value.to_string(),
+            ValueType::Float(value) => value.to_string(),
+            ValueType::Bool(value) => value.to_string(),
+            ValueType::List(values) => {
+                let list_string: String = values
+                    .iter()
+                    .map(|value| match value.to_string(var_map) {
+                        Ok(value) => value + ", ",
+                        Err(e) => {
+                            return e;
+                        }
+                    })
+                    .collect();
+                format!("[{}]", &list_string[0..list_string.len() - 2])
+            }
+            ValueType::Identifier(name) => {
+                let value = var_map.get_var_or_err(name)?;
+                value.to_string(var_map)?
+            }
+            ValueType::Command(value) => value.command_type.to_str().to_string(),
+            ValueType::None => "".to_string(),
+        };
+        Ok(result)
+    }
+
+    /// Returns inner value if Identifier, otherwise returns value that was passed in
+    pub fn get_inner_value<'a>(&'a self, var_map: &'a VarMap) -> Result<&'a ValueType, String> {
+        match self {
+            ValueType::Identifier(name) => Ok(var_map.get_var_or_err(name)?),
+            _ => Ok(self),
+        }
+    }
+}
+
+pub trait ContainsFloat {
+    fn contains_float(&self, var_map: &VarMap) -> bool;
+}
+
+impl ContainsFloat for Vec<ValueType> {
+    fn contains_float(&self, var_map: &VarMap) -> bool {
+        for arg in self {
+            if let ValueType::Float(_) = arg {
+                return true;
+            } else if let ValueType::Identifier(name) = arg {
+                match var_map.get_var(name) {
+                    Some(value) => {
+                        if let ValueType::Float(_) = value {
+                            return true;
+                        }
+                    }
+                    None => continue,
+                };
+            }
+        }
+        return false;
+    }
+}
+
+pub trait ExtractValue {
+    fn extract_float(&self, var_map: &VarMap) -> Option<f64>;
+    fn extract_int(&self, var_map: &VarMap) -> Option<i64>;
+}
+
+impl ExtractValue for ValueType {
+    fn extract_float(&self, var_map: &VarMap) -> Option<f64> {
+        match self {
+            ValueType::Int(value) => Some(*value as f64),
+            ValueType::Float(value) => Some(*value),
+            ValueType::Identifier(name) => match var_map.get_var(name) {
+                Some(value) => value.extract_float(var_map),
+                None => None,
+            },
+            _ => None,
+        }
+    }
+
+    fn extract_int(&self, var_map: &VarMap) -> Option<i64> {
+        match self {
+            ValueType::Int(value) => Some(*value),
+            ValueType::Identifier(name) => match var_map.get_var(name) {
+                Some(value) => value.extract_int(var_map),
+                None => None,
+            },
+            _ => None,
+        }
+    }
+}
+
+pub trait Capitalize {
+    fn capitalize(&self) -> String;
+}
+
+impl Capitalize for String {
+    fn capitalize(&self) -> String {
+        if self.len() < 1 {
+            self.to_string()
+        } else {
+            format!("{}{}", self[0..1].to_uppercase(), self[1..].to_string())
+        }
     }
 }
 
@@ -144,10 +268,9 @@ impl Interpreter {
 
         match final_value {
             ValueType::List(_) => {}
-            ValueType::Identifier(_) => {}
             ValueType::Command(_) => {}
             ValueType::None => {}
-            _ => self.output.push_str(&final_value.to_string()),
+            _ => self.output.push_str(&final_value.to_string(&self.vars)?),
         }
 
         Ok(self.output.drain(..).collect())
@@ -167,7 +290,6 @@ impl Interpreter {
     #[async_recursion]
     async fn eval_command(&mut self, command: Command) -> Result<ValueType, String> {
         let mut args: Vec<ValueType> = Vec::new();
-        let mut has_float_arg = false;
         let mut i = 0;
 
         for arg in command.args {
@@ -183,10 +305,7 @@ impl Interpreter {
                 }
                 ValueType::Text(_) => args.push(arg),
                 ValueType::Int(_) => args.push(arg),
-                ValueType::Float(_) => {
-                    has_float_arg = true;
-                    args.push(arg)
-                }
+                ValueType::Float(_) => args.push(arg),
                 ValueType::Identifier(_) => args.push(arg),
                 ValueType::None => args.push(arg),
                 ValueType::Bool(_) => args.push(arg),
@@ -195,29 +314,28 @@ impl Interpreter {
             i += 1;
         }
 
-        let command_type = command.command_type;
+        let command_type = &command.command_type;
 
         match command_type {
             CommandType::Add => {
                 if args.len() < 2 {
                     return Err(command_type.gen_err(ERROR_TWO_OR_MORE_ARGS));
-                } else if has_float_arg {
-                    if let Some(mut sum) = args[0].extract_float() {
+                } else if args.contains_float(&self.vars) {
+                    if let Some(mut sum) = args[0].extract_float(&self.vars) {
                         for arg in &args[1..args.len()] {
-                            match arg.extract_float() {
+                            match arg.extract_float(&self.vars) {
                                 Some(value) => sum += value,
                                 None => return Err(command_type.gen_err(ERROR_ARGS_MUST_BE_NUMBER)),
                             }
                         }
-
                         Ok(ValueType::Float(sum))
                     } else {
                         return Err(command_type.gen_err(ERROR_ARGS_MUST_BE_NUMBER));
                     }
                 } else {
-                    if let Some(mut sum) = args[0].extract_int() {
+                    if let Some(mut sum) = args[0].extract_int(&self.vars) {
                         for arg in &args[1..args.len()] {
-                            match arg.extract_int() {
+                            match arg.extract_int(&self.vars) {
                                 Some(value) => sum += value,
                                 None => {
                                     return Err(command_type.gen_err(ERROR_ARGS_MUST_BE_NUMBER));
@@ -234,10 +352,10 @@ impl Interpreter {
             CommandType::Subtract => {
                 if args.len() < 2 {
                     return Err(command_type.gen_err(ERROR_TWO_OR_MORE_ARGS));
-                } else if has_float_arg {
-                    if let Some(mut diff) = args[0].extract_float() {
+                } else if args.contains_float(&self.vars) {
+                    if let Some(mut diff) = args[0].extract_float(&self.vars) {
                         for arg in &args[1..args.len()] {
-                            match arg.extract_float() {
+                            match arg.extract_float(&self.vars) {
                                 Some(value) => diff -= value,
                                 None => {
                                     return Err(command_type.gen_err(ERROR_ARGS_MUST_BE_NUMBER));
@@ -250,9 +368,9 @@ impl Interpreter {
                         return Err(command_type.gen_err(ERROR_ARGS_MUST_BE_NUMBER));
                     }
                 } else {
-                    if let Some(mut diff) = args[0].extract_int() {
+                    if let Some(mut diff) = args[0].extract_int(&self.vars) {
                         for arg in &args[1..args.len()] {
-                            match arg.extract_int() {
+                            match arg.extract_int(&self.vars) {
                                 Some(value) => diff -= value,
                                 None => {
                                     return Err(command_type.gen_err(ERROR_ARGS_MUST_BE_NUMBER));
@@ -269,10 +387,10 @@ impl Interpreter {
             CommandType::Multiply => {
                 if args.len() < 2 {
                     return Err(command_type.gen_err(ERROR_TWO_OR_MORE_ARGS));
-                } else if has_float_arg {
-                    if let Some(mut sum) = args[0].extract_float() {
+                } else if args.contains_float(&self.vars) {
+                    if let Some(mut sum) = args[0].extract_float(&self.vars) {
                         for arg in &args[1..args.len()] {
-                            match arg.extract_float() {
+                            match arg.extract_float(&self.vars) {
                                 Some(value) => sum *= value,
                                 None => {
                                     return Err(command_type.gen_err(ERROR_ARGS_MUST_BE_NUMBER));
@@ -285,9 +403,9 @@ impl Interpreter {
                         return Err(command_type.gen_err(ERROR_ARGS_MUST_BE_NUMBER));
                     }
                 } else {
-                    if let Some(mut sum) = args[0].extract_int() {
+                    if let Some(mut sum) = args[0].extract_int(&self.vars) {
                         for arg in &args[1..args.len()] {
-                            match arg.extract_int() {
+                            match arg.extract_int(&self.vars) {
                                 Some(value) => sum *= value,
                                 None => {
                                     return Err(command_type.gen_err(ERROR_ARGS_MUST_BE_NUMBER));
@@ -304,10 +422,10 @@ impl Interpreter {
             CommandType::Divide => {
                 if args.len() < 2 {
                     return Err(command_type.gen_err(ERROR_TWO_OR_MORE_ARGS));
-                } else if has_float_arg {
-                    if let Some(mut sum) = args[0].extract_float() {
+                } else if args.contains_float(&self.vars) {
+                    if let Some(mut sum) = args[0].extract_float(&self.vars) {
                         for arg in &args[1..args.len()] {
-                            match arg.extract_float() {
+                            match arg.extract_float(&self.vars) {
                                 Some(value) => sum /= value,
                                 None => {
                                     return Err(command_type.gen_err(ERROR_ARGS_MUST_BE_NUMBER));
@@ -320,9 +438,9 @@ impl Interpreter {
                         return Err(command_type.gen_err(ERROR_ARGS_MUST_BE_NUMBER));
                     }
                 } else {
-                    if let Some(mut sum) = args[0].extract_int() {
+                    if let Some(mut sum) = args[0].extract_int(&self.vars) {
                         for arg in &args[1..args.len()] {
-                            match arg.extract_int() {
+                            match arg.extract_int(&self.vars) {
                                 Some(value) => {
                                     if value == 0 {
                                         return Err(command_type.gen_err(ERROR_ZERO_DIVISION));
@@ -356,27 +474,24 @@ impl Interpreter {
                     return Err(command_type.gen_err(ERROR_EXACTLY_TWO_ARGS));
                 } else {
                     let mut rng = rand::rng();
-                    match &args[0] {
-                        ValueType::Int(min) => match &args[1] {
-                            ValueType::Int(max) => {
-                                Ok(ValueType::Int(rng.random_range(*min..=*max)))
-                            }
-                            ValueType::Float(max) => {
-                                Ok(ValueType::Float(rng.random_range((*min as f64)..=*max)))
-                            }
-
-                            _ => Err(command_type.gen_err(ERROR_ARGS_MUST_BE_NUMBER)),
-                        },
-                        ValueType::Float(min) => match &args[1] {
-                            ValueType::Int(max) => {
-                                Ok(ValueType::Float(rng.random_range(*min..=(*max as f64))))
-                            }
-                            ValueType::Float(max) => {
-                                Ok(ValueType::Float(rng.random_range(*min..=*max)))
-                            }
-                            _ => Err(command_type.gen_err(ERROR_ARGS_MUST_BE_NUMBER)),
-                        },
-                        _ => Err(command_type.gen_err(ERROR_ARGS_MUST_BE_NUMBER)),
+                    if args.contains_float(&self.vars) {
+                        if let (Some(min), Some(max)) = (
+                            &args[0].extract_float(&self.vars),
+                            &args[1].extract_float(&self.vars),
+                        ) {
+                            return Ok(ValueType::Float(rng.random_range(*min..*max)));
+                        } else {
+                            return Err(command_type.gen_err(ERROR_ARGS_MUST_BE_NUMBER));
+                        }
+                    } else {
+                        if let (Some(min), Some(max)) = (
+                            &args[0].extract_int(&self.vars),
+                            &args[1].extract_int(&self.vars),
+                        ) {
+                            return Ok(ValueType::Int(rng.random_range(*min..*max)));
+                        } else {
+                            return Err(command_type.gen_err(ERROR_ARGS_MUST_BE_NUMBER));
+                        }
                     }
                 }
             }
@@ -385,16 +500,9 @@ impl Interpreter {
                     return Err(command_type.gen_err(ERROR_EXACTLY_ONE_ARG));
                 } else {
                     match &args[0] {
-                        ValueType::Text(text) => {
-                            if text.len() > 0 {
-                                return Ok(ValueType::Text(format!(
-                                    "{}{}",
-                                    text[0..1].to_uppercase(),
-                                    text[1..].to_string()
-                                )));
-                            } else {
-                                return Ok(ValueType::Text("".to_string()));
-                            }
+                        ValueType::Text(text) => Ok(ValueType::Text(text.capitalize())),
+                        ValueType::Identifier(_) => {
+                            Ok(ValueType::Text(args[0].to_string(&self.vars)?.capitalize()))
                         }
                         _ => Err(command_type.gen_err(ERROR_ARG_MUST_BE_TEXT)),
                     }
@@ -406,6 +514,9 @@ impl Interpreter {
                 } else {
                     match &args[0] {
                         ValueType::Text(text) => Ok(ValueType::Text(text.to_uppercase())),
+                        ValueType::Identifier(_) => Ok(ValueType::Text(
+                            args[0].to_string(&self.vars)?.to_uppercase(),
+                        )),
                         _ => Err(command_type.gen_err(ERROR_ARG_MUST_BE_TEXT)),
                     }
                 }
@@ -416,9 +527,36 @@ impl Interpreter {
                 } else {
                     match &args[0] {
                         ValueType::Text(text) => Ok(ValueType::Text(text.to_lowercase())),
+                        ValueType::Identifier(_) => Ok(ValueType::Text(
+                            args[0].to_string(&self.vars)?.to_lowercase(),
+                        )),
                         _ => Err(command_type.gen_err(ERROR_ARG_MUST_BE_TEXT)),
                     }
                 }
+            }
+            CommandType::RemoveWhitespace => {
+                if args.len() != 1 {
+                    return Err(command_type.gen_err(ERROR_EXACTLY_ONE_ARG));
+                } else {
+                    match &args[0] {
+                        ValueType::Text(text) => {
+                            Ok(ValueType::Text(text.split_whitespace().collect()))
+                        }
+                        ValueType::Identifier(_) => Ok(ValueType::Text(
+                            args[0].to_string(&self.vars)?.split_whitespace().collect(),
+                        )),
+                        _ => Err(command_type.gen_err(ERROR_ARG_MUST_BE_TEXT)),
+                    }
+                }
+            }
+            CommandType::Concatenate => {
+                let mut concatenation = String::new();
+
+                for arg in args {
+                    concatenation.push_str(&arg.to_string(&self.vars)?);
+                }
+
+                Ok(ValueType::Text(concatenation))
             }
             CommandType::Repeat => {
                 if args.len() < 2 {
@@ -526,20 +664,22 @@ impl Interpreter {
                     Ok(self.copy_buffer.clone())
                 } else {
                     match &args[0] {
-                        ValueType::Identifier(identifier) => match self.vars.get_var(identifier) {
-                            Some(value) => Ok(value.clone()),
-                            None => Err(command_type.gen_err(&format!(
-                                "{} **{}**",
-                                ERROR_UNKNOWN_IDENTIFIER, identifier
-                            ))),
-                        },
+                        ValueType::Identifier(identifier) => {
+                            match self.vars.get_var_mut(identifier) {
+                                Some(value) => Ok(value.clone()),
+                                None => Err(command_type.gen_err(&format!(
+                                    "{} **{}**",
+                                    ERROR_UNKNOWN_IDENTIFIER, identifier
+                                ))),
+                            }
+                        }
                         _ => Err(command_type.gen_err(ERROR_ARG_MUST_BE_IDENTIFIER)),
                     }
                 }
             }
             CommandType::Print => {
                 for arg in args {
-                    let arg_string = arg.to_string();
+                    let arg_string = arg.to_string(&self.vars)?;
                     if self.output.capacity().saturating_add(arg_string.capacity())
                         <= OUTPUT_BYTE_LIMIT
                     {
@@ -554,32 +694,12 @@ impl Interpreter {
 
                 Ok(ValueType::None)
             }
-            CommandType::RemoveWhitespace => {
-                if args.len() != 1 {
-                    return Err(command_type.gen_err(ERROR_EXACTLY_ONE_ARG));
-                } else {
-                    match &args[0] {
-                        ValueType::Text(text) => {
-                            Ok(ValueType::Text(text.split_whitespace().collect()))
-                        }
-                        _ => Err(command_type.gen_err(ERROR_ARG_MUST_BE_TEXT)),
-                    }
-                }
-            }
-            CommandType::Concatenate => {
-                let mut concatenation = String::new();
-
-                for arg in args {
-                    concatenation.push_str(&arg.to_string());
-                }
-
-                Ok(ValueType::Text(concatenation))
-            }
             CommandType::IfThen => {
                 if args.len() != 2 {
                     return Err(command_type.gen_err(ERROR_EXACTLY_TWO_ARGS));
                 } else {
-                    match &args[0] {
+                    let arg = &args[0].get_inner_value(&self.vars)?;
+                    match arg {
                         ValueType::Bool(bool) => {
                             if *bool {
                                 match &args[1] {
@@ -600,7 +720,8 @@ impl Interpreter {
                 if args.len() != 3 {
                     return Err(command_type.gen_err(ERROR_EXACTLY_THREE_ARGS));
                 } else {
-                    match &args[0] {
+                    let arg = &args[0].get_inner_value(&self.vars)?;
+                    match arg {
                         ValueType::Bool(bool) => {
                             if *bool {
                                 match &args[1] {
@@ -626,7 +747,8 @@ impl Interpreter {
                 if args.len() != 1 {
                     return Err(command_type.gen_err(ERROR_EXACTLY_ONE_ARG));
                 } else {
-                    match &args[0] {
+                    let arg = &args[0].get_inner_value(&self.vars)?;
+                    match arg {
                         ValueType::Bool(bool) => Ok(ValueType::Bool(!*bool)),
                         _ => Err(command_type.gen_err(ERROR_ARG_ONE_MUST_BE_BOOL)),
                     }
@@ -637,7 +759,8 @@ impl Interpreter {
                     return Err(command_type.gen_err(ERROR_TWO_OR_MORE_ARGS));
                 }
                 let mut value: bool = true;
-                for arg in args {
+                for arg in &args {
+                    let arg = arg.get_inner_value(&self.vars)?;
                     match arg {
                         ValueType::Bool(bool) => value = value & bool,
                         _ => return Err(command_type.gen_err(ERROR_ARGS_MUST_BE_BOOL)),
@@ -650,7 +773,8 @@ impl Interpreter {
                     return Err(command_type.gen_err(ERROR_TWO_OR_MORE_ARGS));
                 }
                 let mut value: bool = false;
-                for arg in args {
+                for arg in &args {
+                    let arg = arg.get_inner_value(&self.vars)?;
                     match arg {
                         ValueType::Bool(bool) => value = value | bool,
                         _ => return Err(command_type.gen_err(ERROR_ARGS_MUST_BE_BOOL)),
@@ -662,7 +786,9 @@ impl Interpreter {
                 if args.len() != 2 {
                     return Err(command_type.gen_err(ERROR_EXACTLY_TWO_ARGS));
                 } else {
-                    match (&args[0], &args[1]) {
+                    let arg_1 = &args[0].get_inner_value(&self.vars)?;
+                    let arg_2 = &args[1].get_inner_value(&self.vars)?;
+                    match (arg_1, arg_2) {
                         (ValueType::Text(value_a), ValueType::Text(value_b)) => {
                             Ok(ValueType::Bool(&value_a[..] == &value_b[..]))
                         }
@@ -685,8 +811,8 @@ impl Interpreter {
                         }
                         _ => Err(command_type.gen_err(&format!(
                             "Cannot compare {} with {}",
-                            args[0].to_string(),
-                            args[1].to_string()
+                            args[0].to_string(&self.vars)?,
+                            args[1].to_string(&self.vars)?
                         ))),
                     }
                 }
@@ -695,7 +821,9 @@ impl Interpreter {
                 if args.len() != 2 {
                     return Err(command_type.gen_err(ERROR_EXACTLY_TWO_ARGS));
                 } else {
-                    match (&args[0], &args[1]) {
+                    let arg_1 = &args[0].get_inner_value(&self.vars)?;
+                    let arg_2 = &args[1].get_inner_value(&self.vars)?;
+                    match (arg_1, arg_2) {
                         (ValueType::Int(value_a), ValueType::Int(value_b)) => {
                             Ok(ValueType::Bool(*value_a > *value_b))
                         }
@@ -716,7 +844,9 @@ impl Interpreter {
                 if args.len() != 2 {
                     return Err(command_type.gen_err(ERROR_EXACTLY_TWO_ARGS));
                 } else {
-                    match (&args[0], &args[1]) {
+                    let arg_1 = &args[0].get_inner_value(&self.vars)?;
+                    let arg_2 = &args[1].get_inner_value(&self.vars)?;
+                    match (arg_1, arg_2) {
                         (ValueType::Int(value_a), ValueType::Int(value_b)) => {
                             Ok(ValueType::Bool(*value_a < *value_b))
                         }
@@ -737,7 +867,9 @@ impl Interpreter {
                 if args.len() != 2 {
                     return Err(command_type.gen_err(ERROR_EXACTLY_TWO_ARGS));
                 } else {
-                    match (&args[0], &args[1]) {
+                    let arg_1 = &args[0].get_inner_value(&self.vars)?;
+                    let arg_2 = &args[1].get_inner_value(&self.vars)?;
+                    match (arg_1, arg_2) {
                         (ValueType::Text(value_a), ValueType::Text(value_b)) => {
                             Ok(ValueType::Bool(value_a.starts_with(value_b)))
                         }
@@ -749,7 +881,9 @@ impl Interpreter {
                 if args.len() != 2 {
                     return Err(command_type.gen_err(ERROR_EXACTLY_TWO_ARGS));
                 } else {
-                    match (&args[0], &args[1]) {
+                    let arg_1 = &args[0].get_inner_value(&self.vars)?;
+                    let arg_2 = &args[1].get_inner_value(&self.vars)?;
+                    match (arg_1, arg_2) {
                         (ValueType::Text(value_a), ValueType::Text(value_b)) => {
                             Ok(ValueType::Bool(value_a.ends_with(value_b)))
                         }
@@ -767,10 +901,10 @@ impl Interpreter {
             CommandType::Mod => {
                 if args.len() < 2 {
                     return Err(command_type.gen_err(ERROR_TWO_OR_MORE_ARGS));
-                } else if has_float_arg {
-                    if let Some(mut sum) = args[0].extract_float() {
+                } else if args.contains_float(&self.vars) {
+                    if let Some(mut sum) = args[0].extract_float(&self.vars) {
                         for arg in &args[1..args.len()] {
-                            match arg.extract_float() {
+                            match arg.extract_float(&self.vars) {
                                 Some(value) => sum %= value,
                                 None => {
                                     return Err(command_type.gen_err(ERROR_ARGS_MUST_BE_NUMBER));
@@ -783,9 +917,9 @@ impl Interpreter {
                         return Err(command_type.gen_err(ERROR_ARGS_MUST_BE_NUMBER));
                     }
                 } else {
-                    if let Some(mut sum) = args[0].extract_int() {
+                    if let Some(mut sum) = args[0].extract_int(&self.vars) {
                         for arg in &args[1..args.len()] {
-                            match arg.extract_int() {
+                            match arg.extract_int(&self.vars) {
                                 Some(value) => {
                                     if value == 0 {
                                         return Err(command_type.gen_err(ERROR_ZERO_DIVISION));
@@ -805,6 +939,7 @@ impl Interpreter {
                     }
                 }
             }
+            // TODO fix identifier
             CommandType::While => {
                 if args.len() < 2 {
                     return Err(command_type.gen_err(ERROR_TWO_OR_MORE_ARGS));
@@ -855,8 +990,10 @@ impl Interpreter {
                 if args.len() != 2 {
                     return Err(command_type.gen_err(ERROR_EXACTLY_TWO_ARGS));
                 } else {
-                    match &args[0] {
-                        ValueType::Int(i) => match &args[1] {
+                    let arg_1 = &args[0].get_inner_value(&self.vars)?;
+                    let arg_2 = &args[1].get_inner_value(&self.vars)?;
+                    match arg_1 {
+                        ValueType::Int(i) => match arg_2 {
                             ValueType::Text(value) => match value.chars().nth(*i as usize) {
                                 Some(c) => return Ok(ValueType::Text(c.to_string())),
                                 None => return Err(command_type.gen_err("index out of bounds")),
@@ -878,16 +1015,20 @@ impl Interpreter {
                     }
                 }
             }
+            // TODO fix identifier
             CommandType::Slice => {
                 if args.len() != 3 {
                     return Err(command_type.gen_err(ERROR_EXACTLY_THREE_ARGS));
                 } else {
-                    match (&args[0], &args[1]) {
+                    let arg_1 = &args[0].get_inner_value(&self.vars)?;
+                    let arg_2 = &args[1].get_inner_value(&self.vars)?;
+                    let arg_3 = &args[2].get_inner_value(&self.vars)?;
+                    match (arg_1, arg_2) {
                         (ValueType::Int(a), ValueType::Int(b)) => {
                             let a = *a as usize;
                             let b = *b as usize;
 
-                            match &args[2] {
+                            match arg_3 {
                                 ValueType::Text(value) => {
                                     if a >= b {
                                         return Err(command_type.gen_err(
@@ -924,11 +1065,13 @@ impl Interpreter {
                     }
                 }
             }
+            // TODO fix identifier
             CommandType::Length => {
                 if args.len() != 1 {
                     return Err(command_type.gen_err(ERROR_EXACTLY_ONE_ARG));
                 } else {
-                    match &args[0] {
+                    let arg = &args[0].get_inner_value(&self.vars)?;
+                    match arg {
                         ValueType::Text(value) => Ok(ValueType::Int(value.len() as i64)),
                         ValueType::List(values) => Ok(ValueType::Int(values.len() as i64)),
                         _ => {
@@ -943,12 +1086,15 @@ impl Interpreter {
                 if args.len() != 3 {
                     return Err(command_type.gen_err(ERROR_EXACTLY_THREE_ARGS));
                 } else {
-                    match (&args[0], &args[1]) {
+                    let arg_1 = &args[0].get_inner_value(&self.vars)?;
+                    let arg_2 = &args[1].get_inner_value(&self.vars)?;
+                    let arg_3 = &args[2].get_inner_value(&self.vars)?;
+                    match (arg_1, arg_2) {
                         (ValueType::Int(a), ValueType::Int(b)) => {
                             let a = *a as usize;
                             let b = *b as usize;
 
-                            match &args[2] {
+                            match arg_3 {
                                 ValueType::Text(value) => {
                                     if a > value.len() || b > value.len() {
                                         return Err(command_type.gen_err("index out of bounds"));
@@ -985,12 +1131,15 @@ impl Interpreter {
                 if args.len() != 3 {
                     return Err(command_type.gen_err(ERROR_EXACTLY_THREE_ARGS));
                 } else {
-                    match &args[1] {
+                    let arg_1 = args[0].get_inner_value(&self.vars)?;
+                    let arg_2 = &args[1].get_inner_value(&self.vars)?;
+                    let arg_3 = &args[2].get_inner_value(&self.vars)?;
+                    match arg_2 {
                         ValueType::Int(i) => {
                             let i = *i as usize;
 
-                            match &args[2] {
-                                ValueType::Text(value) => match &args[0] {
+                            match arg_3 {
+                                ValueType::Text(value) => match arg_1 {
                                     ValueType::Text(text) => {
                                         if i > value.len() {
                                             return Err(command_type.gen_err("index out of bounds"));
@@ -1002,7 +1151,7 @@ impl Interpreter {
                                     },
                                     _ => Err(command_type.gen_err("first argument must be of type Text when inserting into type Text")),
                                 },
-                                ValueType::List(values) => match &args[0] {
+                                ValueType::List(values) => match arg_1 {
                                     ValueType::Identifier(_) => Err(command_type.gen_err("cannot insert values of type Identifier into type List")),
                                     ValueType::None => Err(command_type.gen_err("cannot insert values of type None into type List")),
                                     _ => {
@@ -1010,7 +1159,7 @@ impl Interpreter {
                                             return Err(command_type.gen_err("index out of bounds"));
                                         } else {
                                             let mut values = values.to_vec();
-                                            values.insert(i, args[0].clone());
+                                            values.insert(i, arg_1.clone());
                                             return Ok(ValueType::List(values));
                                         }
                                     }
@@ -1027,11 +1176,13 @@ impl Interpreter {
                 if args.len() != 2 {
                     return Err(command_type.gen_err(ERROR_EXACTLY_TWO_ARGS));
                 } else {
-                    match &args[0] {
+                    let arg_1 = &args[0].get_inner_value(&self.vars)?;
+                    let arg_2 = &args[1].get_inner_value(&self.vars)?;
+                    match arg_1 {
                         ValueType::Int(i) => {
                             let i = *i as usize;
 
-                            match &args[1] {
+                            match arg_2 {
                                 ValueType::Text(value) => {
                                     if i >= value.len() {
                                         return Err(command_type.gen_err("index out of bounds"));
@@ -1058,16 +1209,20 @@ impl Interpreter {
                     }
                 }
             }
+            // TODO fix identifier
             CommandType::Replace => {
                 if args.len() != 3 {
                     return Err(command_type.gen_err(ERROR_EXACTLY_THREE_ARGS));
                 } else {
-                    match &args[1] {
+                    let arg_1 = args[0].get_inner_value(&self.vars)?;
+                    let arg_2 = &args[1].get_inner_value(&self.vars)?;
+                    let arg_3 = &args[2].get_inner_value(&self.vars)?;
+                    match arg_2 {
                         ValueType::Int(i) => {
                             let i = *i as usize;
 
-                            match &args[2] {
-                                ValueType::Text(value) => match &args[0] {
+                            match arg_3 {
+                                ValueType::Text(value) => match arg_1 {
                                     ValueType::Text(text) => {
                                         if i >= value.len() {
                                             return Err(command_type.gen_err("index out of bounds"));
@@ -1077,7 +1232,7 @@ impl Interpreter {
                                     },
                                     _ => Err(command_type.gen_err("first argument must be of type Text when inserting into type Text")),
                                 },
-                                ValueType::List(values) => match &args[0] {
+                                ValueType::List(values) => match arg_1 {
                                     ValueType::Identifier(_) => Err(command_type.gen_err("cannot insert values of type Identifier into type List")),
                                     ValueType::None => Err(command_type.gen_err("cannot insert values of type None into type List")),
                                     _ => {
@@ -1085,7 +1240,7 @@ impl Interpreter {
                                             return Err(command_type.gen_err("index out of bounds"));
                                         } else {
                                             let mut values = values.to_vec();
-                                            values[i] = args[0].clone();
+                                            values[i] = arg_1.clone();
                                             return Ok(ValueType::List(values));
                                         }
                                     }

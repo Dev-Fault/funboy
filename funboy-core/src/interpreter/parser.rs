@@ -208,21 +208,6 @@ pub enum ValueType {
 }
 
 impl ValueType {
-    pub fn extract_float(&self) -> Option<f64> {
-        match self {
-            ValueType::Int(value) => Some(*value as f64),
-            ValueType::Float(value) => Some(*value),
-            _ => None,
-        }
-    }
-
-    pub fn extract_int(&self) -> Option<i64> {
-        match self {
-            ValueType::Int(value) => Some(*value),
-            _ => None,
-        }
-    }
-
     pub fn get_size(&self) -> usize {
         match self {
             ValueType::Text(value) => size_of::<ValueType>() + value.capacity(),
@@ -235,27 +220,6 @@ impl ValueType {
             ValueType::Command(value) => size_of::<ValueType>()
                 .saturating_add(value.args.iter().map(|value| value.get_size()).sum()),
             ValueType::None => size_of::<ValueType>(),
-        }
-    }
-}
-
-impl ToString for ValueType {
-    fn to_string(&self) -> String {
-        match self {
-            ValueType::Text(value) => value.to_string(),
-            ValueType::Int(value) => value.to_string(),
-            ValueType::Float(value) => value.to_string(),
-            ValueType::Bool(value) => value.to_string(),
-            ValueType::List(values) => {
-                let list_string: String = values
-                    .iter()
-                    .map(|value| value.to_string() + ", ")
-                    .collect();
-                format!("[{}]", &list_string[0..list_string.len() - 2])
-            }
-            ValueType::Identifier(value) => value.to_string(),
-            ValueType::Command(value) => value.command_type.to_str().to_string(),
-            ValueType::None => "".to_string(),
         }
     }
 }
