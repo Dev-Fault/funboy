@@ -85,12 +85,12 @@ impl OrderBy {
     }
 }
 
-pub struct SubstituteRecord {
+pub struct SubstituteReceipt {
     pub updated: Vec<Substitute>,
     pub ignored: Vec<String>,
 }
 
-impl SubstituteRecord {
+impl SubstituteReceipt {
     pub fn new() -> Self {
         Self {
             updated: Vec::new(),
@@ -123,6 +123,36 @@ impl SubstituteRecord {
                     sub
                 }
             })
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+pub struct TemplateReceipt {
+    pub updated: Vec<Template>,
+    pub ignored: Vec<String>,
+}
+
+impl TemplateReceipt {
+    pub fn new() -> Self {
+        Self {
+            updated: Vec::new(),
+            ignored: Vec::new(),
+        }
+    }
+
+    pub fn updated_to_string(&self) -> String {
+        self.updated
+            .iter()
+            .map(|template| template.name.clone())
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    pub fn ignored_to_string(&self) -> String {
+        self.ignored
+            .iter()
+            .map(|template| template.clone())
             .collect::<Vec<_>>()
             .join(", ")
     }
@@ -323,6 +353,25 @@ impl TemplateDatabase {
         Ok(template)
     }
 
+    pub async fn delete_templates_by_name(&self, names: &[&str]) -> Result<TemplateReceipt, Error> {
+        let mut template_receipt = TemplateReceipt::new();
+        template_receipt.updated =
+            sqlx::query_as::<_, Template>("DELETE FROM templates WHERE name = ANY($1) RETURNING *")
+                .bind(names)
+                .fetch_all(self.pool.as_ref())
+                .await?;
+
+        let deleted: HashSet<&String> = template_receipt.updated.iter().map(|t| &t.name).collect();
+
+        template_receipt.ignored = names
+            .iter()
+            .map(|t| t.to_string())
+            .filter(|t| !deleted.contains(&t))
+            .collect::<Vec<String>>();
+
+        Ok(template_receipt)
+    }
+
     async fn read_or_create_template(&self, template_name: &str) -> Result<Template, Error> {
         let template = sqlx::query_as::<_, Template>(
             "INSERT INTO templates (name) VALUES ($1)
@@ -357,9 +406,9 @@ impl TemplateDatabase {
         &self,
         template_name: &str,
         substitute_names: &[&'a str],
-    ) -> Result<SubstituteRecord, Error> {
+    ) -> Result<SubstituteReceipt, Error> {
         let mut tx = self.pool.as_ref().begin().await?;
-        let mut sub_record = SubstituteRecord::new();
+        let mut sub_record = SubstituteReceipt::new();
 
         let template = self.read_or_create_template(template_name).await?;
 
@@ -533,8 +582,8 @@ impl TemplateDatabase {
     pub async fn delete_substitutes_by_id(
         &self,
         ids: &[KeySize],
-    ) -> Result<SubstituteRecord, Error> {
-        let mut sub_record = SubstituteRecord::new();
+    ) -> Result<SubstituteReceipt, Error> {
+        let mut sub_record = SubstituteReceipt::new();
         sub_record.updated = sqlx::query_as::<_, Substitute>(
             "DELETE FROM substitutes WHERE id = ANY($1) RETURNING *",
         )
@@ -584,8 +633,8 @@ impl TemplateDatabase {
         &self,
         template_name: &str,
         substitute_names: &[&'a str],
-    ) -> Result<SubstituteRecord, Error> {
-        let mut sub_record = SubstituteRecord::new();
+    ) -> Result<SubstituteReceipt, Error> {
+        let mut sub_record = SubstituteReceipt::new();
         sub_record.updated = sqlx::query_as::<_, Substitute>(
             "
                  DELETE FROM substitutes s
@@ -614,7 +663,7 @@ impl TemplateDatabase {
 }
 
 #[cfg(test)]
-pub mod template_db_test {
+pub mod test {
     use crate::template_database::*;
 
     /// Creates a connection with the debug database used for testing
@@ -1119,5 +1168,37 @@ pub mod template_db_test {
         assert!(db.create_template("gr34t_n4m3").await.is_ok());
         assert!(db.create_template("horrible-name").await.is_err());
         assert!(db.create_template("*horrible-name").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn delete_receipt_templates() {
+        let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+        let db = create_debug_db(pool).await.unwrap();
+        db.create_template("stuff").await.unwrap();
+        db.create_template("stuff2").await.unwrap();
+        db.create_template("stuff3").await.unwrap();
+        db.create_template("stuff4").await.unwrap();
+        db.create_template("stuff5").await.unwrap();
+        db.create_template("stuff6").await.unwrap();
+        db.create_template("stuff7").await.unwrap();
+
+        db.delete_templates_by_name(&["stuff2", "stuff7", "stuff5"])
+            .await
+            .unwrap();
+
+        let templates = db
+            .read_templates(None, OrderBy::Default, Limit::None)
+            .await
+            .unwrap();
+        let templates: Vec<&str> = templates
+            .iter()
+            .map(|t| t.name.as_str())
+            .collect::<Vec<&str>>();
+
+        dbg!(&templates);
+        assert!(templates.contains(&"stuff"));
+        assert!(templates.contains(&"stuff3"));
+        assert!(templates.contains(&"stuff4"));
+        assert!(templates.contains(&"stuff6"));
     }
 }

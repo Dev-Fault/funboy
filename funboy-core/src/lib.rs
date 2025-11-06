@@ -12,7 +12,8 @@ use crate::{
     interpreter::Interpreter,
     ollama::{OllamaGenerator, OllamaSettings},
     template_database::{
-        KeySize, Limit, OrderBy, Substitute, SubstituteRecord, Template, TemplateDatabase,
+        KeySize, Limit, OrderBy, Substitute, SubstituteReceipt, Template, TemplateDatabase,
+        TemplateReceipt,
     },
     template_substitutor::{TemplateDelimiter, TemplateSubstitutor, VALID_TEMPLATE_CHARS},
 };
@@ -129,7 +130,7 @@ impl Funboy {
         }
     }
 
-    fn validate_template(&self, template: &str) -> Result<(), FunboyError> {
+    fn validate_template_name(&self, template: &str) -> Result<(), FunboyError> {
         if !self.valid_template_regex.is_match(template) {
             return Err(FunboyError::UserInput(
                 "template must be lowercase containing only characters a-z, 0-9, and _".to_string(),
@@ -142,8 +143,8 @@ impl Funboy {
         &self,
         template: &str,
         substitutes: &[&'a str],
-    ) -> Result<SubstituteRecord, FunboyError> {
-        self.validate_template(template)?;
+    ) -> Result<SubstituteReceipt, FunboyError> {
+        self.validate_template_name(template)?;
 
         match self
             .template_db
@@ -159,8 +160,8 @@ impl Funboy {
         &self,
         template: &str,
         substitutes: &[&'a str],
-    ) -> Result<SubstituteRecord, FunboyError> {
-        self.validate_template(template)?;
+    ) -> Result<SubstituteReceipt, FunboyError> {
+        self.validate_template_name(template)?;
 
         match self
             .template_db
@@ -175,7 +176,7 @@ impl Funboy {
     pub async fn delete_substitutes_by_id(
         &self,
         ids: &[KeySize],
-    ) -> Result<SubstituteRecord, FunboyError> {
+    ) -> Result<SubstituteReceipt, FunboyError> {
         match self.template_db.delete_substitutes_by_id(ids).await {
             Ok(subs) => Ok(subs),
             Err(e) => Err(e.into()),
@@ -187,8 +188,8 @@ impl Funboy {
         from_template: &str,
         to_template: &str,
     ) -> Result<Vec<Substitute>, FunboyError> {
-        self.validate_template(from_template)?;
-        self.validate_template(to_template)?;
+        self.validate_template_name(from_template)?;
+        self.validate_template_name(to_template)?;
 
         match self
             .template_db
@@ -206,7 +207,7 @@ impl Funboy {
         old: &str,
         new: &str,
     ) -> Result<Option<Substitute>, FunboyError> {
-        self.validate_template(template)?;
+        self.validate_template_name(template)?;
 
         match self
             .template_db
@@ -230,9 +231,23 @@ impl Funboy {
     }
 
     pub async fn delete_template(&self, template: &str) -> Result<Option<Template>, FunboyError> {
-        self.validate_template(template)?;
+        self.validate_template_name(template)?;
 
         match self.template_db.delete_template_by_name(template).await {
+            Ok(template) => Ok(template),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub async fn delete_templates(
+        &self,
+        templates: &[&str],
+    ) -> Result<TemplateReceipt, FunboyError> {
+        for template in templates {
+            self.validate_template_name(template)?;
+        }
+
+        match self.template_db.delete_templates_by_name(templates).await {
             Ok(template) => Ok(template),
             Err(e) => Err(e.into()),
         }
@@ -243,8 +258,8 @@ impl Funboy {
         from: &str,
         to: &str,
     ) -> Result<Option<Template>, FunboyError> {
-        self.validate_template(from)?;
-        self.validate_template(to)?;
+        self.validate_template_name(from)?;
+        self.validate_template_name(to)?;
 
         match self.template_db.update_template_by_name(from, to).await {
             Ok(template) => Ok(template),
@@ -275,7 +290,7 @@ impl Funboy {
         order: OrderBy,
         limit: Limit,
     ) -> Result<Vec<Substitute>, FunboyError> {
-        self.validate_template(template)?;
+        self.validate_template_name(template)?;
 
         match self
             .template_db
@@ -288,7 +303,7 @@ impl Funboy {
     }
 
     async fn get_random_substitute(&self, template: &str) -> Result<Substitute, FunboyError> {
-        self.validate_template(template)?;
+        self.validate_template_name(template)?;
 
         match self
             .get_substitutes(template, None, OrderBy::Random, Limit::Count(1))
@@ -408,7 +423,7 @@ mod core {
     use super::*;
     use sqlx::PgPool;
     use std::{panic, sync::Arc};
-    use template_database::template_db_test::create_debug_db;
+    use template_database::test::create_debug_db;
 
     #[tokio::test]
     async fn random_number_produces_int_in_range() {
