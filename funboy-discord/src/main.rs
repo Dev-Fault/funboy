@@ -118,7 +118,7 @@ async fn main() {
                 commands::templates::copy_subs(),
                 commands::templates::replace_sub(),
                 commands::templates::delete_subs(),
-                commands::templates::delete_template(),
+                commands::templates::delete_templates(),
                 commands::templates::list_subs(),
                 commands::templates::list_templates(),
                 commands::random::random_number(),

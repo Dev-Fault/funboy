@@ -32,13 +32,13 @@ pub async fn generate(ctx: Context<'_>, input: String) -> Result<(), Error> {
     Ok(())
 }
 
-#[poise::command(slash_command, prefix_command)]
-pub async fn delete_template(ctx: Context<'_>, template: String) -> Result<(), Error> {
-    async fn edit_response(
-        ctx: Context<'_>,
-        interaction: ComponentInteraction,
-        content: &str,
-    ) -> Result<(), Error> {
+async fn edit_interaction(
+    ctx: Context<'_>,
+    interaction: &ComponentInteraction,
+    content: &str,
+    remove_components: bool,
+) -> Result<(), Error> {
+    if remove_components {
         interaction
             .edit_response(
                 ctx.http(),
@@ -47,12 +47,105 @@ pub async fn delete_template(ctx: Context<'_>, template: String) -> Result<(), E
                     .components(vec![]),
             )
             .await?;
-        Ok(())
+    } else {
+        interaction
+            .edit_response(ctx.http(), EditInteractionResponse::new().content(content))
+            .await?;
     }
+    Ok(())
+}
+
+async fn delete_multiple_templates(
+    ctx: Context<'_>,
+    templates_to_delete: &[&str],
+    interaction: &ComponentInteraction,
+) -> Result<(), Error> {
+    match ctx
+        .data()
+        .funboy
+        .delete_templates(templates_to_delete)
+        .await
+    {
+        Ok(result) => {
+            if result.updated.len() > 0 {
+                edit_interaction(
+                    ctx,
+                    &interaction,
+                    &format!(
+                        "Deleted templates `{}`",
+                        ellipsize_if_long(&result.updated_to_string(), 1000)
+                    ),
+                    true,
+                )
+                .await?;
+            }
+            if result.ignored.len() > 0 {
+                edit_interaction(
+                    ctx,
+                    &interaction,
+                    &format!(
+                        "Templates `{}` do not exist.",
+                        ellipsize_if_long(&result.ignored_to_string(), 1000)
+                    ),
+                    true,
+                )
+                .await?;
+            }
+            Ok(())
+        }
+        Err(e) => {
+            edit_interaction(ctx, &interaction, e.to_string().as_str(), true).await?;
+            Ok(())
+        }
+    }
+}
+
+async fn delete_single_template(
+    ctx: Context<'_>,
+    template: &str,
+    interaction: &ComponentInteraction,
+) -> Result<(), Error> {
+    match ctx.data().funboy.delete_template(&template).await {
+        Ok(result) => match result {
+            Some(_) => {
+                edit_interaction(
+                    ctx,
+                    &interaction,
+                    &format!("Deleted template `{}`", ellipsize_if_long(template, 1000)),
+                    true,
+                )
+                .await?;
+                Ok(())
+            }
+            None => {
+                edit_interaction(
+                    ctx,
+                    &interaction,
+                    &format!(
+                        "Template `{}` does not exist.",
+                        ellipsize_if_long(template, 1000)
+                    ),
+                    true,
+                )
+                .await?;
+                Ok(())
+            }
+        },
+        Err(e) => {
+            edit_interaction(ctx, &interaction, e.to_string().as_str(), true).await?;
+            Ok(())
+        }
+    }
+}
+
+#[poise::command(slash_command, prefix_command)]
+pub async fn delete_templates(ctx: Context<'_>, names: String) -> Result<(), Error> {
+    let templates = split_by_whitespace_unless_quoted(&names);
 
     let interaction_text = format!(
-        "Are you sure you want to delete `{}` all of it's substitutes will be deleted as well?",
-        template
+        "Are you sure you want to delete `{}`? All of {} substitutes will be deleted as well.",
+        ellipsize_if_long(&names, 1000),
+        if templates.len() > 1 { "their" } else { "it's" }
     );
 
     match create_confirmation_interaction(ctx, &interaction_text, 30).await? {
@@ -65,7 +158,13 @@ pub async fn delete_template(ctx: Context<'_>, template: String) -> Result<(), E
                     )
                     .await?;
 
-                edit_response(ctx, interaction, "Command to remove template canceled.").await?;
+                edit_interaction(
+                    ctx,
+                    &interaction,
+                    "Command to remove templates canceled.",
+                    true,
+                )
+                .await?;
 
                 Ok(())
             }
@@ -76,29 +175,10 @@ pub async fn delete_template(ctx: Context<'_>, template: String) -> Result<(), E
                         serenity::all::CreateInteractionResponse::Acknowledge,
                     )
                     .await?;
-
-                match ctx.data().funboy.delete_template(&template).await {
-                    Ok(result) => match result {
-                        Some(_) => {
-                            edit_response(
-                                ctx,
-                                interaction,
-                                &format!("Deleted template `{}`", template),
-                            )
-                            .await?;
-                        }
-                        None => {
-                            edit_response(
-                                ctx,
-                                interaction,
-                                &format!("Template `{}` does not exist.", template),
-                            )
-                            .await?;
-                        }
-                    },
-                    Err(e) => {
-                        edit_response(ctx, interaction, e.to_string().as_str()).await?;
-                    }
+                if templates.len() > 1 {
+                    delete_multiple_templates(ctx, &templates, &interaction).await?;
+                } else {
+                    delete_single_template(ctx, &names, &interaction).await?;
                 };
 
                 Ok(())
