@@ -7,7 +7,9 @@ use serenity::all::{ComponentInteraction, EditInteractionResponse};
 
 use crate::{
     Context, Error,
-    components::{CANCEL_BUTTON_ID, CONFIRM_BUTTON_ID, create_confirmation_interaction},
+    components::{
+        CANCEL_BUTTON_ID, CONFIRM_BUTTON_ID, create_confirmation_interaction, edit_interaction,
+    },
     io_format::{
         context_extension::ContextExtension,
         discord_message_format::{
@@ -29,29 +31,6 @@ pub async fn generate(ctx: Context<'_>, input: String) -> Result<(), Error> {
             ctx.say_ephemeral(&e.to_string()).await?;
         }
     };
-    Ok(())
-}
-
-async fn edit_interaction(
-    ctx: Context<'_>,
-    interaction: &ComponentInteraction,
-    content: &str,
-    remove_components: bool,
-) -> Result<(), Error> {
-    if remove_components {
-        interaction
-            .edit_response(
-                ctx.http(),
-                EditInteractionResponse::new()
-                    .content(content)
-                    .components(vec![]),
-            )
-            .await?;
-    } else {
-        interaction
-            .edit_response(ctx.http(), EditInteractionResponse::new().content(content))
-            .await?;
-    }
     Ok(())
 }
 

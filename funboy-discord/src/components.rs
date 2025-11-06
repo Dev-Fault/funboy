@@ -1,5 +1,5 @@
 use poise::CreateReply;
-use serenity::all::{ComponentInteraction, CreateActionRow, CreateButton};
+use serenity::all::{ComponentInteraction, CreateActionRow, CreateButton, EditInteractionResponse};
 use uuid::Uuid;
 
 use crate::{Context, Error};
@@ -69,6 +69,29 @@ impl TrackComponent {
     pub fn get_track_command(&self) -> &str {
         self.track_command.as_str()
     }
+}
+
+pub async fn edit_interaction(
+    ctx: Context<'_>,
+    interaction: &ComponentInteraction,
+    content: &str,
+    remove_components: bool,
+) -> Result<(), Error> {
+    if remove_components {
+        interaction
+            .edit_response(
+                ctx.http(),
+                EditInteractionResponse::new()
+                    .content(content)
+                    .components(vec![]),
+            )
+            .await?;
+    } else {
+        interaction
+            .edit_response(ctx.http(), EditInteractionResponse::new().content(content))
+            .await?;
+    }
+    Ok(())
 }
 
 pub fn create_track_button(track_id: Uuid, command: &str) -> CreateButton {
