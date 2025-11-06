@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
+    time::Duration,
 };
 
 use ::serenity::all::{FullEvent, Interaction, UserId};
@@ -13,7 +14,7 @@ use funboy_core::{
 use poise::serenity_prelude as serenity;
 use reqwest::Client as HttpClient;
 use songbird::{SerenityInit, typemap::TypeMapKey};
-use sqlx::PgPool;
+use sqlx::{PgPool, pool::PoolOptions, postgres::PgPoolOptions};
 use tokio::sync::Mutex;
 
 use crate::{
@@ -108,7 +109,13 @@ async fn main() {
     };
 
     let pool = Arc::new(
-        PgPool::connect(&db_url)
+        PgPoolOptions::new()
+            .max_connections(15)
+            .min_connections(2)
+            .acquire_timeout(Duration::from_secs(5))
+            .idle_timeout(Duration::from_secs(60 * 10))
+            .max_lifetime(Duration::from_secs(60 * 30))
+            .connect(&db_url)
             .await
             .expect("failed to connect to database"),
     );
