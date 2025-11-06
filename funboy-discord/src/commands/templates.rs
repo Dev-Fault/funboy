@@ -200,13 +200,27 @@ pub async fn replace_sub(
     template: String,
     from: String,
     to: String,
+    replace_by_id: Option<bool>,
 ) -> Result<(), Error> {
-    match ctx
-        .data()
-        .funboy
-        .replace_substitute(&template, &from, &to)
-        .await
-    {
+    let replace_by_id = replace_by_id.unwrap_or(false);
+
+    let result = if replace_by_id {
+        let id = from.parse::<KeySize>();
+        match id {
+            Ok(id) => ctx.data().funboy.replace_substitute_by_id(id, &to).await,
+            Err(_) => {
+                ctx.say_ephemeral("Id must be a valid number.").await?;
+                return Ok(());
+            }
+        }
+    } else {
+        ctx.data()
+            .funboy
+            .replace_substitute(&template, &from, &to)
+            .await
+    };
+
+    match result {
         Ok(template) => match template {
             Some(_) => {
                 ctx.say_long(
@@ -244,7 +258,9 @@ pub async fn add_subs(
     subs: String,
     add_as_single_sub: Option<bool>,
 ) -> Result<(), Error> {
-    let result = if add_as_single_sub.is_some_and(|is_true| is_true) {
+    let add_as_single_sub = add_as_single_sub.unwrap_or(false);
+
+    let result = if add_as_single_sub {
         ctx.data()
             .get_funboy()
             .add_substitutes(&template, &[&subs])
@@ -336,12 +352,10 @@ pub async fn delete_subs(
     delete_as_single_sub: Option<bool>,
     delete_by_id: Option<bool>,
 ) -> Result<(), Error> {
-    let delete_by_id = match delete_by_id {
-        Some(delete_by_id) => delete_by_id,
-        None => false,
-    };
+    let delete_as_single_sub = delete_as_single_sub.unwrap_or(false);
+    let delete_by_id = delete_by_id.unwrap_or(false);
 
-    let result = if delete_as_single_sub.is_some_and(|is_true| is_true) {
+    let result = if delete_as_single_sub {
         if delete_by_id {
             match subs.parse::<KeySize>() {
                 Ok(id) => ctx.data().funboy.delete_substitutes_by_id(&[id]).await,
@@ -468,11 +482,7 @@ pub async fn list_subs(
 
             let subs = subs.to_ref();
 
-            let list_style = if list_style.is_none() {
-                ListStyle::Default
-            } else {
-                list_style.unwrap()
-            };
+            let list_style = list_style.unwrap_or(ListStyle::Default);
 
             match list_style {
                 ListStyle::Default => {
@@ -552,11 +562,7 @@ pub async fn list_templates(
 
             let templates = templates.to_ref();
 
-            let list_style = if list_style.is_none() {
-                ListStyle::Default
-            } else {
-                list_style.unwrap()
-            };
+            let list_style = list_style.unwrap_or(ListStyle::Default);
 
             match list_style {
                 ListStyle::Default => {
