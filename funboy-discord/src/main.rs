@@ -1,8 +1,15 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
-use ::serenity::all::{FullEvent, Interaction};
+use ::serenity::all::{FullEvent, Interaction, UserId};
 use dotenvy::dotenv;
-use funboy_core::{Funboy, template_database::TemplateDatabase};
+use funboy_core::{
+    Funboy,
+    ollama::{OllamaGenerator, OllamaSettings},
+    template_database::TemplateDatabase,
+};
 use poise::serenity_prelude as serenity;
 use reqwest::Client as HttpClient;
 use songbird::{SerenityInit, typemap::TypeMapKey};
@@ -18,17 +25,46 @@ mod commands;
 mod components;
 mod io_format;
 
+pub type OllamaUserSettingsMap = HashMap<UserId, OllamaSettings>;
+
+struct OllamaData {
+    pub users: Mutex<HashSet<UserId>>,
+    pub generator: Mutex<OllamaGenerator>,
+    pub model: Arc<Mutex<Option<String>>>,
+    pub user_settings: Arc<Mutex<OllamaUserSettingsMap>>,
+}
+
+impl Default for OllamaData {
+    fn default() -> Self {
+        Self {
+            users: Default::default(),
+            generator: Default::default(),
+            model: Default::default(),
+            user_settings: Default::default(),
+        }
+    }
+}
+
 struct Data {
     pub funboy: Funboy,
     pub track_list: Arc<Mutex<TrackList>>,
     pub track_player_lock: Arc<Mutex<()>>,
-
+    pub ollama_data: OllamaData,
     yt_dlp_cookies_path: Option<String>,
 } // User data, which is stored and accessible in all command invocations
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type Context<'a> = poise::Context<'a, Data, Error>;
 
 impl Data {
+    pub fn new(pool: Arc<PgPool>) -> Self {
+        Self {
+            funboy: Funboy::new(TemplateDatabase::new(pool.clone())),
+            track_list: Mutex::new(TrackList::new()).into(),
+            track_player_lock: Default::default(),
+            ollama_data: OllamaData::default(),
+            yt_dlp_cookies_path: None,
+        }
+    }
     pub fn get_funboy(&self) -> &Funboy {
         &self.funboy
     }
@@ -96,6 +132,17 @@ async fn main() {
                 commands::utility::fsl_help(),
                 commands::utility::move_bot_pins(),
                 commands::utility::age(),
+                commands::ollama::list_ollama_models(),
+                commands::ollama::set_ollama_model(),
+                commands::ollama::list_ollama_settings(),
+                commands::ollama::set_ollama_word_limit(),
+                commands::ollama::set_ollama_parameters(),
+                commands::ollama::set_ollama_system_prompt(),
+                commands::ollama::reset_ollama_system_prompt(),
+                commands::ollama::set_ollama_template(),
+                commands::ollama::reset_ollama_template(),
+                commands::ollama::reset_ollama_parameters(),
+                commands::ollama::generate_ollama(),
             ],
             event_handler: |ctx, event, _framework_ctx, data| {
                 Box::pin(async move {
@@ -123,12 +170,7 @@ async fn main() {
         .setup(|ctx, _ready, framework| {
             Box::pin(async move {
                 //poise::builtins::register_globally(ctx, &framework.options().commands).await?;
-                Ok(Data {
-                    funboy: Funboy::new(TemplateDatabase::new(pool.clone())),
-                    track_list: Mutex::new(TrackList::new()).into(),
-                    track_player_lock: Arc::new(Mutex::new(())),
-                    yt_dlp_cookies_path: None,
-                })
+                Ok(Data::new(pool))
             })
         })
         .build();
