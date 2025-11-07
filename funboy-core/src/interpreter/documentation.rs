@@ -2,7 +2,7 @@ use std::{fs::File, path::Path};
 
 use serde::{Deserialize, Serialize};
 
-const FSL_DOCUMENTATION_PATH: &str = "fsl_documentation.json";
+const FSL_DOCUMENTATION: &str = include_str!("../../fsl_documentation.json");
 
 #[derive(Debug, Deserialize, Serialize)]
 struct CommandDocumentation {
@@ -19,9 +19,7 @@ pub struct CommandInfo {
 }
 
 pub fn get_command_documentation() -> Vec<CommandInfo> {
-    let path = Path::new(FSL_DOCUMENTATION_PATH);
-    let documenation = File::open(path).expect("fsl documentation file should exist");
     let command_documentation: CommandDocumentation =
-        serde_json::from_reader(documenation).expect("fsl documentation should be valid json");
+        serde_json::from_str(FSL_DOCUMENTATION).expect("fsl documentation should be valid json");
     command_documentation.commands
 }
