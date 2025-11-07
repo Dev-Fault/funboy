@@ -130,10 +130,15 @@ impl Funboy {
         }
     }
 
+    pub const MAX_TEMPLATE_LENGTH: usize = 255;
     fn validate_template_name(&self, template: &str) -> Result<(), FunboyError> {
         if !self.valid_template_regex.is_match(template) {
             return Err(FunboyError::UserInput(
                 "template must be lowercase containing only characters a-z, 0-9, and _".to_string(),
+            ));
+        } else if template.len() > Funboy::MAX_TEMPLATE_LENGTH {
+            return Err(FunboyError::UserInput(
+                "template must be less than 255 characters long".to_string(),
             ));
         }
         Ok(())
