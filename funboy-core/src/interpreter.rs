@@ -588,7 +588,7 @@ impl Interpreter {
                     }
                 }
             }
-            CommandType::Copy => {
+            CommandType::Store => {
                 if args.is_empty() {
                     return Err(command_type.gen_err("must have one or more arguments"));
                 } else if args.len() == 1 {
@@ -656,7 +656,7 @@ impl Interpreter {
                     return Err(command_type.gen_err("last arg must be of type Identifier"));
                 }
             }
-            CommandType::Paste => {
+            CommandType::Clone => {
                 if args.len() > 1 {
                     return Err(command_type.gen_err("cannot have more than 1 argument"));
                 }

@@ -569,7 +569,7 @@ mod core {
         funboy.add_substitutes("verb", &["jump"]).await.unwrap();
 
         let output = funboy
-            .generate("{copy(\"`adj\", adj) print(concat(paste(adj), paste(adj)))}")
+            .generate("{store(\"`adj\", adj) print(concat(adj, adj))}")
             .await
             .unwrap();
 
@@ -577,7 +577,7 @@ mod core {
         assert!(output == "quickadj");
 
         let output = funboy
-            .generate("{copy(\"^adj\", adj) print(concat(paste(adj), paste(adj)))}")
+            .generate("{store(\"^adj\", adj) print(concat(adj, adj))}")
             .await
             .unwrap();
 

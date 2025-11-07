@@ -11,25 +11,25 @@
       ]
     },
     {
-      "name": "copy",
+      "name": "store",
       "argument_count": "Two or more",
       "argument_types": "(Int or Float or Text or Bool or Command, ..., Identifier)",
       "return_type": "None",
-      "description": "Copies any number of values into an Identifier",
+      "description": "Stores any number of values into an Identifier",
       "examples": [
-        "{copy(\"hello\", h) print(paste(h))} = hello",
-        "{copy(0, 1, 2, 3, numbers) print(paste(numbers))} = [0, 1, 2, 3]"
+        "{store(\"hello\", h) print(h)} = hello",
+        "{store(0, 1, 2, 3, numbers) print(numbers)} = [0, 1, 2, 3]"
       ]
     },
     {
-      "name": "paste",
+      "name": "clone",
       "argument_count": "One",
       "argument_types": "Identifier",
       "return_type": "Int, Float, Text, Bool, List, or Command",
-      "description": "Pastes the value contained in an Identifer",
+      "description": "Clones the value stored inside an Identifier",
       "examples": [
-        "{copy(\"hello\", h) print(paste(h))} = hello",
-        "{copy(0, 1, 2, 3, numbers) print(paste(numbers))} = [0, 1, 2, 3]"
+        "{store(\"hello\", h) print(clone(h))} = hello",
+        "{store(0, 1, 2, 3, numbers) print(clone(numbers))} = [0, 1, 2, 3]"
       ]
     },
     {
@@ -189,7 +189,7 @@
       "return_type": "None",
       "description": "Preforms the given commands as long as the given Bool is true.",
       "examples": [
-        "{copy(0, n) while(not(eq(paste(n), 5)), print(\"ha\"), copy(add(1, paste(n)), n))} = hahahahaha"
+        "{store(0, n) while(not(eq(n, 5)), print(\"ha\"), store(add(1, n), n))} = hahahahaha"
       ]
     },
     {
@@ -290,7 +290,7 @@
       "description": "Returns a character of Text or an element of a List at the given index.",
       "examples": [
         "{print(index(1, \"hello\"))} = e",
-        "{copy(1, 2, 3, list) print(index(1, paste(list)))} = 2"
+        "{store(1, 2, 3, list) print(index(1, list))} = 2"
       ]
     },
     {
@@ -301,7 +301,7 @@
       "description": "Returns a slice of Text or a List from the first index up to the second index.",
       "examples": [
         "{print(slice(2, 5, \"hello\"))} = llo",
-        "{copy(1, 2, 3, list) print(slice(0, 2, paste(list)))} = [1, 2]"
+        "{store(1, 2, 3, list) print(slice(0, 2, list))} = [1, 2]"
       ]
     },
     {
@@ -312,7 +312,7 @@
       "description": "Returns the length of Text or a List.",
       "examples": [
         "{print(length(\"hello\"))} = 5",
-        "{copy(1, 2, 3, list) print(length(paste(list)))} = 3"
+        "{store(1, 2, 3, list) print(length(list))} = 3"
       ]
     },
     {
@@ -323,7 +323,7 @@
       "description": "Swaps two characters of Text or two elements of a List from the given indices and returns the result.",
       "examples": [
         "{print(swap(0, 4, \"hello\"))} = oellh",
-        "{copy(1, 2, 3, list) print(swap(0, 1, paste(list)))} = [2, 1, 3]"
+        "{store(1, 2, 3, list) print(swap(0, 1, list))} = [2, 1, 3]"
       ]
     },
     {
@@ -334,7 +334,7 @@
       "description": "Inserts Text into Text or an element into a List at the given index and returns the result.",
       "examples": [
         "{print(insert(\"h\", 0, \"ello\"))} = hello",
-        "{copy(1, 2, 3, list) print(insert(4, 3, paste(list)))} = [1, 2, 3, 4]"
+        "{store(1, 2, 3, list) print(insert(4, 3, list))} = [1, 2, 3, 4]"
       ]
     },
     {
@@ -345,7 +345,7 @@
       "description": "Removes a character of Text or an element of a List and returns the result.",
       "examples": [
         "{print(remove(0, \"hello\"))} = ello",
-        "{copy(1, 2, 3, list) print(remove(0, paste(list)))} = [2, 3]"
+        "{store(1, 2, 3, list) print(remove(0, list))} = [2, 3]"
       ]
     },
     {
@@ -356,7 +356,7 @@
       "description": "Replaces a character of Text or an element of a List and returns the result.",
       "examples": [
         "{print(replace(\"n\", 0, \"hello\"))} = nello",
-        "{copy(1, 2, 3, list) print(replace(3, 0, paste(list)))} = [3, 2, 3]"
+        "{store(1, 2, 3, list) print(replace(3, 0, list))} = [3, 2, 3]"
       ]
     }
   ]

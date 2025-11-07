@@ -23,8 +23,8 @@ pub const MOD: &str = "mod";
 pub const RANDOM_RANGE: &str = "random_range";
 
 // Variables
-pub const COPY: &str = "copy";
-pub const PASTE: &str = "paste";
+pub const STORE: &str = "store";
+pub const CLONE: &str = "clone";
 
 // Booleans
 pub const EQ: &str = "eq";
@@ -76,8 +76,8 @@ pub enum CommandType {
     RemoveWhitespace,
     Repeat,
     While,
-    Copy,
-    Paste,
+    Store,
+    Clone,
     Print,
     Concatenate,
     IfThen,
@@ -113,8 +113,8 @@ impl CommandType {
             CommandType::Upper => UPPER,
             CommandType::Lower => LOWER,
             CommandType::Repeat => REPEAT,
-            CommandType::Copy => COPY,
-            CommandType::Paste => PASTE,
+            CommandType::Store => STORE,
+            CommandType::Clone => CLONE,
             CommandType::Print => PRINT,
             CommandType::RemoveWhitespace => REMOVE_WHITESPACE,
             CommandType::Concatenate => CONCATENATE,
@@ -167,8 +167,8 @@ impl FromStr for CommandType {
             LOWER => Ok(CommandType::Lower),
             REPEAT => Ok(CommandType::Repeat),
             WHILE => Ok(CommandType::While),
-            COPY => Ok(CommandType::Copy),
-            PASTE => Ok(CommandType::Paste),
+            STORE => Ok(CommandType::Store),
+            CLONE => Ok(CommandType::Clone),
             PRINT => Ok(CommandType::Print),
             REMOVE_WHITESPACE => Ok(CommandType::RemoveWhitespace),
             CONCATENATE => Ok(CommandType::Concatenate),
