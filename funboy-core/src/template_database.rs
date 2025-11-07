@@ -6,7 +6,7 @@ use strum::IntoEnumIterator;
 use crate::template_substitutor::{TemplateDelimiter, TemplateSubstitutor};
 pub const DEBUG_DB_URL: &str = "postgres://funboy:funboy@localhost/funboy_db";
 
-pub type KeySize = i32;
+pub type KeySize = i64;
 
 #[derive(Debug, FromRow, Clone)]
 pub struct Template {
@@ -667,8 +667,9 @@ pub mod test {
     use crate::template_database::*;
 
     /// Creates a connection with the debug database used for testing
-    pub async fn create_debug_db(pool: Arc<PgPool>) -> Result<TemplateDatabase, sqlx::Error> {
-        let debug_db = TemplateDatabase::new(pool);
+    pub async fn create_debug_db(pool: PgPool) -> Result<TemplateDatabase, sqlx::Error> {
+        TemplateDatabase::migrate(&pool).await?;
+        let debug_db = TemplateDatabase::new(Arc::new(pool));
 
         sqlx::query("ALTER SEQUENCE templates_id_seq RESTART WITH 1")
             .execute(debug_db.pool.as_ref())
@@ -687,14 +688,14 @@ pub mod test {
 
     #[tokio::test]
     async fn connect_to_database() {
-        let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+        let pool = PgPool::connect(DEBUG_DB_URL).await.unwrap();
         let db = create_debug_db(pool).await.unwrap();
         dbg!(db);
     }
 
     #[tokio::test]
     async fn crud_template_by_id() {
-        let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+        let pool = PgPool::connect(DEBUG_DB_URL).await.unwrap();
         let db = create_debug_db(pool).await.unwrap();
         let noun = db.create_template("noun").await.unwrap().unwrap();
         let verb = db.create_template("verb").await.unwrap().unwrap();
@@ -736,7 +737,7 @@ pub mod test {
 
     #[tokio::test]
     async fn crud_template_by_name() {
-        let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+        let pool = PgPool::connect(DEBUG_DB_URL).await.unwrap();
         let db = create_debug_db(pool).await.unwrap();
         let noun = db.create_template("noun").await.unwrap().unwrap();
         let verb = db.create_template("verb").await.unwrap().unwrap();
@@ -778,7 +779,7 @@ pub mod test {
 
     #[tokio::test]
     async fn crud_substitute_by_id() {
-        let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+        let pool = PgPool::connect(DEBUG_DB_URL).await.unwrap();
         let db = create_debug_db(pool).await.unwrap();
         let noun_template = db.create_template("animal").await.unwrap().unwrap();
         for name in ["cat", "dog", "bat"] {
@@ -823,7 +824,7 @@ pub mod test {
 
     #[tokio::test]
     async fn crud_substitute_by_name() {
-        let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+        let pool = PgPool::connect(DEBUG_DB_URL).await.unwrap();
         let db = create_debug_db(pool).await.unwrap();
         let _ = db.create_template("fruit").await.unwrap();
         let banana = db.create_substitute("fruit", "banana").await.unwrap();
@@ -856,7 +857,7 @@ pub mod test {
     #[tokio::test]
     async fn ripple_rename_template_by_name() {
         for delim in TemplateDelimiter::iter() {
-            let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+            let pool = PgPool::connect(DEBUG_DB_URL).await.unwrap();
             let db = create_debug_db(pool).await.unwrap();
             let fruit_template = db.create_template("fruit").await.unwrap().unwrap();
             db.create_template("references_fruit").await.unwrap();
@@ -900,7 +901,7 @@ pub mod test {
 
     #[tokio::test]
     async fn sort_templates() {
-        let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+        let pool = PgPool::connect(DEBUG_DB_URL).await.unwrap();
         let db = create_debug_db(pool).await.unwrap();
         let templates = [
             "food", "vehicle", "clothes", "number", "adj", "noun", "verb",
@@ -936,7 +937,7 @@ pub mod test {
 
     #[tokio::test]
     async fn delete_substitutes_by_name() {
-        let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+        let pool = PgPool::connect(DEBUG_DB_URL).await.unwrap();
         let db = create_debug_db(pool).await.unwrap();
         let subs = ["mouse", "keyboard", "monitor", "microphone"];
         for sub in subs {
@@ -974,7 +975,7 @@ pub mod test {
 
     #[tokio::test]
     async fn delete_substitutes_by_id() {
-        let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+        let pool = PgPool::connect(DEBUG_DB_URL).await.unwrap();
         let db = create_debug_db(pool).await.unwrap();
         let subs = ["mouse", "keyboard", "monitor", "microphone"];
         for sub in subs {
@@ -1006,7 +1007,7 @@ pub mod test {
 
     #[tokio::test]
     async fn create_substitutes() {
-        let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+        let pool = PgPool::connect(DEBUG_DB_URL).await.unwrap();
         let db = create_debug_db(pool).await.unwrap();
 
         let sub_names = ["a", "b", "c", "d"];
@@ -1025,7 +1026,7 @@ pub mod test {
 
     #[tokio::test]
     async fn template_collision() {
-        let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+        let pool = PgPool::connect(DEBUG_DB_URL).await.unwrap();
         let db = create_debug_db(pool).await.unwrap();
 
         db.create_template("template_collision").await.unwrap();
@@ -1040,7 +1041,7 @@ pub mod test {
 
     #[tokio::test]
     async fn substitute_collision() {
-        let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+        let pool = PgPool::connect(DEBUG_DB_URL).await.unwrap();
         let db = create_debug_db(pool).await.unwrap();
         db.create_template("template").await.unwrap();
         db.create_substitute("template", "substitute_collision")
@@ -1057,7 +1058,7 @@ pub mod test {
 
     #[tokio::test]
     async fn read_single_template() {
-        let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+        let pool = PgPool::connect(DEBUG_DB_URL).await.unwrap();
         let db = create_debug_db(pool).await.unwrap();
         let test = db.create_template("test").await.unwrap().unwrap();
         assert!(db.read_template_by_name("test").await.unwrap().unwrap().id == test.id);
@@ -1066,7 +1067,7 @@ pub mod test {
 
     #[tokio::test]
     async fn read_single_substitute() {
-        let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+        let pool = PgPool::connect(DEBUG_DB_URL).await.unwrap();
         let db = create_debug_db(pool).await.unwrap();
         db.create_template("test").await.unwrap();
         let test_sub = db
@@ -1094,7 +1095,7 @@ pub mod test {
 
     #[tokio::test]
     async fn cascade_on_delete_template() {
-        let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+        let pool = PgPool::connect(DEBUG_DB_URL).await.unwrap();
         let db = create_debug_db(pool).await.unwrap();
         let test_template = db.create_template("test").await.unwrap().unwrap();
         let test_subs = db
@@ -1118,7 +1119,7 @@ pub mod test {
 
     #[tokio::test]
     async fn copy_subs_from_one_template_to_another() {
-        let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+        let pool = PgPool::connect(DEBUG_DB_URL).await.unwrap();
         let db = create_debug_db(pool).await.unwrap();
         let _ = db.create_template("from_template").await.unwrap();
         let _ = db.create_template("to_template").await.unwrap();
@@ -1161,7 +1162,7 @@ pub mod test {
 
     #[tokio::test]
     async fn valid_template_names() {
-        let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+        let pool = PgPool::connect(DEBUG_DB_URL).await.unwrap();
         let db = create_debug_db(pool).await.unwrap();
         assert!(db.create_template("good_name").await.is_ok());
         assert!(db.create_template("Bad_name").await.is_err());
@@ -1172,7 +1173,7 @@ pub mod test {
 
     #[tokio::test]
     async fn delete_receipt_templates() {
-        let pool = Arc::new(PgPool::connect(DEBUG_DB_URL).await.unwrap());
+        let pool = PgPool::connect(DEBUG_DB_URL).await.unwrap();
         let db = create_debug_db(pool).await.unwrap();
         db.create_template("stuff").await.unwrap();
         db.create_template("stuff2").await.unwrap();

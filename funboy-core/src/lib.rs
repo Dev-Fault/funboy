@@ -501,15 +501,13 @@ mod core {
         }
     }
 
-    async fn get_pool() -> Arc<PgPool> {
-        Arc::new(
-            PgPool::connect(template_database::DEBUG_DB_URL)
-                .await
-                .unwrap(),
-        )
+    async fn get_pool() -> PgPool {
+        PgPool::connect(template_database::DEBUG_DB_URL)
+            .await
+            .unwrap()
     }
 
-    async fn get_funboy(pool: Arc<PgPool>) -> Funboy {
+    async fn get_funboy(pool: PgPool) -> Funboy {
         let db = create_debug_db(pool).await.unwrap();
         Funboy::new(db)
     }
