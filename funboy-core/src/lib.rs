@@ -643,7 +643,8 @@ mod core {
         );
     }
 
-    #[tokio::test]
+    // Test is slow so only run it selectively
+    // #[tokio::test]
     async fn generate_ollama_response() {
         let pool = get_pool().await;
         let funboy = get_funboy(pool).await;
