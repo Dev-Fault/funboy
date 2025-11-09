@@ -353,7 +353,6 @@ impl Funboy {
             Err(e) => Err(FunboyError::Interpreter(e)),
         }
     }
-
     /// Resolves templates and fsl code until output is complete or depth limit is reached
     pub async fn generate(&self, input: &str) -> Result<String, FunboyError> {
         let mut output = input.to_string();
@@ -371,10 +370,7 @@ impl Funboy {
                 output = self
                     .interpret_input(
                         output,
-                        vec![
-                            TemplateSubstitutor::new(TemplateDelimiter::Caret),
-                            TemplateSubstitutor::new(TemplateDelimiter::SingleQuote),
-                        ],
+                        vec![TemplateSubstitutor::new(TemplateDelimiter::Caret)],
                     )
                     .await?;
 
