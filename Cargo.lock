@@ -827,6 +827,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fsl_interpreter"
+version = "0.1.0"
+dependencies = [
+ "async-recursion",
+ "rand 0.9.2",
+ "tokio",
+]
+
+[[package]]
 name = "funboy-cli"
 version = "0.1.0"
 dependencies = [
@@ -838,6 +847,7 @@ name = "funboy-core"
 version = "0.1.0"
 dependencies = [
  "async-recursion",
+ "fsl_interpreter",
  "ollama-rs",
  "rand 0.9.2",
  "regex",
@@ -856,6 +866,7 @@ version = "0.1.0"
 dependencies = [
  "async-recursion",
  "dotenvy",
+ "fsl_interpreter",
  "funboy-core",
  "ollama-rs",
  "poise",

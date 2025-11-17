@@ -3,6 +3,7 @@ use serenity::all::UserId;
 
 use crate::{
     Context, Error, OllamaUserSettingsMap,
+    commands::templates::create_custom_interpreter,
     io_format::{context_extension::ContextExtension, discord_message_format::ellipsize_if_long},
 };
 
@@ -211,7 +212,7 @@ pub async fn set_ollama_word_limit(ctx: Context<'_>, limit: u16) -> Result<(), E
 /// Generate an ollama response from prompt
 #[poise::command(slash_command, prefix_command, category = "Ollama")]
 pub async fn generate_ollama(ctx: Context<'_>, prompt: String) -> Result<(), Error> {
-    ctx.defer().await?;
+    ctx.say_ephemeral("Generating response...").await?;
 
     let user_id = ctx.author().id;
     let mut users = ctx.data().ollama_data.users.lock().await;
@@ -225,17 +226,15 @@ pub async fn generate_ollama(ctx: Context<'_>, prompt: String) -> Result<(), Err
     }
     drop(users);
 
-    let interpreted_prompt = ctx.data().funboy.generate(&prompt).await;
+    let interpreted_prompt = ctx
+        .data()
+        .funboy
+        .generate(&prompt, &mut create_custom_interpreter(&ctx))
+        .await;
 
     let result: Result<(), Error> = {
         match interpreted_prompt {
             Ok(prompt) => {
-                ctx.say(&format!(
-                    "Generating prompt: **\"{}\"**",
-                    ellipsize_if_long(&prompt, 200)
-                ))
-                .await?;
-
                 let user_id = ctx.author().id;
                 let mut ollama_settings_map = ctx.data().ollama_data.user_settings.lock().await;
                 let settings =

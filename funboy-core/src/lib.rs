@@ -4,12 +4,12 @@ use std::{
     str::FromStr,
 };
 
+use fsl_interpreter::FslInterpreter;
 use ollama_rs::{generation::completion::GenerationResponse, models::ModelInfo};
 use rand::{Rng, distr::uniform::SampleUniform};
 use regex::Regex;
 
 use crate::{
-    interpreter::Interpreter,
     ollama::{OllamaGenerator, OllamaSettings},
     template_database::{
         KeySize, Limit, OrderBy, Substitute, SubstituteReceipt, Template, TemplateDatabase,
@@ -330,6 +330,7 @@ impl Funboy {
         &self,
         input: String,
         template_substitutors: Vec<TemplateSubstitutor>,
+        interpreter: &mut FslInterpreter,
     ) -> Result<String, FunboyError> {
         let mut substituted_text = input.clone();
         for template_substitutor in template_substitutors {
@@ -343,18 +344,19 @@ impl Funboy {
                 .await;
         }
 
-        let mut fsl_interpreter = Interpreter::new();
-        let interpreter_result = fsl_interpreter
-            .interpret_embedded_code(&substituted_text)
-            .await;
+        let interpreter_result = interpreter.interpret_embedded_code(&substituted_text).await;
 
         match interpreter_result {
             Ok(interpreted_text) => Ok(interpreted_text),
-            Err(e) => Err(FunboyError::Interpreter(e)),
+            Err(e) => Err(FunboyError::Interpreter(e.to_string())),
         }
     }
     /// Resolves templates and fsl code until output is complete or depth limit is reached
-    pub async fn generate(&self, input: &str) -> Result<String, FunboyError> {
+    pub async fn generate(
+        &self,
+        input: &str,
+        interpreter: &mut FslInterpreter,
+    ) -> Result<String, FunboyError> {
         let mut output = input.to_string();
         let mut prev_hashes = HashSet::new();
 
@@ -371,6 +373,7 @@ impl Funboy {
                     .interpret_input(
                         output,
                         vec![TemplateSubstitutor::new(TemplateDelimiter::Caret)],
+                        interpreter,
                     )
                     .await?;
 
@@ -378,6 +381,7 @@ impl Funboy {
                     .interpret_input(
                         output,
                         vec![TemplateSubstitutor::new(TemplateDelimiter::BackTick)],
+                        interpreter,
                     )
                     .await?;
             }
@@ -406,8 +410,9 @@ impl Funboy {
         model: Option<String>,
         ollama_settings: &OllamaSettings,
         prompt: &str,
+        interpreter: &mut FslInterpreter,
     ) -> Result<GenerationResponse, FunboyError> {
-        let prompt = self.generate(prompt).await?;
+        let prompt = self.generate(prompt, interpreter).await?;
         match self
             .ollama_generator
             .generate(&prompt, ollama_settings, model)
@@ -423,7 +428,7 @@ impl Funboy {
 mod core {
     use super::*;
     use sqlx::PgPool;
-    use std::{panic, sync::Arc};
+    use std::panic;
     use template_database::test::create_debug_db;
 
     #[tokio::test]
@@ -518,7 +523,10 @@ mod core {
         let pool = get_pool().await;
         let funboy = get_funboy(pool).await;
 
-        let output = funboy.generate("^sentence").await.unwrap();
+        let output = funboy
+            .generate("^sentence", &mut FslInterpreter::new())
+            .await
+            .unwrap();
 
         assert!(output == "^sentence");
         println!("OUTPUT: {}", output);
@@ -535,7 +543,10 @@ mod core {
         funboy.add_substitutes("noun", &["fox"]).await.unwrap();
         funboy.add_substitutes("verb", &["jump"]).await.unwrap();
 
-        let output = funboy.generate("^sentence").await.unwrap();
+        let output = funboy
+            .generate("^sentence", &mut FslInterpreter::new())
+            .await
+            .unwrap();
 
         println!("OUTPUT: {}", output);
         assert!(output == "A quick brown fox jumped over the lazy dog.");
@@ -547,7 +558,7 @@ mod core {
         let funboy = get_funboy(pool).await;
 
         let output = funboy
-            .generate("{repeat(5, print(\"again\"))}")
+            .generate("{repeat(5, print(\"again\"))}", &mut FslInterpreter::new())
             .await
             .unwrap();
 
@@ -565,7 +576,10 @@ mod core {
         funboy.add_substitutes("verb", &["jump"]).await.unwrap();
 
         let output = funboy
-            .generate("{store(\"`adj\", adj) print(concat(adj, adj))}")
+            .generate(
+                "{store(\"`adj\", adj) print(concat(adj, adj))}",
+                &mut FslInterpreter::new(),
+            )
             .await
             .unwrap();
 
@@ -573,7 +587,10 @@ mod core {
         assert!(output == "quickadj");
 
         let output = funboy
-            .generate("{store(\"^adj\", adj) print(concat(adj, adj))}")
+            .generate(
+                "{store(\"^adj\", adj) print(concat(adj, adj))}",
+                &mut FslInterpreter::new(),
+            )
             .await
             .unwrap();
 
@@ -599,7 +616,7 @@ mod core {
             .unwrap();
 
         let output = funboy
-            .generate("{print(\"`quick_brown_fox`\")}")
+            .generate("{print(\"`quick_brown_fox`\")}", &mut FslInterpreter::new())
             .await
             .unwrap();
 
@@ -655,6 +672,7 @@ mod core {
                 Some("tinyllama".to_string()),
                 &OllamaSettings::default(),
                 "{print(\"You are very ^adj you know that?\")}",
+                &mut FslInterpreter::new(),
             )
             .await
             .unwrap();

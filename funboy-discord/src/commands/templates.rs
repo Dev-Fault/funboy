@@ -1,9 +1,26 @@
+use std::{sync::Arc, time::Duration};
+
+use fsl_interpreter::{
+    ErrorContext, FSLError, FslInterpreter, InterpreterData,
+    commands::NO_RULES,
+    types::{ArgPos, ArgRule, FslType, Value},
+};
 use funboy_core::{
     FunboyError,
     template_database::{KeySize, Limit, OrderBy, SortOrder},
 };
 use poise::ChoiceParameter;
-use serenity::all::{ComponentInteraction, EditInteractionResponse};
+use serenity::{
+    all::{
+        Cache, ChannelId, ComponentInteraction, EditInteractionResponse, Http, ShardMessenger,
+        UserId,
+    },
+    futures::StreamExt,
+};
+use tokio::{
+    sync::Mutex,
+    time::{Sleep, sleep},
+};
 
 use crate::{
     Context, Error,
@@ -19,9 +36,122 @@ use crate::{
     },
 };
 
+#[derive(Clone)]
+pub struct LightContext {
+    pub http: Arc<Http>,
+    pub cache: Arc<Cache>,
+    pub shard: ShardMessenger,
+    pub channel_id: ChannelId,
+    pub author_id: UserId,
+}
+
+impl LightContext {
+    pub fn from_poise(ctx: &Context<'_>) -> Self {
+        Self {
+            http: ctx.serenity_context().http.clone(),
+            cache: ctx.serenity_context().cache.clone(),
+            shard: ctx.serenity_context().shard.clone(),
+            channel_id: ctx.channel_id(),
+            author_id: ctx.author().id,
+        }
+    }
+}
+
+pub fn create_custom_interpreter(ctx: &Context<'_>) -> FslInterpreter {
+    let mut interpreter = FslInterpreter::new();
+
+    let lctx = LightContext::from_poise(ctx);
+
+    const SAY_RULES: &'static [ArgRule] = &[ArgRule::new(ArgPos::Index(0), &[FslType::Text])];
+    const SAY_LIMIT: u8 = 100;
+    let say_count: Arc<Mutex<u8>> = Arc::new(Mutex::new(0));
+    let say_command = {
+        move |values: Arc<Vec<Value>>, interpreter_data| {
+            let lctx = lctx.clone();
+            let say_count = say_count.clone();
+            async move {
+                if *say_count.lock().await >= SAY_LIMIT {
+                    return Err(FSLError::CustomError(ErrorContext::new(
+                        "say".into(),
+                        format!("Cannot use say more than {} times in one go", SAY_LIMIT),
+                    )));
+                }
+                *say_count.lock().await += 1;
+
+                sleep(Duration::from_secs(1)).await;
+
+                let message = values[0].as_text(interpreter_data).await?;
+                lctx.channel_id.say(&lctx.http, message).await.ok();
+                Ok(Value::None)
+            }
+        }
+    };
+
+    const ASK_RULES: &'static [ArgRule] = &[ArgRule::new(ArgPos::Index(0), &[FslType::Text])];
+    let lctx = LightContext::from_poise(&ctx);
+    const ASK_LIMIT: u8 = 100;
+    let ask_count: Arc<Mutex<u8>> = Arc::new(Mutex::new(0));
+    let ask_command = {
+        move |values: Arc<Vec<Value>>, data: Arc<InterpreterData>| {
+            let lctx = lctx.clone();
+            let ask_count = ask_count.clone();
+            async move {
+                if *ask_count.lock().await >= ASK_LIMIT {
+                    return Err(FSLError::CustomError(ErrorContext::new(
+                        "say".into(),
+                        format!("Cannot use ask more than {} times in one go", SAY_LIMIT),
+                    )));
+                }
+                *ask_count.lock().await += 1;
+
+                sleep(Duration::from_secs(1)).await;
+
+                lctx.channel_id
+                    .say(&lctx.http, values[0].as_text(data).await?)
+                    .await
+                    .ok();
+
+                let mut collector = lctx
+                    .channel_id
+                    .await_reply(lctx.shard)
+                    .timeout(Duration::from_secs(10))
+                    .channel_id(lctx.channel_id)
+                    .author_id(lctx.author_id)
+                    .stream();
+
+                if let Some(msg) = collector.next().await {
+                    Ok(Value::Text(msg.content))
+                } else {
+                    Ok(Value::None)
+                }
+            }
+        }
+    };
+
+    interpreter.add_command(
+        "say",
+        SAY_RULES,
+        FslInterpreter::construct_executor(say_command),
+    );
+
+    interpreter.add_command(
+        "ask",
+        ASK_RULES,
+        FslInterpreter::construct_executor(ask_command),
+    );
+
+    interpreter
+}
+
 #[poise::command(slash_command, prefix_command)]
 pub async fn generate(ctx: Context<'_>, input: String) -> Result<(), Error> {
-    let output = ctx.data().get_funboy().generate(&input).await;
+    ctx.say_ephemeral("Generating...").await?;
+
+    let output = ctx
+        .data()
+        .get_funboy()
+        .generate(&input, &mut create_custom_interpreter(&ctx))
+        .await;
 
     match output {
         Ok(output) => {

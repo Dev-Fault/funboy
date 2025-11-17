@@ -94,7 +94,9 @@ pub async fn register(ctx: Context<'_>) -> Result<(), Error> {
 async fn main() {
     dotenv().ok();
 
-    let intents = serenity::GatewayIntents::non_privileged();
+    let intents =
+        serenity::GatewayIntents::non_privileged() | serenity::GatewayIntents::MESSAGE_CONTENT;
+
     let token = std::env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN");
     let debug_mode = std::env::var("DEBUG_MODE")
         .unwrap_or("false".to_string())
