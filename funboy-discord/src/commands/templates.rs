@@ -114,7 +114,7 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> FslInterpreter {
                 let mut collector = lctx
                     .channel_id
                     .await_reply(lctx.shard)
-                    .timeout(Duration::from_secs(10))
+                    .timeout(Duration::from_secs(30))
                     .channel_id(lctx.channel_id)
                     .author_id(lctx.author_id)
                     .stream();
@@ -145,7 +145,7 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> FslInterpreter {
 
 #[poise::command(slash_command, prefix_command)]
 pub async fn generate(ctx: Context<'_>, input: String) -> Result<(), Error> {
-    ctx.say_ephemeral("Generating...").await?;
+    ctx.say("Generating...").await?;
 
     let output = ctx
         .data()

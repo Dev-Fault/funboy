@@ -212,7 +212,7 @@ pub async fn set_ollama_word_limit(ctx: Context<'_>, limit: u16) -> Result<(), E
 /// Generate an ollama response from prompt
 #[poise::command(slash_command, prefix_command, category = "Ollama")]
 pub async fn generate_ollama(ctx: Context<'_>, prompt: String) -> Result<(), Error> {
-    ctx.say_ephemeral("Generating response...").await?;
+    ctx.say("Generating response...").await?;
 
     let user_id = ctx.author().id;
     let mut users = ctx.data().ollama_data.users.lock().await;
