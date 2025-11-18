@@ -10,6 +10,7 @@ use super::discord_message_format::{DISCORD_CHARACTER_LIMIT, split_long_string, 
 pub const MAX_MESSAGE_CHAIN_SIZE: usize = DISCORD_CHARACTER_LIMIT * 4;
 pub const WARN_MESSAGE_SIZE_EXCEEDED: &str = "Message was too large to send.";
 pub const WARN_EMPTY_MESSAGE: &str = "Message was empty.";
+pub const MESSAGE_DELAY_MS: u64 = 300;
 
 pub type ListFormatter = Box<dyn Fn(&[&str]) -> Vec<String> + Send + Sync>;
 
@@ -26,7 +27,6 @@ pub trait ContextExtension {
     async fn say_long(&self, message: &str, ephemeral: bool) -> Result<(), Error>;
 }
 
-const MESSAGE_DELAY_MS: u64 = 500;
 impl<'a> ContextExtension for Context<'a> {
     async fn say_list(
         &self,

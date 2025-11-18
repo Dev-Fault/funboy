@@ -3,7 +3,7 @@ use serenity::all::UserId;
 
 use crate::{
     Context, Error, OllamaUserSettingsMap,
-    commands::templates::create_custom_interpreter,
+    interpreter::create_custom_interpreter,
     io_format::{context_extension::ContextExtension, discord_message_format::ellipsize_if_long},
 };
 
@@ -212,7 +212,11 @@ pub async fn set_ollama_word_limit(ctx: Context<'_>, limit: u16) -> Result<(), E
 /// Generate an ollama response from prompt
 #[poise::command(slash_command, prefix_command, category = "Ollama")]
 pub async fn generate_ollama(ctx: Context<'_>, prompt: String) -> Result<(), Error> {
-    ctx.say("Generating response...").await?;
+    ctx.say(&format!(
+        "Generating prompt: **\"{}\"**",
+        ellipsize_if_long(&prompt, 200)
+    ))
+    .await?;
 
     let user_id = ctx.author().id;
     let mut users = ctx.data().ollama_data.users.lock().await;

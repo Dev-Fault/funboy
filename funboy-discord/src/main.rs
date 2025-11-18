@@ -24,6 +24,7 @@ use crate::{
 
 mod commands;
 mod components;
+mod interpreter;
 mod io_format;
 
 pub type OllamaUserSettingsMap = HashMap<UserId, OllamaSettings>;
