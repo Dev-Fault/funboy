@@ -345,7 +345,7 @@ impl Funboy {
 
         match interpreter_result {
             Ok(interpreted_text) => Ok(interpreted_text),
-            Err(e) => Err(FunboyError::Interpreter(e.to_string())),
+            Err(e) => Err(e),
         }
     }
 
