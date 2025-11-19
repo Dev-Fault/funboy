@@ -329,28 +329,100 @@ impl Funboy {
     async fn interpret_input(
         &self,
         input: String,
-        template_substitutors: Vec<TemplateSubstitutor>,
         interpreter: &mut FslInterpreter,
     ) -> Result<String, FunboyError> {
         let mut substituted_text = input.clone();
-        for template_substitutor in template_substitutors {
-            substituted_text = template_substitutor
-                .substitute_recursively(substituted_text, |template: String| async move {
-                    match self.get_random_substitute(&template).await {
-                        Ok(sub) => Some(sub.name.to_string()),
-                        Err(_) => None,
-                    }
-                })
-                .await;
-        }
+        substituted_text = TemplateSubstitutor::new(TemplateDelimiter::Caret)
+            .substitute_recursively(substituted_text, |template: String| async move {
+                match self.get_random_substitute(&template).await {
+                    Ok(sub) => Some(sub.name.to_string()),
+                    Err(_) => None,
+                }
+            })
+            .await;
 
-        let interpreter_result = interpreter.interpret_embedded_code(&substituted_text).await;
+        let interpreter_result = self.interpret_code(interpreter, &substituted_text).await;
 
         match interpreter_result {
             Ok(interpreted_text) => Ok(interpreted_text),
             Err(e) => Err(FunboyError::Interpreter(e.to_string())),
         }
     }
+
+    async fn interpret_code(
+        &self,
+        interpreter: &mut FslInterpreter,
+        input: &str,
+    ) -> Result<String, FunboyError> {
+        let mut output = String::with_capacity(input.len());
+        let mut code_stack: Vec<String> = Vec::new();
+
+        let mut code_depth: i16 = 0;
+
+        for c in input.chars() {
+            if c == '{' {
+                code_stack.push(String::new());
+                code_depth += 1;
+            } else if c == '}' {
+                code_depth -= 1;
+                if code_depth < 0 {
+                    return Err(FunboyError::Interpreter(
+                        "Unmatched curly braces".to_string(),
+                    ));
+                } else {
+                    match code_stack.pop() {
+                        Some(code) => {
+                            interpreter.reset_data();
+                            match interpreter.interpret(&code).await {
+                                Ok(eval) => {
+                                    let substituted_text =
+                                        TemplateSubstitutor::new(TemplateDelimiter::BackTick)
+                                            .substitute_recursively(
+                                                eval,
+                                                |template: String| async move {
+                                                    match self
+                                                        .get_random_substitute(&template)
+                                                        .await
+                                                    {
+                                                        Ok(sub) => Some(sub.name.to_string()),
+                                                        Err(_) => None,
+                                                    }
+                                                },
+                                            )
+                                            .await;
+
+                                    match code_stack.last_mut() {
+                                        Some(code) => code.push_str(&substituted_text),
+                                        None => output.push_str(&substituted_text),
+                                    }
+                                }
+                                Err(e) => {
+                                    return Err(FunboyError::Interpreter(e.to_string()));
+                                }
+                            };
+                        }
+                        None => {}
+                    }
+                }
+            } else if code_depth == 0 {
+                output.push(c);
+            } else {
+                match code_stack.last_mut() {
+                    Some(s) => s.push(c),
+                    None => {}
+                }
+            }
+        }
+
+        if code_depth != 0 {
+            return Err(FunboyError::Interpreter(
+                "Unmatched curly braces".to_string(),
+            ));
+        }
+
+        Ok(output)
+    }
+
     /// Resolves templates and fsl code until output is complete or depth limit is reached
     pub async fn generate(
         &self,
@@ -369,21 +441,7 @@ impl Funboy {
             if !prev_hashes.insert(hash) {
                 break;
             } else {
-                output = self
-                    .interpret_input(
-                        output,
-                        vec![TemplateSubstitutor::new(TemplateDelimiter::Caret)],
-                        interpreter,
-                    )
-                    .await?;
-
-                output = self
-                    .interpret_input(
-                        output,
-                        vec![TemplateSubstitutor::new(TemplateDelimiter::BackTick)],
-                        interpreter,
-                    )
-                    .await?;
+                output = self.interpret_input(output, interpreter).await?;
             }
         }
 
@@ -577,7 +635,7 @@ mod core {
 
         let output = funboy
             .generate(
-                "{store(\"`adj\", adj) print(concat(adj, adj))}",
+                "{adj.store(\"`adj\") print(concat(adj, adj))}",
                 &mut FslInterpreter::new(),
             )
             .await
@@ -588,7 +646,7 @@ mod core {
 
         let output = funboy
             .generate(
-                "{store(\"^adj\", adj) print(concat(adj, adj))}",
+                "{adj.store(\"^adj\") print(concat(adj, adj))}",
                 &mut FslInterpreter::new(),
             )
             .await
