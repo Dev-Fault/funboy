@@ -2,7 +2,7 @@ use funboy_core::{
     FunboyError,
     template_database::{KeySize, Limit, OrderBy, SortOrder},
 };
-use poise::ChoiceParameter;
+use poise::{ChoiceParameter, CreateReply, ReplyHandle};
 use serenity::all::ComponentInteraction;
 
 use crate::{
@@ -22,7 +22,7 @@ use crate::{
 
 #[poise::command(slash_command, prefix_command)]
 pub async fn generate(ctx: Context<'_>, input: String) -> Result<(), Error> {
-    ctx.say("Generating...").await?;
+    let original_message = ctx.say("Generating...").await?;
 
     let output = ctx
         .data()
@@ -33,7 +33,14 @@ pub async fn generate(ctx: Context<'_>, input: String) -> Result<(), Error> {
     match output {
         Ok(output) => {
             if !output.is_empty() {
-                ctx.say_long(&output, false).await?;
+                ctx.edit_long(original_message, &output, false).await?;
+            } else {
+                original_message
+                    .edit(
+                        ctx,
+                        CreateReply::default().content("There was nothing to generate."),
+                    )
+                    .await?;
             }
         }
         Err(e) => {

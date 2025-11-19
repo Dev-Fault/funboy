@@ -1,4 +1,5 @@
 use funboy_core::ollama::{MAX_PREDICT, OllamaSettings};
+use poise::CreateReply;
 use serenity::all::UserId;
 
 use crate::{
@@ -212,23 +213,19 @@ pub async fn set_ollama_word_limit(ctx: Context<'_>, limit: u16) -> Result<(), E
 /// Generate an ollama response from prompt
 #[poise::command(slash_command, prefix_command, category = "Ollama")]
 pub async fn generate_ollama(ctx: Context<'_>, prompt: String) -> Result<(), Error> {
-    ctx.say(&format!(
-        "Generating prompt: **\"{}\"**",
-        ellipsize_if_long(&prompt, 200)
-    ))
-    .await?;
+    let original_message = ctx.say("Generating...").await?;
 
     let user_id = ctx.author().id;
-    let mut users = ctx.data().ollama_data.users.lock().await;
+    let mut users_lock = ctx.data().ollama_data.users.lock().await;
 
-    if users.contains(&user_id) {
+    if users_lock.contains(&user_id) {
         ctx.say_ephemeral("You are already generating a prompt. Please wait until it is finished.")
             .await?;
         return Ok(());
     } else {
-        users.insert(user_id);
+        users_lock.insert(user_id);
     }
-    drop(users);
+    drop(users_lock);
 
     let interpreted_prompt = ctx
         .data()
@@ -239,6 +236,16 @@ pub async fn generate_ollama(ctx: Context<'_>, prompt: String) -> Result<(), Err
     let result: Result<(), Error> = {
         match interpreted_prompt {
             Ok(prompt) => {
+                original_message
+                    .edit(
+                        ctx,
+                        CreateReply::default().content(&format!(
+                            "Generating prompt: **\"{}\"**",
+                            ellipsize_if_long(&prompt, 200)
+                        )),
+                    )
+                    .await?;
+
                 let user_id = ctx.author().id;
                 let mut ollama_settings_map = ctx.data().ollama_data.user_settings.lock().await;
                 let settings =

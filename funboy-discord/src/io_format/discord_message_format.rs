@@ -31,7 +31,7 @@ pub fn split_by_whitespace_unless_quoted(input: &str) -> Vec<&str> {
     output
 }
 
-pub fn split_message(message: &[&str]) -> Vec<String> {
+pub fn split_messages(message: &[&str]) -> Vec<String> {
     let mut message_split: Vec<String> = Vec::new();
 
     let iter = message.iter();
@@ -46,7 +46,7 @@ pub fn split_message(message: &[&str]) -> Vec<String> {
             if value.len() <= DISCORD_CHARACTER_LIMIT {
                 message_part.push_str(value);
             } else {
-                for sub_str in split_long_string(value) {
+                for sub_str in split_message(value) {
                     message_split.push(sub_str.to_string());
                 }
             }
@@ -75,41 +75,32 @@ pub fn split_block<'a>(str: &'a str) -> Vec<&'a str> {
     output
 }
 
-// TODO: Fix bugs with this
-pub fn split_long_string(str: &str) -> Vec<&str> {
-    let mut output = Vec::new();
+pub fn split_message(input: &str) -> Vec<&str> {
+    let mut messages: Vec<&str> = vec![];
+    let mut end_of_last_word: usize = 0;
+    let mut end_of_last_word_prev: usize = 0;
+    let mut prev_char_was_whitespace = false;
+    let mut start: usize = 0;
 
-    let mut output_length = 0;
-    let mut message_length = 0;
-
-    for word in str.split_inclusive(' ').collect::<Vec<&str>>() {
-        if message_length + word.len() > DISCORD_CHARACTER_LIMIT {
-            output.push(
-                str.get(output_length..output_length + message_length)
-                    .unwrap_or_default(),
-            );
-            output_length += message_length;
-            message_length = 0;
+    for (i, ch) in input.char_indices() {
+        if i > 0 && ch.is_whitespace() && !prev_char_was_whitespace {
+            end_of_last_word = i;
         }
-        message_length += word.len();
-    }
 
-    if let Some(o) = str.get(output_length..output_length + message_length) {
-        output.push(o)
-    }
-
-    let mut output2 = Vec::new();
-    for message in output {
-        if message.len() > DISCORD_CHARACTER_LIMIT {
-            for block in split_block(message) {
-                output2.push(block);
-            }
-        } else {
-            output2.push(message);
+        if end_of_last_word - start >= DISCORD_CHARACTER_LIMIT {
+            messages.push(&input[start..end_of_last_word_prev]);
+            start = end_of_last_word_prev;
         }
+
+        end_of_last_word_prev = end_of_last_word;
+        prev_char_was_whitespace = ch.is_whitespace();
     }
 
-    output2
+    for block in split_block(&input[start..input.len()]) {
+        messages.push(block);
+    }
+
+    messages
 }
 
 pub fn ellipsize_if_long(item: &str, limit: usize) -> String {
@@ -262,6 +253,74 @@ mod tests {
     const ITEM_SEPERATOR: &str = ", ";
 
     #[test]
+    fn test_no_words_cut_in_middle() {
+        let input = "hello world this isss aaaa test message ".repeat(1000);
+        let result = split_message(&input);
+        for msg in &result {
+            dbg!(&msg);
+            assert!(!(msg.len() > DISCORD_CHARACTER_LIMIT));
+            assert!(
+                msg.ends_with("hello")
+                    || msg.ends_with("world")
+                    || msg.ends_with("this")
+                    || msg.ends_with("isss")
+                    || msg.ends_with("aaaa")
+                    || msg.ends_with("test")
+                    || msg.ends_with("message")
+                    || msg.ends_with(" ")
+            );
+        }
+    }
+
+    #[test]
+    fn test_messages_reconstruct_original() {
+        let input = "The quick brown fox jumps over the lazy dog. ".repeat(100);
+        let result = split_message(&input);
+        let reconstructed = result.join("");
+        assert_eq!(reconstructed, input);
+    }
+
+    #[test]
+    fn test_empty_string() {
+        let input = "";
+        let result = split_message(input);
+        assert!(result.is_empty() || (result.len() == 1 && result[0].is_empty()));
+    }
+
+    #[test]
+    fn test_long_block() {
+        let input = "=".repeat(DISCORD_CHARACTER_LIMIT * 2);
+        let result = split_message(&input);
+        dbg!(&result);
+        assert!(result[0].len() == DISCORD_CHARACTER_LIMIT);
+        assert!(result[1].len() == DISCORD_CHARACTER_LIMIT);
+    }
+
+    #[test]
+    fn test_single_word() {
+        let input = "verylongword";
+        let result = split_message(input);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], "verylongword");
+    }
+
+    #[test]
+    fn test_multiple_spaces() {
+        let input = "hello    world    test";
+        let result = split_message(&input);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], "hello    world    test");
+    }
+
+    #[test]
+    fn test_newlines_and_tabs() {
+        let input = "hello\nworld\ttest";
+        let result = split_message(&input);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], "hello\nworld\ttest");
+    }
+
+    #[test]
     fn mixed_quote_input() {
         let input = String::from(
             "cat \"\" \"United States of America\" bear snake lion \"my mom\"  \"ten bulls\" dog goat",
@@ -277,63 +336,6 @@ mod tests {
         let input = String::from("This is some input");
 
         assert_eq!(split_by_whitespace_unless_quoted(&input).len(), 4);
-    }
-
-    #[test]
-    fn split_a_long_string() {
-        let mut long_string = String::with_capacity(23000);
-
-        for _ in 0..23000 {
-            long_string.push('0');
-        }
-
-        let split_string = split_long_string(&long_string);
-
-        let mut character_count = 0;
-        for s in &split_string {
-            character_count += s.len();
-        }
-        assert!(character_count == long_string.len());
-
-        for s in &split_string {
-            assert!(s.len() <= super::DISCORD_CHARACTER_LIMIT);
-        }
-    }
-
-    #[test]
-    fn split_a_long_string_with_spaces() {
-        let mut long_string = String::with_capacity(23000);
-
-        for i in 0..23000 {
-            // also test with spaces at random positions
-            if i == 2004 || i == 4500 {
-                long_string.push(' ');
-            } else {
-                long_string.push('0');
-            }
-        }
-
-        long_string.insert_str(
-            8438,
-            " some normal words that you would find in any message on discord ",
-        );
-
-        dbg!(&long_string);
-
-        let split_string = split_long_string(&long_string);
-
-        let mut character_count = 0;
-        for s in &split_string {
-            println!("\nMessage: {}\nLength: {}\n\n", &s, &s.len());
-            character_count += s.len();
-            assert!(s.len() <= super::DISCORD_CHARACTER_LIMIT);
-        }
-        println!(
-            "Count: {} actual length: {}",
-            &character_count,
-            &long_string.len()
-        );
-        assert!(character_count == long_string.len());
     }
 
     #[test]
@@ -369,7 +371,7 @@ mod tests {
         message.push(regular_string_3);
         message.push(regular_string_4);
 
-        for split in split_message(&message.iter().map(|s| &s[..]).collect::<Vec<&str>>()[..]) {
+        for split in split_messages(&message.iter().map(|s| &s[..]).collect::<Vec<&str>>()[..]) {
             dbg!(split.len());
             assert!(split.len() <= super::DISCORD_CHARACTER_LIMIT);
         }

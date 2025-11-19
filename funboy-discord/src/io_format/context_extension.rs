@@ -5,7 +5,7 @@ use crate::{Context, Error};
 use poise::{CreateReply, ReplyHandle};
 use tokio::time::sleep;
 
-use super::discord_message_format::{DISCORD_CHARACTER_LIMIT, split_long_string, split_message};
+use super::discord_message_format::{DISCORD_CHARACTER_LIMIT, split_message, split_messages};
 
 pub const MAX_MESSAGE_CHAIN_SIZE: usize = DISCORD_CHARACTER_LIMIT * 4;
 pub const WARN_MESSAGE_SIZE_EXCEEDED: &str = "Message was too large to send.";
@@ -25,18 +25,25 @@ pub trait ContextExtension {
     async fn say_ephemeral(&self, message: &str) -> Result<ReplyHandle<'_>, Error>;
 
     async fn say_long(&self, message: &str, ephemeral: bool) -> Result<(), Error>;
+
+    async fn edit_long<'b>(
+        &self,
+        original_message: ReplyHandle<'b>,
+        message: &str,
+        ephemeral: bool,
+    ) -> Result<(), Error>;
 }
 
 impl<'a> ContextExtension for Context<'a> {
     async fn say_list(
         &self,
-        message: &[&str],
+        list: &[&str],
         ephemeral: bool,
         formatter: Option<ListFormatter>,
     ) -> Result<(), Error> {
         let mut size: usize = 0;
 
-        for string in message {
+        for string in list {
             size = size.saturating_add(string.len());
         }
 
@@ -49,18 +56,18 @@ impl<'a> ContextExtension for Context<'a> {
         }
 
         let formatted_message: Vec<String>;
-        let message = match formatter {
+        let messages = match formatter {
             Some(formatter) => {
-                formatted_message = formatter(message);
+                formatted_message = formatter(list);
                 &formatted_message
                     .iter()
                     .map(|msg| msg.as_str())
                     .collect::<Vec<&str>>()[..]
             }
-            None => message,
+            None => list,
         };
 
-        for (i, split_message) in split_message(message).iter().enumerate() {
+        for (i, split_message) in split_messages(messages).iter().enumerate() {
             self.defer_ephemeral().await?;
             self.send(
                 CreateReply::default()
@@ -101,9 +108,39 @@ impl<'a> ContextExtension for Context<'a> {
             return Ok(());
         }
 
-        for m in split_long_string(message) {
+        for m in split_message(message) {
             self.send(CreateReply::default().content(m).ephemeral(ephemeral))
                 .await?;
+        }
+        Ok(())
+    }
+
+    async fn edit_long<'b>(
+        &self,
+        original_message: ReplyHandle<'b>,
+        message: &str,
+        ephemeral: bool,
+    ) -> Result<(), Error> {
+        if !ephemeral && message.len() > MAX_MESSAGE_CHAIN_SIZE {
+            self.say_ephemeral(WARN_MESSAGE_SIZE_EXCEEDED).await?;
+            return Ok(());
+        } else if message.is_empty() {
+            self.say_ephemeral(WARN_EMPTY_MESSAGE).await?;
+            return Ok(());
+        }
+
+        for (i, m) in split_message(message).iter().enumerate() {
+            if i == 0 {
+                original_message
+                    .edit(
+                        *self,
+                        CreateReply::default().content(*m).ephemeral(ephemeral),
+                    )
+                    .await?;
+            } else {
+                self.send(CreateReply::default().content(*m).ephemeral(ephemeral))
+                    .await?;
+            }
         }
         Ok(())
     }
