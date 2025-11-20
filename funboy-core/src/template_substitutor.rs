@@ -97,24 +97,29 @@ impl TemplateSubstitutor {
         let mut start = 0;
         let mut end = 0;
         for template in self.regex.find_iter(&input[start..]) {
-            let sub = match template_mapper(
+            let sub = template_mapper(
                 template.as_str()[1..]
                     .trim_end_matches(self.delimiter.to_char())
                     .to_string(),
             )
-            .await
-            {
-                Some(sub) => sub,
-                None => template.as_str().to_string(),
-            };
+            .await;
 
-            end = template.end();
+            match sub {
+                Some(sub) => {
+                    end = template.end();
 
-            let segment = self.regex.replace(&input[start..end], &sub).into_owned();
+                    let segment = self.regex.replace(&input[start..end], &sub).into_owned();
 
-            start = template.end();
+                    start = template.end();
 
-            output.push_str(&segment);
+                    output.push_str(&segment);
+                }
+                None => {
+                    output.push_str(template.as_str());
+                    start = template.end();
+                    end = template.end();
+                }
+            }
         }
         output.push_str(&input[end..]);
         output

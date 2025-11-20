@@ -328,30 +328,6 @@ impl Funboy {
         }
     }
 
-    /// Resolves templates and interprets embeded code in input with a single pass
-    async fn interpret_input(
-        &self,
-        input: String,
-        interpreter: Arc<Mutex<FslInterpreter>>,
-    ) -> Result<String, FunboyError> {
-        let mut substituted_text = input.clone();
-        substituted_text = TemplateSubstitutor::new(TemplateDelimiter::Caret)
-            .substitute_recursively(substituted_text, |template: String| async move {
-                match self.get_random_substitute(&template).await {
-                    Ok(sub) => Some(sub.name.to_string()),
-                    Err(_) => None,
-                }
-            })
-            .await;
-
-        let interpreter_result = self.interpret_code(interpreter, &substituted_text).await;
-
-        match interpreter_result {
-            Ok(interpreted_text) => Ok(interpreted_text),
-            Err(e) => Err(e),
-        }
-    }
-
     async fn interpret_code(
         &self,
         interpreter: Arc<Mutex<FslInterpreter>>,
@@ -427,6 +403,30 @@ impl Funboy {
         Ok(output)
     }
 
+    /// Resolves templates and interprets embeded code in input with a single pass
+    async fn interpret_input(
+        &self,
+        input: String,
+        interpreter: Arc<Mutex<FslInterpreter>>,
+    ) -> Result<String, FunboyError> {
+        let mut substituted_text = input.clone();
+        substituted_text = TemplateSubstitutor::new(TemplateDelimiter::Caret)
+            .substitute_recursively(substituted_text, |template: String| async move {
+                match self.get_random_substitute(&template).await {
+                    Ok(sub) => Some(sub.name.to_string()),
+                    Err(_) => None,
+                }
+            })
+            .await;
+
+        let interpreter_result = self.interpret_code(interpreter, &substituted_text).await;
+
+        match interpreter_result {
+            Ok(interpreted_text) => Ok(interpreted_text),
+            Err(e) => Err(e),
+        }
+    }
+
     #[async_recursion]
     async fn substitute_register_templates(
         &self,
@@ -455,7 +455,7 @@ impl Funboy {
                                     Ok(interpreted_sub) => interpreted_sub,
                                     Err(e) => {
                                         let _ = funboy_error.lock().await.insert(e);
-                                        "".to_string()
+                                        return None;
                                     }
                                 };
                                 sub_map.insert(template.to_string(), sub.clone());
