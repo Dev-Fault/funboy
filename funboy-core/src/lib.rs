@@ -346,34 +346,7 @@ impl Funboy {
         let interpreter_result = self.interpret_code(interpreter, &substituted_text).await;
 
         match interpreter_result {
-            Ok(interpreted_text) => {
-                let sub_map: Arc<Mutex<HashMap<String, String>>> =
-                    Arc::new(Mutex::new(HashMap::new()));
-                substituted_text = TemplateSubstitutor::new(TemplateDelimiter::DollarSign)
-                    .substitute_recursively(interpreted_text, |template: String| {
-                        let sub_map = sub_map.clone();
-                        async move {
-                            let mut sub_map = sub_map.lock().await;
-                            let result = sub_map.get(&template);
-                            if let Some(value) = result {
-                                Some(value.clone())
-                            } else {
-                                let split = template.split('-').collect::<Vec<&str>>();
-                                let template_before_dash = split.get(0).unwrap_or(&"");
-                                match self.get_random_substitute(&template_before_dash).await {
-                                    Ok(sub) => {
-                                        sub_map.insert(template.to_string(), sub.name.to_string());
-                                        return Some(sub.name.to_string());
-                                    }
-                                    Err(_) => None,
-                                }
-                            }
-                        }
-                    })
-                    .await;
-
-                Ok(substituted_text)
-            }
+            Ok(interpreted_text) => Ok(interpreted_text),
             Err(e) => Err(e),
         }
     }
@@ -448,6 +421,30 @@ impl Funboy {
                 "Unmatched curly braces".to_string(),
             ));
         }
+
+        let sub_map: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
+        output = TemplateSubstitutor::new(TemplateDelimiter::DollarSign)
+            .substitute_recursively(output, |template: String| {
+                let sub_map = sub_map.clone();
+                async move {
+                    let mut sub_map = sub_map.lock().await;
+                    let result = sub_map.get(&template);
+                    if let Some(value) = result {
+                        Some(value.clone())
+                    } else {
+                        let split = template.split('-').collect::<Vec<&str>>();
+                        let template_before_dash = split.get(0).unwrap_or(&"");
+                        match self.get_random_substitute(&template_before_dash).await {
+                            Ok(sub) => {
+                                sub_map.insert(template.to_string(), sub.name.to_string());
+                                return Some(sub.name.to_string());
+                            }
+                            Err(_) => None,
+                        }
+                    }
+                }
+            })
+            .await;
 
         Ok(output)
     }
