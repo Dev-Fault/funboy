@@ -1,13 +1,15 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     hash::{DefaultHasher, Hash, Hasher},
     str::FromStr,
+    sync::Arc,
 };
 
 use fsl_interpreter::FslInterpreter;
 use ollama_rs::{generation::completion::GenerationResponse, models::ModelInfo};
 use rand::{Rng, distr::uniform::SampleUniform};
 use regex::Regex;
+use tokio::sync::Mutex;
 
 use crate::{
     ollama::{OllamaGenerator, OllamaSettings},
@@ -341,6 +343,28 @@ impl Funboy {
             })
             .await;
 
+        let sub_map: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
+        substituted_text = TemplateSubstitutor::new(TemplateDelimiter::DollarSign)
+            .substitute_recursively(substituted_text, |template: String| {
+                let sub_map = sub_map.clone();
+                async move {
+                    let mut sub_map = sub_map.lock().await;
+                    let result = sub_map.get(&template);
+                    if let Some(value) = result {
+                        Some(value.clone())
+                    } else {
+                        match self.get_random_substitute(&template).await {
+                            Ok(sub) => {
+                                sub_map.insert(template, sub.name.to_string());
+                                return Some(sub.name.to_string());
+                            }
+                            Err(_) => None,
+                        }
+                    }
+                }
+            })
+            .await;
+
         let interpreter_result = self.interpret_code(interpreter, &substituted_text).await;
 
         match interpreter_result {
@@ -608,6 +632,32 @@ mod core {
 
         println!("OUTPUT: {}", output);
         assert!(output == "A quick brown fox jumped over the lazy dog.");
+    }
+
+    #[tokio::test]
+    async fn generate_copied_template() {
+        let pool = get_pool().await;
+        let funboy = get_funboy(pool).await;
+
+        funboy
+            .add_substitutes(
+                "noun",
+                &["fox", "bear", "lion", "tiger", "bat", "giraffe", "zebra"],
+            )
+            .await
+            .unwrap();
+
+        let output = funboy
+            .generate("$noun $noun $noun $noun $noun", &mut FslInterpreter::new())
+            .await
+            .unwrap();
+
+        let mut subs = output.split_whitespace();
+        let first_sub = subs.nth(0).unwrap();
+        for sub in subs {
+            dbg!(sub);
+            assert!(sub == first_sub);
+        }
     }
 
     #[tokio::test]
