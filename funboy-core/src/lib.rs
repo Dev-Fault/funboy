@@ -437,7 +437,7 @@ impl Funboy {
     ) -> Result<String, FunboyError> {
         let sub_map: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
         let funboy_error: Arc<Mutex<Option<FunboyError>>> = Arc::new(Mutex::new(None));
-        let output = TemplateSubstitutor::new(TemplateDelimiter::Plus)
+        let output = TemplateSubstitutor::new(TemplateDelimiter::PlusRegister)
             .substitute_recursively(input, |template: String| {
                 let sub_map = sub_map.clone();
                 let interpreter = interpreter.clone();
