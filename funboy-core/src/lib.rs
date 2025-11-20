@@ -135,7 +135,15 @@ impl Funboy {
 
     pub const MAX_TEMPLATE_LENGTH: usize = 255;
     fn validate_template_name(&self, template: &str) -> Result<(), FunboyError> {
-        if !self.valid_template_regex.is_match(template) {
+        if template.is_empty() {
+            return Err(FunboyError::UserInput(
+                "template cannot be empty".to_string(),
+            ));
+        } else if template.chars().nth(0).is_some_and(|ch| ch.is_numeric()) {
+            return Err(FunboyError::UserInput(
+                "first character of template cannot be a number".to_string(),
+            ));
+        } else if !self.valid_template_regex.is_match(template) {
             return Err(FunboyError::UserInput(
                 "template must be lowercase containing only characters a-z, 0-9, and _".to_string(),
             ));

@@ -115,8 +115,9 @@ impl TemplateSubstitutor {
                     output.push_str(&segment);
                 }
                 None => {
-                    output.push_str(template.as_str());
+                    output.push_str(&input[end..template.start()]);
                     start = template.end();
+                    output.push_str(template.as_str());
                     end = template.end();
                 }
             }
