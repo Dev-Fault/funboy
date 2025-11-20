@@ -1,6 +1,9 @@
+use std::sync::Arc;
+
 use funboy_core::ollama::{MAX_PREDICT, OllamaSettings};
 use poise::CreateReply;
 use serenity::all::UserId;
+use tokio::sync::Mutex;
 
 use crate::{
     Context, Error, OllamaUserSettingsMap,
@@ -230,7 +233,10 @@ pub async fn generate_ollama(ctx: Context<'_>, prompt: String) -> Result<(), Err
     let interpreted_prompt = ctx
         .data()
         .funboy
-        .generate(&prompt, &mut create_custom_interpreter(&ctx))
+        .generate(
+            &prompt,
+            Arc::new(Mutex::new(create_custom_interpreter(&ctx))),
+        )
         .await;
 
     let result: Result<(), Error> = {
