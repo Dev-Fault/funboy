@@ -409,9 +409,11 @@ impl Funboy {
         input: String,
         interpreter: Arc<Mutex<FslInterpreter>>,
     ) -> Result<String, FunboyError> {
+        println!("Before registers {}", input);
         let mut substituted_text = self
             .substitute_register_templates(input, interpreter.clone())
             .await?;
+        println!("after registers {}", substituted_text);
         substituted_text = TemplateSubstitutor::new(TemplateDelimiter::Caret)
             .substitute_recursively(substituted_text, |template: String| async move {
                 match self.get_random_substitute(&template).await {
@@ -420,6 +422,7 @@ impl Funboy {
                 }
             })
             .await;
+        println!("after carets {}", substituted_text);
 
         let interpreter_result = self.interpret_code(interpreter, &substituted_text).await;
 
