@@ -5,6 +5,7 @@ use std::{
     sync::Arc,
 };
 
+use async_recursion::async_recursion;
 use fsl_interpreter::FslInterpreter;
 use ollama_rs::{generation::completion::GenerationResponse, models::ModelInfo};
 use rand::{Rng, distr::uniform::SampleUniform};
@@ -331,7 +332,7 @@ impl Funboy {
     async fn interpret_input(
         &self,
         input: String,
-        interpreter: &mut FslInterpreter,
+        interpreter: Arc<Mutex<FslInterpreter>>,
     ) -> Result<String, FunboyError> {
         let mut substituted_text = input.clone();
         substituted_text = TemplateSubstitutor::new(TemplateDelimiter::Caret)
@@ -353,7 +354,7 @@ impl Funboy {
 
     async fn interpret_code(
         &self,
-        interpreter: &mut FslInterpreter,
+        interpreter: Arc<Mutex<FslInterpreter>>,
         input: &str,
     ) -> Result<String, FunboyError> {
         let mut output = String::with_capacity(input.len());
@@ -374,6 +375,7 @@ impl Funboy {
                 } else {
                     match code_stack.pop() {
                         Some(code) => {
+                            let mut interpreter = interpreter.lock().await;
                             interpreter.reset_data();
                             match interpreter.interpret(&code).await {
                                 Ok(eval) => {
@@ -422,10 +424,23 @@ impl Funboy {
             ));
         }
 
+        Ok(output)
+    }
+
+    #[async_recursion]
+    async fn substitute_register_templates(
+        &self,
+        input: String,
+        interpreter: Arc<Mutex<FslInterpreter>>,
+    ) -> Result<String, FunboyError> {
         let sub_map: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
-        output = TemplateSubstitutor::new(TemplateDelimiter::DollarSign)
-            .substitute_recursively(output, |template: String| {
+        let funboy_error: Arc<Mutex<Option<FunboyError>>> = Arc::new(Mutex::new(None));
+        let output = TemplateSubstitutor::new(TemplateDelimiter::DollarSign)
+            .substitute_recursively(input, |template: String| {
                 let sub_map = sub_map.clone();
+                let interpreter = interpreter.clone();
+                let funboy_error = funboy_error.clone();
+
                 async move {
                     let mut sub_map = sub_map.lock().await;
                     let result = sub_map.get(&template);
@@ -436,8 +451,15 @@ impl Funboy {
                         let template_before_dash = split.get(0).unwrap_or(&"");
                         match self.get_random_substitute(&template_before_dash).await {
                             Ok(sub) => {
-                                sub_map.insert(template.to_string(), sub.name.to_string());
-                                return Some(sub.name.to_string());
+                                let sub = match self.generate(&sub.name, interpreter).await {
+                                    Ok(interpreted_sub) => interpreted_sub,
+                                    Err(e) => {
+                                        let _ = funboy_error.lock().await.insert(e);
+                                        "".to_string()
+                                    }
+                                };
+                                sub_map.insert(template.to_string(), sub.clone());
+                                return Some(sub);
                             }
                             Err(_) => None,
                         }
@@ -445,15 +467,18 @@ impl Funboy {
                 }
             })
             .await;
-
-        Ok(output)
+        let err = funboy_error.lock().await.take();
+        match err {
+            Some(e) => return Err(e),
+            None => return Ok(output),
+        }
     }
 
     /// Resolves templates and fsl code until output is complete or depth limit is reached
     pub async fn generate(
         &self,
         input: &str,
-        interpreter: &mut FslInterpreter,
+        interpreter: Arc<Mutex<FslInterpreter>>,
     ) -> Result<String, FunboyError> {
         let mut output = input.to_string();
         let mut prev_hashes = HashSet::new();
@@ -467,10 +492,13 @@ impl Funboy {
             if !prev_hashes.insert(hash) {
                 break;
             } else {
-                output = self.interpret_input(output, interpreter).await?;
+                output = self.interpret_input(output, interpreter.clone()).await?;
             }
         }
 
+        let output = self
+            .substitute_register_templates(output, interpreter)
+            .await?;
         Ok(output)
     }
 
@@ -494,7 +522,7 @@ impl Funboy {
         model: Option<String>,
         ollama_settings: &OllamaSettings,
         prompt: &str,
-        interpreter: &mut FslInterpreter,
+        interpreter: Arc<Mutex<FslInterpreter>>,
     ) -> Result<GenerationResponse, FunboyError> {
         let prompt = self.generate(prompt, interpreter).await?;
         match self
@@ -608,7 +636,7 @@ mod core {
         let funboy = get_funboy(pool).await;
 
         let output = funboy
-            .generate("^sentence", &mut FslInterpreter::new())
+            .generate("^sentence", Arc::new(Mutex::new(FslInterpreter::new())))
             .await
             .unwrap();
 
@@ -628,7 +656,7 @@ mod core {
         funboy.add_substitutes("verb", &["jump"]).await.unwrap();
 
         let output = funboy
-            .generate("^sentence", &mut FslInterpreter::new())
+            .generate("^sentence", Arc::new(Mutex::new(FslInterpreter::new())))
             .await
             .unwrap();
 
@@ -650,7 +678,10 @@ mod core {
             .unwrap();
 
         let output = funboy
-            .generate("$noun $noun $noun $noun $noun", &mut FslInterpreter::new())
+            .generate(
+                "$noun $noun $noun $noun $noun",
+                Arc::new(Mutex::new(FslInterpreter::new())),
+            )
             .await
             .unwrap();
 
@@ -678,7 +709,7 @@ mod core {
         let output = funboy
             .generate(
                 "$noun-1 $noun-1 $noun-2 $noun-2 $noun-2 $noun-999 $noun-999 $noun-999$$noun-999$",
-                &mut FslInterpreter::new(),
+                Arc::new(Mutex::new(FslInterpreter::new())),
             )
             .await
             .unwrap();
@@ -693,7 +724,10 @@ mod core {
         let funboy = get_funboy(pool).await;
 
         let output = funboy
-            .generate("{repeat(5, print(\"again\"))}", &mut FslInterpreter::new())
+            .generate(
+                "{repeat(5, print(\"again\"))}",
+                Arc::new(Mutex::new(FslInterpreter::new())),
+            )
             .await
             .unwrap();
 
@@ -713,7 +747,7 @@ mod core {
         let output = funboy
             .generate(
                 "{adj.store(\"`adj\") print(concat(adj, adj))}",
-                &mut FslInterpreter::new(),
+                Arc::new(Mutex::new(FslInterpreter::new())),
             )
             .await
             .unwrap();
@@ -724,7 +758,7 @@ mod core {
         let output = funboy
             .generate(
                 "{adj.store(\"^adj\") print(concat(adj, adj))}",
-                &mut FslInterpreter::new(),
+                Arc::new(Mutex::new(FslInterpreter::new())),
             )
             .await
             .unwrap();
@@ -751,7 +785,10 @@ mod core {
             .unwrap();
 
         let output = funboy
-            .generate("{print(\"`quick_brown_fox`\")}", &mut FslInterpreter::new())
+            .generate(
+                "{print(\"`quick_brown_fox`\")}",
+                Arc::new(Mutex::new(FslInterpreter::new())),
+            )
             .await
             .unwrap();
 
@@ -807,7 +844,7 @@ mod core {
                 Some("tinyllama".to_string()),
                 &OllamaSettings::default(),
                 "{print(\"You are very ^adj you know that?\")}",
-                &mut FslInterpreter::new(),
+                Arc::new(Mutex::new(FslInterpreter::new())),
             )
             .await
             .unwrap();
