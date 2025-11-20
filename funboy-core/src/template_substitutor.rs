@@ -12,6 +12,7 @@ pub const VALID_TEMPLATE_CHARS: &str = "a-z0-9_";
 pub enum TemplateDelimiter {
     Caret,
     Plus,
+    PlusRegister,
     BackTick,
 }
 
@@ -19,16 +20,18 @@ impl TemplateDelimiter {
     pub fn to_char(&self) -> char {
         match self {
             TemplateDelimiter::Caret => '^',
-            TemplateDelimiter::Plus => '\'',
-            TemplateDelimiter::BackTick => '+',
+            TemplateDelimiter::Plus => '+',
+            TemplateDelimiter::PlusRegister => '+',
+            TemplateDelimiter::BackTick => '`',
         }
     }
 
     pub fn to_regex_pattern(&self) -> String {
         match self {
             TemplateDelimiter::Caret => format!(r"\^[{}]+\^?", VALID_TEMPLATE_CHARS),
-            TemplateDelimiter::Plus => format!(r"\+[a-z0-9-_]+\+?"),
             TemplateDelimiter::BackTick => format!(r"\`[{}]+\`?", VALID_TEMPLATE_CHARS),
+            TemplateDelimiter::Plus => format!(r"\+[{}]+\+?", VALID_TEMPLATE_CHARS),
+            TemplateDelimiter::PlusRegister => format!(r"\+[a-z0-9-_]+\+?"),
         }
     }
 }
@@ -90,7 +93,6 @@ impl TemplateSubstitutor {
         F: Fn(String) -> Fut,
         Fut: Future<Output = Option<String>>,
     {
-        println!("Incoming text: {}", input);
         let mut output = String::new();
         let mut start = 0;
         let mut end = 0;
@@ -106,17 +108,13 @@ impl TemplateSubstitutor {
                 Some(sub) => {
                     end = template.end();
 
-                    println!("matched sub: {}", sub);
-                    println!("current delimiter: {:?}", self.delimiter);
                     let segment = self.regex.replace(&input[start..end], &sub).into_owned();
-                    println!("replacement: {}", segment);
 
                     start = template.end();
 
                     output.push_str(&segment);
                 }
                 None => {
-                    println!("nothing matched");
                     output.push_str(template.as_str());
                     start = template.end();
                     end = template.end();
@@ -124,7 +122,6 @@ impl TemplateSubstitutor {
             }
         }
         output.push_str(&input[end..]);
-        println!("outgoing text: {}", output);
         output
     }
 

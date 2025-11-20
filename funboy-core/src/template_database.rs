@@ -3,7 +3,7 @@ use std::{collections::HashSet, sync::Arc};
 use sqlx::{Error, FromRow, PgPool, Pool, Postgres, Transaction};
 use strum::IntoEnumIterator;
 
-use crate::template_substitutor::{TemplateDelimiter, TemplateSubstitutor};
+use crate::template_substitutor::{TemplateDelimiter, TemplateDelimiterIter, TemplateSubstitutor};
 pub const DEBUG_DB_URL: &str = "postgres://funboy:funboy@localhost/funboy_db";
 
 pub type KeySize = i64;
@@ -189,41 +189,58 @@ impl TemplateDatabase {
         Ok(template)
     }
 
+    async fn replace_template_with_delimiter(
+        &self,
+        mut tx: Transaction<'static, Postgres>,
+        old_name: &str,
+        new_name: &str,
+        delimiter: TemplateDelimiter,
+    ) -> Result<Transaction<'static, Postgres>, Error> {
+        // Fetch substitutes that might contain old template
+        let substitutes =
+            sqlx::query_as::<_, Substitute>("SELECT * FROM substitutes WHERE name LIKE $1")
+                .bind(format!("%{}{}%", delimiter.to_char(), old_name))
+                .fetch_all(&mut *tx)
+                .await?;
+
+        let substitutor = TemplateSubstitutor::new(delimiter);
+
+        // Replace references to old template with new template
+        for sub in substitutes {
+            let new_sub_name = substitutor
+                .rename_template(&sub.name, old_name, new_name)
+                .await;
+
+            // Avoid useless updates
+            if sub.name != new_sub_name {
+                sqlx::query_as::<_, Substitute>(
+                    "UPDATE substitutes SET name = $1 WHERE id = $2 RETURNING *",
+                )
+                .bind(&new_sub_name)
+                .bind(sub.id)
+                .fetch_one(&mut *tx)
+                .await?;
+            }
+        }
+        Ok(tx)
+    }
+
     async fn update_template_references_in_substitutes(
         &self,
         mut tx: Transaction<'static, Postgres>,
         old_name: &str,
         new_name: &str,
     ) -> Result<Transaction<'static, Postgres>, Error> {
-        for delimiter in TemplateDelimiter::iter() {
-            // Fetch substitutes that might contain old template
-            let substitutes =
-                sqlx::query_as::<_, Substitute>("SELECT * FROM substitutes WHERE name LIKE $1")
-                    .bind(format!("%{}{}%", delimiter.to_char(), old_name))
-                    .fetch_all(&mut *tx)
-                    .await?;
-
-            let substitutor = TemplateSubstitutor::new(delimiter);
-
-            // Replace references to old template with new template
-            for sub in substitutes {
-                let new_sub_name = substitutor
-                    .rename_template(&sub.name, old_name, new_name)
-                    .await;
-
-                // Avoid useless updates
-                if sub.name != new_sub_name {
-                    sqlx::query_as::<_, Substitute>(
-                        "UPDATE substitutes SET name = $1 WHERE id = $2 RETURNING *",
-                    )
-                    .bind(&new_sub_name)
-                    .bind(sub.id)
-                    .fetch_one(&mut *tx)
-                    .await?;
-                }
-            }
+        let delims = vec![
+            TemplateDelimiter::Caret,
+            TemplateDelimiter::BackTick,
+            TemplateDelimiter::Plus,
+        ];
+        for delim in delims {
+            tx = self
+                .replace_template_with_delimiter(tx, old_name, new_name, delim)
+                .await?;
         }
-
         Ok(tx)
     }
 
@@ -856,7 +873,12 @@ pub mod test {
 
     #[tokio::test]
     async fn ripple_rename_template_by_name() {
-        for delim in TemplateDelimiter::iter() {
+        let delims = vec![
+            TemplateDelimiter::Caret,
+            TemplateDelimiter::BackTick,
+            TemplateDelimiter::Plus,
+        ];
+        for delim in delims {
             let pool = PgPool::connect(DEBUG_DB_URL).await.unwrap();
             let db = create_debug_db(pool).await.unwrap();
             let fruit_template = db.create_template("fruit").await.unwrap().unwrap();

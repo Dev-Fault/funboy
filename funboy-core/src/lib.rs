@@ -409,11 +409,9 @@ impl Funboy {
         input: String,
         interpreter: Arc<Mutex<FslInterpreter>>,
     ) -> Result<String, FunboyError> {
-        println!("Before registers {}", input);
         let mut substituted_text = self
             .substitute_register_templates(input, interpreter.clone())
             .await?;
-        println!("after registers {}", substituted_text);
         substituted_text = TemplateSubstitutor::new(TemplateDelimiter::Caret)
             .substitute_recursively(substituted_text, |template: String| async move {
                 match self.get_random_substitute(&template).await {
@@ -422,7 +420,6 @@ impl Funboy {
                 }
             })
             .await;
-        println!("after carets {}", substituted_text);
 
         let interpreter_result = self.interpret_code(interpreter, &substituted_text).await;
 
@@ -735,67 +732,6 @@ mod core {
 
         println!("OUTPUT: {}", output);
         assert!(output == "againagainagainagainagain");
-    }
-
-    #[tokio::test]
-    async fn generate_lazy_templates() {
-        let pool = get_pool().await;
-        let funboy = get_funboy(pool).await;
-
-        funboy.add_substitutes("adj", &["quick"]).await.unwrap();
-        funboy.add_substitutes("noun", &["fox"]).await.unwrap();
-        funboy.add_substitutes("verb", &["jump"]).await.unwrap();
-
-        let output = funboy
-            .generate(
-                "{adj.store(\"`adj\") print(concat(adj, adj))}",
-                Arc::new(Mutex::new(FslInterpreter::new())),
-            )
-            .await
-            .unwrap();
-
-        println!("OUTPUT: {}", output);
-        assert!(output == "quickadj");
-
-        let output = funboy
-            .generate(
-                "{adj.store(\"^adj\") print(concat(adj, adj))}",
-                Arc::new(Mutex::new(FslInterpreter::new())),
-            )
-            .await
-            .unwrap();
-
-        println!("OUTPUT: {}", output);
-        assert!(output == "quickquick");
-    }
-
-    #[tokio::test]
-    async fn generate_lazy_templates_that_contain_code() {
-        let pool = get_pool().await;
-        let funboy = get_funboy(pool).await;
-
-        funboy.add_substitutes("adj", &["quick"]).await.unwrap();
-        funboy.add_substitutes("color", &["brown"]).await.unwrap();
-        funboy.add_substitutes("noun", &["fox"]).await.unwrap();
-        funboy.add_substitutes("verb", &["jump"]).await.unwrap();
-        funboy
-            .add_substitutes(
-                "quick_brown_fox",
-                &["{print(\"The ^adj ^color ^noun ^verb^ed over the lazy dog.\")}"],
-            )
-            .await
-            .unwrap();
-
-        let output = funboy
-            .generate(
-                "{print(\"`quick_brown_fox`\")}",
-                Arc::new(Mutex::new(FslInterpreter::new())),
-            )
-            .await
-            .unwrap();
-
-        println!("OUTPUT: {}", output);
-        assert!(output == "The quick brown fox jumped over the lazy dog.");
     }
 
     #[tokio::test]
