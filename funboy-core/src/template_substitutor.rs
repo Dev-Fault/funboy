@@ -12,7 +12,6 @@ pub const VALID_TEMPLATE_CHARS: &str = "a-z0-9_";
 pub enum TemplateDelimiter {
     Caret,
     SingleQuote,
-    DollarSign,
     BackTick,
 }
 
@@ -21,7 +20,6 @@ impl TemplateDelimiter {
         match self {
             TemplateDelimiter::Caret => '^',
             TemplateDelimiter::SingleQuote => '\'',
-            TemplateDelimiter::DollarSign => '$',
             TemplateDelimiter::BackTick => '`',
         }
     }
@@ -30,7 +28,6 @@ impl TemplateDelimiter {
         match self {
             TemplateDelimiter::Caret => format!(r"\^[{}]+\^?", VALID_TEMPLATE_CHARS),
             TemplateDelimiter::SingleQuote => format!(r"\'[{}]+\'?", VALID_TEMPLATE_CHARS),
-            TemplateDelimiter::DollarSign => format!(r"\$[a-z0-9_-]+\$?"),
             TemplateDelimiter::BackTick => format!(r"\`[{}]+\`?", VALID_TEMPLATE_CHARS),
         }
     }
