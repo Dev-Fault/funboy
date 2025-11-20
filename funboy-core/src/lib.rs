@@ -409,7 +409,9 @@ impl Funboy {
         input: String,
         interpreter: Arc<Mutex<FslInterpreter>>,
     ) -> Result<String, FunboyError> {
-        let mut substituted_text = input.clone();
+        let mut substituted_text = self
+            .substitute_register_templates(input, interpreter.clone())
+            .await?;
         substituted_text = TemplateSubstitutor::new(TemplateDelimiter::Caret)
             .substitute_recursively(substituted_text, |template: String| async move {
                 match self.get_random_substitute(&template).await {
@@ -492,9 +494,6 @@ impl Funboy {
             if !prev_hashes.insert(hash) {
                 break;
             } else {
-                output = self
-                    .substitute_register_templates(output, interpreter.clone())
-                    .await?;
                 output = self.interpret_input(output, interpreter.clone()).await?;
             }
         }
