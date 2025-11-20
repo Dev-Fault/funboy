@@ -93,6 +93,7 @@ impl TemplateSubstitutor {
         F: Fn(String) -> Fut,
         Fut: Future<Output = Option<String>>,
     {
+        println!("Incoming text: {}", input);
         let mut output = String::new();
         let mut start = 0;
         let mut end = 0;
@@ -109,12 +110,14 @@ impl TemplateSubstitutor {
                     end = template.end();
 
                     let segment = self.regex.replace(&input[start..end], &sub).into_owned();
+                    println!("matched text: {}", segment);
 
                     start = template.end();
 
                     output.push_str(&segment);
                 }
                 None => {
+                    println!("nothing matched");
                     output.push_str(template.as_str());
                     start = template.end();
                     end = template.end();
@@ -122,6 +125,7 @@ impl TemplateSubstitutor {
             }
         }
         output.push_str(&input[end..]);
+        println!("outgoing text: {}", output);
         output
     }
 
