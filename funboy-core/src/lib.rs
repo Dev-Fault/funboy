@@ -353,9 +353,11 @@ impl Funboy {
                     if let Some(value) = result {
                         Some(value.clone())
                     } else {
-                        match self.get_random_substitute(&template).await {
+                        let split = template.split('-').collect::<Vec<&str>>();
+                        let template_before_dash = split.get(0).unwrap_or(&"");
+                        match self.get_random_substitute(&template_before_dash).await {
                             Ok(sub) => {
-                                sub_map.insert(template, sub.name.to_string());
+                                sub_map.insert(template.to_string(), sub.name.to_string());
                                 return Some(sub.name.to_string());
                             }
                             Err(_) => None,
@@ -658,6 +660,31 @@ mod core {
             dbg!(sub);
             assert!(sub == first_sub);
         }
+    }
+
+    #[tokio::test]
+    async fn generate_copied_template_registers() {
+        let pool = get_pool().await;
+        let funboy = get_funboy(pool).await;
+
+        funboy
+            .add_substitutes(
+                "noun",
+                &["fox", "bear", "lion", "tiger", "bat", "giraffe", "zebra"],
+            )
+            .await
+            .unwrap();
+
+        let output = funboy
+            .generate(
+                "$noun-1 $noun-1 $noun-2 $noun-2 $noun-2 $noun-999 $noun-999 $noun-999$$noun-999$",
+                &mut FslInterpreter::new(),
+            )
+            .await
+            .unwrap();
+
+        // relies on random, can't assert, dbg output
+        dbg!(output);
     }
 
     #[tokio::test]

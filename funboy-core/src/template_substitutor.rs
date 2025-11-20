@@ -30,7 +30,7 @@ impl TemplateDelimiter {
         match self {
             TemplateDelimiter::Caret => format!(r"\^[{}]+\^?", VALID_TEMPLATE_CHARS),
             TemplateDelimiter::SingleQuote => format!(r"\'[{}]+\'?", VALID_TEMPLATE_CHARS),
-            TemplateDelimiter::DollarSign => format!(r"\$[{}]+\$?", VALID_TEMPLATE_CHARS),
+            TemplateDelimiter::DollarSign => format!(r"\$[a-z0-9_-]+\$?"),
             TemplateDelimiter::BackTick => format!(r"\`[{}]+\`?", VALID_TEMPLATE_CHARS),
         }
     }
