@@ -109,7 +109,7 @@ impl TemplateSubstitutor {
                 Some(sub) => {
                     end = template.end();
 
-                    println!("matched sub: {}", segment);
+                    println!("matched sub: {}", sub);
                     let segment = self.regex.replace(&input[start..end], &sub).into_owned();
                     println!("replacement: {}", segment);
 
