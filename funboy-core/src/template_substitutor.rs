@@ -110,6 +110,7 @@ impl TemplateSubstitutor {
                     end = template.end();
 
                     println!("matched sub: {}", sub);
+                    println!("current delimiter: {:?}", self.delimiter);
                     let segment = self.regex.replace(&input[start..end], &sub).into_owned();
                     println!("replacement: {}", segment);
 
