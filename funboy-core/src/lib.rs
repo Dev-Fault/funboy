@@ -483,10 +483,6 @@ impl Funboy {
         let mut output = input.to_string();
         let mut prev_hashes = HashSet::new();
 
-        output = self
-            .substitute_register_templates(output, interpreter.clone())
-            .await?;
-
         const MAX_GENERATIONS: u8 = 255;
         for _ in 0..MAX_GENERATIONS {
             let mut hasher = DefaultHasher::new();
@@ -496,6 +492,9 @@ impl Funboy {
             if !prev_hashes.insert(hash) {
                 break;
             } else {
+                output = self
+                    .substitute_register_templates(output, interpreter.clone())
+                    .await?;
                 output = self.interpret_input(output, interpreter.clone()).await?;
             }
         }
