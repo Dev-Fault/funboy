@@ -20,14 +20,14 @@ impl TemplateDelimiter {
         match self {
             TemplateDelimiter::Caret => '^',
             TemplateDelimiter::SingleQuote => '\'',
-            TemplateDelimiter::BackTick => '`',
+            TemplateDelimiter::BackTick => '+',
         }
     }
 
     pub fn to_regex_pattern(&self) -> String {
         match self {
             TemplateDelimiter::Caret => format!(r"\^[{}]+\^?", VALID_TEMPLATE_CHARS),
-            TemplateDelimiter::SingleQuote => format!(r"\'[{}]+\'?", VALID_TEMPLATE_CHARS),
+            TemplateDelimiter::SingleQuote => format!(r"\+[a-z0-9-_]+\+?"),
             TemplateDelimiter::BackTick => format!(r"\`[{}]+\`?", VALID_TEMPLATE_CHARS),
         }
     }
