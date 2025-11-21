@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use fsl_interpreter::{
     ErrorContext, FslError, FslInterpreter, InterpreterData,
-    types::{ArgPos, ArgRule, FslType, Value},
+    types::{ArgPos, ArgRule, Command, FslType, Value},
 };
 use serenity::{
     all::{Cache, ChannelId, Http, Mentionable, ShardMessenger, UserId},
@@ -42,7 +42,7 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> FslInterpreter {
     const SAY_LIMIT: u8 = 100;
     let say_count: Arc<Mutex<u8>> = Arc::new(Mutex::new(0));
     let say_command = {
-        move |values: Arc<Vec<Value>>, interpreter_data| {
+        move |command: Command, interpreter_data| {
             let ictx = ictx.clone();
             let say_count = say_count.clone();
             async move {
@@ -56,7 +56,12 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> FslInterpreter {
 
                 sleep(Duration::from_millis(MESSAGE_DELAY_MS)).await;
 
-                let message = values[0].as_text(interpreter_data).await?;
+                let mut values = command.take_args();
+                let message = values
+                    .pop_front()
+                    .unwrap()
+                    .as_text(interpreter_data)
+                    .await?;
                 ictx.channel_id.say(&ictx.http, message).await.ok();
                 Ok(Value::None)
             }
@@ -69,7 +74,7 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> FslInterpreter {
     const ASK_DEFAULT_TIMEOUT_S: u64 = 30;
     let ask_count: Arc<Mutex<u8>> = Arc::new(Mutex::new(0));
     let ask_command = {
-        move |values: Arc<Vec<Value>>, data: Arc<InterpreterData>| {
+        move |command: Command, data: Arc<InterpreterData>| {
             let ictx = ictx.clone();
             let ask_count = ask_count.clone();
             async move {
@@ -83,10 +88,11 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> FslInterpreter {
 
                 sleep(Duration::from_millis(MESSAGE_DELAY_MS)).await;
 
+                let mut values = command.take_args();
                 let question = format!(
                     "{} {}",
                     ictx.author_id.mention(),
-                    values[0].as_text(data).await?
+                    values.pop_front().unwrap().as_text(data).await?
                 );
 
                 ictx.channel_id.say(&ictx.http, question).await.ok();
