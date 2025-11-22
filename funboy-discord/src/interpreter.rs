@@ -2,7 +2,11 @@ use std::{sync::Arc, time::Duration};
 
 use fsl_interpreter::{
     ErrorContext, FslError, FslInterpreter, InterpreterData,
-    types::{ArgPos, ArgRule, Command, FslType, Value},
+    types::{
+        FslType,
+        command::{ArgPos, ArgRule, Command},
+        value::Value,
+    },
 };
 use serenity::{
     all::{Cache, ChannelId, Http, Mentionable, ShardMessenger, UserId},
