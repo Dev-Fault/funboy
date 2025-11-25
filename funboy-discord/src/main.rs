@@ -14,7 +14,7 @@ use funboy_core::{
 use poise::serenity_prelude as serenity;
 use reqwest::Client as HttpClient;
 use songbird::{SerenityInit, typemap::TypeMapKey};
-use sqlx::{PgPool, pool::PoolOptions, postgres::PgPoolOptions};
+use sqlx::{PgPool, postgres::PgPoolOptions};
 use tokio::sync::Mutex;
 
 use crate::{
@@ -71,6 +71,7 @@ impl Data {
         &self.funboy
     }
 
+    #[allow(dead_code)]
     pub fn get_yt_dlp_cookies_path(&self) -> Option<&str> {
         match &self.yt_dlp_cookies_path {
             Some(path) => Some(path),
@@ -148,7 +149,6 @@ async fn main() {
                 commands::sound::stop_tracks(),
                 commands::sound::list_tracks(),
                 commands::utility::help(),
-                commands::utility::fsl_help(),
                 commands::utility::move_bot_pins(),
                 commands::utility::age(),
                 commands::ollama::list_ollama_models(),
@@ -186,9 +186,9 @@ async fn main() {
             },
             ..Default::default()
         })
-        .setup(|ctx, _ready, framework| {
+        .setup(|_ctx, _ready, _framework| {
             Box::pin(async move {
-                //poise::builtins::register_globally(ctx, &framework.options().commands).await?;
+                // poise::builtins::register_globally(ctx, &framework.options().commands).await?;
                 Ok(Data::new(pool))
             })
         })

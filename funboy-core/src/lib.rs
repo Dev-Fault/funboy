@@ -21,7 +21,6 @@ use crate::{
     template_substitutor::{TemplateDelimiter, TemplateSubstitutor, VALID_TEMPLATE_CHARS},
 };
 
-pub mod interpreter;
 pub mod ollama;
 pub mod template_database;
 pub mod template_substitutor;

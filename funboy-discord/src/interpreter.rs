@@ -2,8 +2,8 @@ use std::{sync::Arc, time::Duration};
 
 use fsl_interpreter::{
     FslInterpreter, InterpreterData,
+    commands::TEXT_TYPES,
     types::{
-        FslType,
         command::{ArgPos, ArgRule, Command, CommandError},
         value::Value,
     },
@@ -19,6 +19,7 @@ use crate::{Context, io_format::context_extension::MESSAGE_DELAY_MS};
 #[derive(Clone)]
 pub struct InterpreterContext {
     pub http: Arc<Http>,
+    #[allow(dead_code)]
     pub cache: Arc<Cache>,
     pub shard: ShardMessenger,
     pub channel_id: ChannelId,
@@ -42,7 +43,7 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> FslInterpreter {
 
     let ictx = InterpreterContext::from_poise(ctx);
 
-    const SAY_RULES: &'static [ArgRule] = &[ArgRule::new(ArgPos::Index(0), &[FslType::Text])];
+    const SAY_RULES: &'static [ArgRule] = &[ArgRule::new(ArgPos::Index(0), TEXT_TYPES)];
     const SAY_LIMIT: u8 = 100;
     let say_count: Arc<Mutex<u8>> = Arc::new(Mutex::new(0));
     let say_command = {
@@ -72,7 +73,7 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> FslInterpreter {
         }
     };
 
-    const ASK_RULES: &'static [ArgRule] = &[ArgRule::new(ArgPos::Index(0), &[FslType::Text])];
+    const ASK_RULES: &'static [ArgRule] = &[ArgRule::new(ArgPos::Index(0), TEXT_TYPES)];
     let ictx = InterpreterContext::from_poise(&ctx);
     const ASK_LIMIT: u8 = 100;
     const ASK_DEFAULT_TIMEOUT_S: u64 = 30;

@@ -1,9 +1,8 @@
 use std::{collections::HashSet, sync::Arc};
 
 use sqlx::{Error, FromRow, PgPool, Pool, Postgres, Transaction};
-use strum::IntoEnumIterator;
 
-use crate::template_substitutor::{TemplateDelimiter, TemplateDelimiterIter, TemplateSubstitutor};
+use crate::template_substitutor::{TemplateDelimiter, TemplateSubstitutor};
 pub const DEBUG_DB_URL: &str = "postgres://funboy:funboy@localhost/funboy_db";
 
 pub type KeySize = i64;

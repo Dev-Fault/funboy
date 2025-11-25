@@ -4,7 +4,7 @@ use funboy_core::{
     FunboyError,
     template_database::{KeySize, Limit, OrderBy, SortOrder},
 };
-use poise::{ChoiceParameter, CreateReply, ReplyHandle};
+use poise::{ChoiceParameter, CreateReply};
 use serenity::all::ComponentInteraction;
 use tokio::sync::Mutex;
 
@@ -15,7 +15,7 @@ use crate::{
     },
     interpreter::create_custom_interpreter,
     io_format::{
-        context_extension::{ContextExtension, MESSAGE_DELAY_MS},
+        context_extension::ContextExtension,
         discord_message_format::{
             SeperatedListOptions, StringVecToRef, ellipsize_if_long, format_as_item_seperated_list,
             format_as_numeric_list, split_by_whitespace_unless_quoted,

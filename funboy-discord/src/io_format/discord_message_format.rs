@@ -206,21 +206,6 @@ pub fn format_as_item_seperated_list(
     messages
 }
 
-pub fn format_as_standard_list(items: &[&str]) -> Vec<String> {
-    items
-        .iter()
-        .map(|s| {
-            if s.len() > DISCORD_CHARACTER_LIMIT / 10 {
-                "\n".to_string() + s + "\n"
-            } else if s.contains(' ') {
-                format!("{}{}{}", "[", s, "] ")
-            } else {
-                s.to_string() + " "
-            }
-        })
-        .collect()
-}
-
 pub fn format_as_numeric_list(items: &[&str]) -> Vec<String> {
     let mut i = 0;
     items
