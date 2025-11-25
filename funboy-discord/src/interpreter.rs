@@ -1,10 +1,10 @@
 use std::{sync::Arc, time::Duration};
 
 use fsl_interpreter::{
-    ErrorContext, FslError, FslInterpreter, InterpreterData,
+    FslInterpreter, InterpreterData,
     types::{
         FslType,
-        command::{ArgPos, ArgRule, Command},
+        command::{ArgPos, ArgRule, Command, CommandError},
         value::Value,
     },
 };
@@ -51,9 +51,9 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> FslInterpreter {
             let say_count = say_count.clone();
             async move {
                 if *say_count.lock().await >= SAY_LIMIT {
-                    return Err(FslError::CustomError(ErrorContext::new(
-                        "say".into(),
-                        format!("Cannot use say more than {} times in one go", SAY_LIMIT),
+                    return Err(CommandError::Custom(format!(
+                        "Cannot use say more than {} times in one go",
+                        SAY_LIMIT
                     )));
                 }
                 *say_count.lock().await += 1;
@@ -83,9 +83,9 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> FslInterpreter {
             let ask_count = ask_count.clone();
             async move {
                 if *ask_count.lock().await >= ASK_LIMIT {
-                    return Err(FslError::CustomError(ErrorContext::new(
-                        "ask".into(),
-                        format!("Cannot use ask more than {} times in one go", SAY_LIMIT),
+                    return Err(CommandError::Custom(format!(
+                        "Cannot use ask more than {} times in one go",
+                        SAY_LIMIT
                     )));
                 }
                 *ask_count.lock().await += 1;
@@ -112,9 +112,8 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> FslInterpreter {
                 if let Some(msg) = collector.next().await {
                     Ok(Value::Text(msg.content))
                 } else {
-                    return Err(FslError::CustomError(ErrorContext::new(
-                        "ask".into(),
-                        format!("Didn't receive a message before timeout ended"),
+                    return Err(CommandError::Custom(format!(
+                        "Didn't receive a message before timeout ended"
                     )));
                 }
             }
