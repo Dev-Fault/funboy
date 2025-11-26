@@ -182,7 +182,7 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> FslInterpreter {
 
                 if let Some(msg) = collector.next().await {
                     if msg.content == "-STOP-" {
-                        Err(CommandError::ProgramExited)
+                        Err(CommandError::Custom("User quit the program".into()))
                     } else {
                         Ok(Value::Text(msg.content))
                     }
