@@ -1,18 +1,25 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::{Duration, SystemTime},
+};
 
 use fsl_interpreter::{
     FslInterpreter, InterpreterData,
-    commands::TEXT_TYPES,
+    commands::{NUMERIC_TYPES, TEXT_TYPES},
     types::{
         command::{ArgPos, ArgRule, Command, CommandError},
         value::Value,
     },
 };
 use serenity::{
-    all::{Cache, ChannelId, Http, Mentionable, ShardMessenger, UserId},
+    all::{Cache, ChannelId, CreateMessage, Http, Mentionable, ShardMessenger, UserId},
     futures::StreamExt,
 };
-use tokio::{sync::Mutex, time::sleep};
+use tokio::time::sleep;
 
 use crate::{Context, io_format::context_extension::MESSAGE_DELAY_MS};
 
@@ -38,26 +45,69 @@ impl InterpreterContext {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct RateLimit {
+    users: HashMap<UserId, Vec<SystemTime>>,
+    uses_per_minute: usize,
+}
+
+impl RateLimit {
+    pub fn new(per_minute_limit: usize) -> Self {
+        Self {
+            users: HashMap::new(),
+            uses_per_minute: per_minute_limit,
+        }
+    }
+
+    pub fn check_limit(&mut self, user_id: UserId) -> Result<(), String> {
+        let now = SystemTime::now();
+        let last_minute = now - Duration::from_secs(60);
+
+        let uses = self.users.entry(user_id).or_insert_with(Vec::new);
+
+        uses.retain(|&t| t > last_minute);
+
+        if uses.len() >= self.uses_per_minute {
+            return Err(format!(
+                "Exceeded rate limit of {} uses per minute",
+                self.uses_per_minute
+            ));
+        }
+
+        uses.push(now);
+        Ok(())
+    }
+}
+
 pub fn create_custom_interpreter(ctx: &Context<'_>) -> FslInterpreter {
     let mut interpreter = FslInterpreter::new();
 
     let ictx = InterpreterContext::from_poise(ctx);
+    let rate_limit = Arc::new(tokio::sync::Mutex::new(RateLimit::new(20)));
 
+    const SAY: &str = "say";
     const SAY_RULES: &'static [ArgRule] = &[ArgRule::new(ArgPos::Index(0), TEXT_TYPES)];
-    const SAY_LIMIT: u8 = 100;
-    let say_count: Arc<Mutex<u8>> = Arc::new(Mutex::new(0));
+    const SAY_LIMIT: u64 = 300;
+    let say_count: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
     let say_command = {
+        let rate_limit = rate_limit.clone();
+        let ictx = ictx.clone();
         move |command: Command, interpreter_data| {
             let ictx = ictx.clone();
             let say_count = say_count.clone();
+            let rate_limit = rate_limit.clone();
             async move {
-                if *say_count.lock().await >= SAY_LIMIT {
+                if say_count.load(Ordering::Relaxed) >= SAY_LIMIT {
                     return Err(CommandError::Custom(format!(
                         "Cannot use say more than {} times in one go",
                         SAY_LIMIT
                     )));
                 }
-                *say_count.lock().await += 1;
+                say_count.fetch_add(1, Ordering::Relaxed);
+
+                if let Err(e) = rate_limit.lock().await.check_limit(ictx.author_id) {
+                    return Err(CommandError::Custom(format!("{} on {} command", e, SAY)));
+                }
 
                 sleep(Duration::from_millis(MESSAGE_DELAY_MS)).await;
 
@@ -73,49 +123,73 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> FslInterpreter {
         }
     };
 
-    const ASK_RULES: &'static [ArgRule] = &[ArgRule::new(ArgPos::Index(0), TEXT_TYPES)];
-    let ictx = InterpreterContext::from_poise(&ctx);
-    const ASK_LIMIT: u8 = 100;
-    const ASK_DEFAULT_TIMEOUT_S: u64 = 30;
-    let ask_count: Arc<Mutex<u8>> = Arc::new(Mutex::new(0));
+    const ASK: &str = "ask";
+    const ASK_RULES: &'static [ArgRule] = &[
+        ArgRule::new(ArgPos::Index(0), TEXT_TYPES),
+        ArgRule::new(ArgPos::OptionalIndex(1), NUMERIC_TYPES),
+    ];
+    const ASK_LIMIT: u64 = 300;
+    const ASK_DEFAULT_TIMEOUT_S: f64 = 60.0 * 2.0;
+    let ask_count: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
     let ask_command = {
         move |command: Command, data: Arc<InterpreterData>| {
             let ictx = ictx.clone();
             let ask_count = ask_count.clone();
+            let rate_limit = rate_limit.clone();
             async move {
-                if *ask_count.lock().await >= ASK_LIMIT {
+                if ask_count.load(Ordering::Relaxed) >= ASK_LIMIT {
                     return Err(CommandError::Custom(format!(
-                        "Cannot use ask more than {} times in one go",
-                        SAY_LIMIT
+                        "Cannot use {} more than {} times in one go",
+                        ASK, ASK_LIMIT
                     )));
                 }
-                *ask_count.lock().await += 1;
+                ask_count.fetch_add(1, Ordering::Relaxed);
 
                 sleep(Duration::from_millis(MESSAGE_DELAY_MS)).await;
 
+                if let Err(e) = rate_limit.lock().await.check_limit(ictx.author_id) {
+                    return Err(CommandError::Custom(format!("{} on {} command", e, ASK)));
+                }
+
                 let mut values = command.take_args();
-                let question = format!(
-                    "{} {}",
-                    ictx.author_id.mention(),
-                    values.pop_front().unwrap().as_text(data).await?
-                );
+                let question = values.pop_front().unwrap().as_text(data.clone()).await?;
+                let timeout = if let Some(value) = values.pop_front() {
+                    let timeout = value.as_float(data).await?;
+                    if !timeout.is_finite() {
+                        return Err(CommandError::NonFiniteValue);
+                    } else if timeout.is_sign_negative() {
+                        return Err(CommandError::Custom(format!(
+                            "timeout cannot be a negative number"
+                        )));
+                    }
+                    timeout
+                } else {
+                    ASK_DEFAULT_TIMEOUT_S
+                };
+
+                let question = format!("{}\n{}", ictx.author_id.mention(), question);
+                let question = format!("{}\n\n{}", question, "(enter -STOP- to quit)");
 
                 ictx.channel_id.say(&ictx.http, question).await.ok();
 
                 let mut collector = ictx
                     .channel_id
                     .await_reply(ictx.shard)
-                    .timeout(Duration::from_secs(ASK_DEFAULT_TIMEOUT_S))
+                    .timeout(Duration::from_secs_f64(timeout))
                     .channel_id(ictx.channel_id)
                     .author_id(ictx.author_id)
                     .stream();
 
                 if let Some(msg) = collector.next().await {
-                    Ok(Value::Text(msg.content))
+                    if msg.content == "-STOP-" {
+                        Err(CommandError::ProgramExited)
+                    } else {
+                        Ok(Value::Text(msg.content))
+                    }
                 } else {
-                    return Err(CommandError::Custom(format!(
+                    Err(CommandError::Custom(format!(
                         "Didn't receive a message before timeout ended"
-                    )));
+                    )))
                 }
             }
         }
