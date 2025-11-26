@@ -61,11 +61,11 @@ impl RateLimit {
 
     pub fn check_limit(&mut self, user_id: UserId) -> Result<(), String> {
         let now = SystemTime::now();
-        let last_minute = now - Duration::from_secs(60);
+        let usage_window = now - Duration::from_secs(30);
 
         let uses = self.users.entry(user_id).or_insert_with(Vec::new);
 
-        uses.retain(|&t| t > last_minute);
+        uses.retain(|&t| t > usage_window);
 
         if uses.len() >= self.uses_per_minute {
             return Err(format!(
@@ -79,11 +79,12 @@ impl RateLimit {
     }
 }
 
+const COMMAND_MESSAGE_DELAY_MS: u64 = 500;
 pub fn create_custom_interpreter(ctx: &Context<'_>) -> FslInterpreter {
     let mut interpreter = FslInterpreter::new();
 
     let ictx = InterpreterContext::from_poise(ctx);
-    let rate_limit = Arc::new(tokio::sync::Mutex::new(RateLimit::new(20)));
+    let rate_limit = Arc::new(tokio::sync::Mutex::new(RateLimit::new(60)));
 
     const SAY: &str = "say";
     const SAY_RULES: &'static [ArgRule] = &[ArgRule::new(ArgPos::Index(0), TEXT_TYPES)];
@@ -105,11 +106,7 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> FslInterpreter {
                 }
                 say_count.fetch_add(1, Ordering::Relaxed);
 
-                if let Err(e) = rate_limit.lock().await.check_limit(ictx.author_id) {
-                    return Err(CommandError::Custom(format!("{} on {} command", e, SAY)));
-                }
-
-                sleep(Duration::from_millis(MESSAGE_DELAY_MS)).await;
+                sleep(Duration::from_millis(COMMAND_MESSAGE_DELAY_MS)).await;
 
                 let mut values = command.take_args();
                 let message = values
@@ -118,6 +115,11 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> FslInterpreter {
                     .as_text(interpreter_data)
                     .await?;
                 ictx.channel_id.say(&ictx.http, message).await.ok();
+
+                if let Err(e) = rate_limit.lock().await.check_limit(ictx.author_id) {
+                    return Err(CommandError::Custom(format!("{} on {} command", e, SAY)));
+                }
+
                 Ok(Value::None)
             }
         }
@@ -146,11 +148,7 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> FslInterpreter {
                 }
                 ask_count.fetch_add(1, Ordering::Relaxed);
 
-                sleep(Duration::from_millis(MESSAGE_DELAY_MS)).await;
-
-                if let Err(e) = rate_limit.lock().await.check_limit(ictx.author_id) {
-                    return Err(CommandError::Custom(format!("{} on {} command", e, ASK)));
-                }
+                sleep(Duration::from_millis(COMMAND_MESSAGE_DELAY_MS)).await;
 
                 let mut values = command.take_args();
                 let question = values.pop_front().unwrap().as_text(data.clone()).await?;
@@ -185,6 +183,10 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> FslInterpreter {
                     .channel_id(ictx.channel_id)
                     .author_id(ictx.author_id)
                     .stream();
+
+                if let Err(e) = rate_limit.lock().await.check_limit(ictx.author_id) {
+                    return Err(CommandError::Custom(format!("{} on {} command", e, ASK)));
+                }
 
                 if let Some(msg) = collector.next().await {
                     if msg.content == "-STOP-" {
