@@ -129,7 +129,8 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> FslInterpreter {
         ArgRule::new(ArgPos::OptionalIndex(1), NUMERIC_TYPES),
     ];
     const ASK_LIMIT: u64 = 300;
-    const ASK_DEFAULT_TIMEOUT_S: f64 = 60.0 * 2.0;
+    const DEFAULT_TIMEOUT_SECS: f64 = 60.0 * 2.0;
+    const MAX_TIMEOUT_SECS: f64 = 60.0 * 10.0;
     let ask_count: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
     let ask_command = {
         move |command: Command, data: Arc<InterpreterData>| {
@@ -161,10 +162,15 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> FslInterpreter {
                         return Err(CommandError::Custom(format!(
                             "timeout cannot be a negative number"
                         )));
+                    } else if timeout > MAX_TIMEOUT_SECS {
+                        return Err(CommandError::Custom(format!(
+                            "timeout cannot be greater than {} seconds",
+                            MAX_TIMEOUT_SECS
+                        )));
                     }
                     timeout
                 } else {
-                    ASK_DEFAULT_TIMEOUT_S
+                    DEFAULT_TIMEOUT_SECS
                 };
 
                 let question = format!("{}\n{}", ictx.author_id.mention(), question);
