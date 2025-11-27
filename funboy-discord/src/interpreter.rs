@@ -61,7 +61,7 @@ impl RateLimit {
 
     pub fn check_limit(&mut self, user_id: UserId) -> Result<(), String> {
         let now = SystemTime::now();
-        let usage_window = now - Duration::from_secs(60);
+        let usage_window = now - Duration::from_secs(30);
 
         let uses = self.users.entry(user_id).or_insert_with(Vec::new);
 
@@ -84,7 +84,7 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> FslInterpreter {
     let mut interpreter = FslInterpreter::new();
 
     let ictx = InterpreterContext::from_poise(ctx);
-    let rate_limit = Arc::new(tokio::sync::Mutex::new(RateLimit::new(60)));
+    let rate_limit = Arc::new(tokio::sync::Mutex::new(RateLimit::new(30)));
 
     const SAY: &str = "say";
     const SAY_RULES: &'static [ArgRule] = &[ArgRule::new(ArgPos::Index(0), TEXT_TYPES)];
