@@ -16,7 +16,7 @@ use fsl_interpreter::{
     },
 };
 use serenity::{
-    all::{Cache, ChannelId, GuildId, Http, Mentionable, ShardMessenger, UserId},
+    all::{Cache, ChannelId, GuildId, Http, Member, Mentionable, ShardMessenger, UserId},
     futures::StreamExt,
 };
 use tokio::{sync::Mutex, time::sleep};
@@ -194,11 +194,18 @@ pub fn create_say_to_command(
 
                 if let Some(guild_id) = ictx.guild_id {
                     if let Ok(members) = guild_id.members(ictx.http.clone(), None, None).await {
-                        if let Some(user) = members
-                            .iter()
-                            .find(|m| m.user.name == user || m.user.tag() == user)
-                        {
-                            let mention = user.mention();
+                        let mut found_member: Option<&Member> = None;
+                        for member in members.iter() {
+                            if member.nick.as_ref().is_some_and(|nick| nick == &user) {
+                                found_member = Some(member);
+                                break;
+                            } else if member.display_name() == &user {
+                                found_member = Some(member);
+                                break;
+                            }
+                        }
+
+                        let say_message = async |mention: String| {
                             let mention_message = format!("{} {}", mention, message);
                             if let Err(e) = ictx.channel_id.say(&ictx.http, mention_message).await {
                                 return Err(CommandError::Custom(e.to_string()));
@@ -209,19 +216,20 @@ pub fn create_say_to_command(
                                     "{} on {} command",
                                     e, SAY_TO
                                 )));
+                            } else {
+                                Ok(())
                             }
-                        } else if user == "everyone" {
-                            let mention_message = format!("@{} {}", user, message);
-                            if let Err(e) = ictx.channel_id.say(&ictx.http, mention_message).await {
-                                return Err(CommandError::Custom(e.to_string()));
-                            };
+                        };
 
-                            if let Err(e) = rate_limit.lock().await.check_limit(ictx.author_id) {
-                                return Err(CommandError::Custom(format!(
-                                    "{} on {} command",
-                                    e, SAY_TO
-                                )));
-                            }
+                        if let Some(user) = found_member {
+                            say_message(user.mention().to_string()).await?;
+                        } else if let Some(user) = members
+                            .iter()
+                            .find(|m| m.user.name == user || m.user.tag() == user)
+                        {
+                            say_message(user.mention().to_string()).await?;
+                        } else if user == "everyone" {
+                            say_message(user).await?;
                         } else {
                             return Err(CommandError::Custom(format!(
                                 "no user named {} found",
