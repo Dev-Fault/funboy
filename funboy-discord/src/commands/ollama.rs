@@ -4,6 +4,7 @@ use serenity::all::UserId;
 
 use crate::{
     Context, Error, OllamaUserSettingsMap,
+    interpreter::create_custom_interpreter,
     io_format::{context_extension::ContextExtension, discord_message_format::ellipsize_if_long},
 };
 
@@ -229,7 +230,7 @@ pub async fn generate_ollama(ctx: Context<'_>, prompt: String) -> Result<(), Err
     let interpreted_prompt = ctx
         .data()
         .funboy
-        .generate(&prompt, ctx.data().get_interpreter(ctx).await)
+        .generate(&prompt, create_custom_interpreter(&ctx))
         .await;
 
     let result: Result<(), Error> = {

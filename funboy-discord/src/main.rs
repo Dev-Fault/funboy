@@ -6,7 +6,6 @@ use std::{
 
 use ::serenity::all::{FullEvent, Interaction, UserId};
 use dotenvy::dotenv;
-use fsl_interpreter::FslInterpreter;
 use funboy_core::{
     Funboy,
     ollama::{OllamaGenerator, OllamaSettings},
@@ -16,12 +15,11 @@ use poise::serenity_prelude as serenity;
 use reqwest::Client as HttpClient;
 use songbird::{SerenityInit, typemap::TypeMapKey};
 use sqlx::{PgPool, postgres::PgPoolOptions};
-use tokio::sync::{Mutex, OnceCell};
+use tokio::sync::Mutex;
 
 use crate::{
     commands::sound::TrackList,
     components::{CustomComponent, TrackComponent},
-    interpreter::create_custom_interpreter,
 };
 
 mod commands;
@@ -57,7 +55,6 @@ struct Data {
     pub track_list: Arc<Mutex<TrackList>>,
     pub track_player_lock: Arc<Mutex<()>>,
     pub ollama_data: OllamaData,
-    interpreter: OnceCell<Arc<Mutex<FslInterpreter>>>,
     yt_dlp_cookies_path: Option<String>,
 } // User data, which is stored and accessible in all command invocations
 
@@ -68,16 +65,8 @@ impl Data {
             track_list: Mutex::new(TrackList::new()).into(),
             track_player_lock: Default::default(),
             ollama_data: OllamaData::default(),
-            interpreter: OnceCell::new(),
             yt_dlp_cookies_path: None,
         }
-    }
-
-    pub async fn get_interpreter(&self, ctx: Context<'_>) -> Arc<Mutex<FslInterpreter>> {
-        self.interpreter
-            .get_or_init(async || Arc::new(Mutex::new(create_custom_interpreter(&ctx))))
-            .await
-            .clone()
     }
 
     #[allow(dead_code)]

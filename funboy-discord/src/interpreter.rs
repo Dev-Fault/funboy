@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    pin::Pin,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
@@ -12,7 +11,7 @@ use fsl_interpreter::{
     FslInterpreter, InterpreterData,
     commands::{NUMERIC_TYPES, TEXT_TYPES},
     types::{
-        command::{ArgPos, ArgRule, Command, CommandError, CommandFn, Executor},
+        command::{ArgPos, ArgRule, Command, CommandError, Executor},
         value::Value,
     },
 };
@@ -83,7 +82,7 @@ impl RateLimit {
 }
 
 const COMMAND_MESSAGE_DELAY_MS: u64 = 500;
-pub fn create_custom_interpreter(ctx: &Context<'_>) -> FslInterpreter {
+pub fn create_custom_interpreter(ctx: &Context<'_>) -> Arc<tokio::sync::Mutex<FslInterpreter>> {
     let mut interpreter = FslInterpreter::new();
 
     let ictx = InterpreterContext::from_poise(ctx);
@@ -107,7 +106,7 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> FslInterpreter {
         create_ask_command(rate_limit.clone(), ictx.clone()),
     );
 
-    interpreter
+    Arc::new(tokio::sync::Mutex::new(interpreter))
 }
 
 const SAY_RULES: &'static [ArgRule] = &[ArgRule::new(ArgPos::Index(0), TEXT_TYPES)];

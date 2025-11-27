@@ -10,6 +10,7 @@ use crate::{
     components::{
         CANCEL_BUTTON_ID, CONFIRM_BUTTON_ID, create_confirmation_interaction, edit_interaction,
     },
+    interpreter::create_custom_interpreter,
     io_format::{
         context_extension::ContextExtension,
         discord_message_format::{
@@ -26,7 +27,7 @@ pub async fn generate(ctx: Context<'_>, input: String) -> Result<(), Error> {
     let output = ctx
         .data()
         .funboy
-        .generate(&input, ctx.data().get_interpreter(ctx).await)
+        .generate(&input, create_custom_interpreter(&ctx))
         .await;
 
     match output {
