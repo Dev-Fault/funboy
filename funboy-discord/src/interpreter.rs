@@ -32,6 +32,7 @@ pub struct InterpreterContext {
     pub guild_id: Option<GuildId>,
     pub channel_id: ChannelId,
     pub author_id: UserId,
+    pub rate_limit: Arc<Mutex<RateLimit>>,
 }
 
 impl InterpreterContext {
@@ -43,6 +44,73 @@ impl InterpreterContext {
             guild_id: ctx.guild_id(),
             channel_id: ctx.channel_id(),
             author_id: ctx.author().id,
+            rate_limit: Arc::new(Mutex::new(RateLimit::new(30))),
+        }
+    }
+
+    pub async fn get_guild_members(&self) -> Result<Vec<Member>, CommandError> {
+        if let Some(guild_id) = self.guild_id {
+            if let Ok(members) = guild_id.members(self.http.clone(), None, None).await {
+                Ok(members)
+            } else {
+                return Err(CommandError::Custom(format!(
+                    "failed to fetch guild members",
+                )));
+            }
+        } else {
+            return Err(CommandError::Custom(format!("failed to get guild id",)));
+        }
+    }
+
+    pub async fn say_to_user(&self, user_name: &str, message: &str) -> Result<(), CommandError> {
+        let members = self.get_guild_members().await?;
+
+        let say_message = async |mention: &str| {
+            let mention_message = format!("{} {}", mention, message);
+            if let Err(e) = self.channel_id.say(&self.http, mention_message).await {
+                return Err(CommandError::Custom(e.to_string()));
+            };
+
+            if let Err(e) = self.rate_limit.lock().await.check_limit(self.author_id) {
+                return Err(CommandError::Custom(e));
+            } else {
+                Ok(())
+            }
+        };
+
+        if let Some(member) = members.iter().find(|m| {
+            m.user.name == user_name
+                || m.user.tag() == user_name
+                || m.user.display_name() == user_name
+                || m.nick.as_ref().is_some_and(|nick| nick == &user_name)
+        }) {
+            say_message(&member.mention().to_string()).await?;
+        } else if user_name == "everyone" {
+            say_message(user_name).await?;
+        } else {
+            return Err(CommandError::Custom(format!(
+                "no user named {} found",
+                user_name
+            )));
+        }
+        Ok(())
+    }
+
+    pub async fn get_user_id(&self, user_name: &str) -> Result<UserId, CommandError> {
+        let members = self.get_guild_members().await?;
+
+        if let Some(member) = members.iter().find(|m| {
+            m.user.name == user_name
+                || m.user.tag() == user_name
+                || m.user.display_name() == user_name
+                || m.nick.as_ref().is_some_and(|nick| nick == &user_name)
+        }) {
+            Ok(member.user.id)
+        } else {
+            return Err(CommandError::Custom(format!(
+                "no user named {} found",
+                user_name
+            )));
         }
     }
 }
@@ -86,36 +154,25 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> Arc<tokio::sync::Mutex<Fs
     let mut interpreter = FslInterpreter::new();
 
     let ictx = InterpreterContext::from_poise(ctx);
-    let rate_limit = Arc::new(Mutex::new(RateLimit::new(30)));
 
-    interpreter.add_command(
-        "say",
-        SAY_RULES,
-        create_say_command(rate_limit.clone(), ictx.clone()),
-    );
+    interpreter.add_command("say", SAY_RULES, create_say_command(ictx.clone()));
 
-    interpreter.add_command(
-        "say_to",
-        SAY_TO_RULES,
-        create_say_to_command(rate_limit.clone(), ictx.clone()),
-    );
+    interpreter.add_command("say_to", SAY_TO_RULES, create_say_to_command(ictx.clone()));
 
-    interpreter.add_command(
-        "ask",
-        ASK_RULES,
-        create_ask_command(rate_limit.clone(), ictx.clone()),
-    );
+    interpreter.add_command("ask", ASK_RULES, create_ask_command(ictx.clone()));
+
+    interpreter.add_command("ask_to", ASK_TO_RULES, create_ask_to_command(ictx.clone()));
 
     Arc::new(tokio::sync::Mutex::new(interpreter))
 }
 
 const SAY_RULES: &'static [ArgRule] = &[ArgRule::new(ArgPos::Index(0), TEXT_TYPES)];
-pub fn create_say_command(rate_limit: Arc<Mutex<RateLimit>>, ictx: InterpreterContext) -> Executor {
+pub fn create_say_command(ictx: InterpreterContext) -> Executor {
     const SAY: &str = "say";
     const SAY_LIMIT: u64 = 300;
     let say_count: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
     let say_command = {
-        let rate_limit = rate_limit.clone();
+        let rate_limit = ictx.rate_limit.clone();
         let ictx = ictx.clone();
         move |command: Command, interpreter_data| {
             let ictx = ictx.clone();
@@ -138,6 +195,7 @@ pub fn create_say_command(rate_limit: Arc<Mutex<RateLimit>>, ictx: InterpreterCo
                     .unwrap()
                     .as_text(interpreter_data)
                     .await?;
+
                 ictx.channel_id.say(&ictx.http, message).await.ok();
 
                 if let Err(e) = rate_limit.lock().await.check_limit(ictx.author_id) {
@@ -155,20 +213,16 @@ const SAY_TO_RULES: &'static [ArgRule] = &[
     ArgRule::new(ArgPos::Index(0), TEXT_TYPES),
     ArgRule::new(ArgPos::Index(1), TEXT_TYPES),
 ];
-pub fn create_say_to_command(
-    rate_limit: Arc<Mutex<RateLimit>>,
-    ictx: InterpreterContext,
-) -> Executor {
+pub fn create_say_to_command(ictx: InterpreterContext) -> Executor {
     const SAY_TO: &str = "say_to";
     const SAY_TO_LIMIT: u64 = 300;
     let say_count: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
     let say_command = {
-        let rate_limit = rate_limit.clone();
+        let rate_limit = ictx.rate_limit.clone();
         let ictx = ictx.clone();
         move |command: Command, interpreter_data: Arc<InterpreterData>| {
             let ictx = ictx.clone();
             let say_count = say_count.clone();
-            let rate_limit = rate_limit.clone();
             async move {
                 if say_count.load(Ordering::Relaxed) >= SAY_TO_LIMIT {
                     return Err(CommandError::Custom(format!(
@@ -181,7 +235,7 @@ pub fn create_say_to_command(
                 sleep(Duration::from_millis(COMMAND_MESSAGE_DELAY_MS)).await;
 
                 let mut values = command.take_args();
-                let user = values
+                let user_name = values
                     .pop_front()
                     .unwrap()
                     .as_text(interpreter_data.clone())
@@ -192,63 +246,8 @@ pub fn create_say_to_command(
                     .as_text(interpreter_data)
                     .await?;
 
-                if let Some(guild_id) = ictx.guild_id {
-                    if let Ok(members) = guild_id.members(ictx.http.clone(), None, None).await {
-                        let mut found_member: Option<&Member> = None;
-                        for member in members.iter() {
-                            if member.nick.as_ref().is_some_and(|nick| nick == &user) {
-                                found_member = Some(member);
-                                break;
-                            } else if member.display_name() == &user {
-                                found_member = Some(member);
-                                break;
-                            }
-                        }
-
-                        let say_message = async |mention: String| {
-                            let mention_message = format!("{} {}", mention, message);
-                            if let Err(e) = ictx.channel_id.say(&ictx.http, mention_message).await {
-                                return Err(CommandError::Custom(e.to_string()));
-                            };
-
-                            if let Err(e) = rate_limit.lock().await.check_limit(ictx.author_id) {
-                                return Err(CommandError::Custom(format!(
-                                    "{} on {} command",
-                                    e, SAY_TO
-                                )));
-                            } else {
-                                Ok(())
-                            }
-                        };
-
-                        if let Some(user) = found_member {
-                            say_message(user.mention().to_string()).await?;
-                        } else if let Some(user) = members
-                            .iter()
-                            .find(|m| m.user.name == user || m.user.tag() == user)
-                        {
-                            say_message(user.mention().to_string()).await?;
-                        } else if user == "everyone" {
-                            say_message(user).await?;
-                        } else {
-                            return Err(CommandError::Custom(format!(
-                                "no user named {} found",
-                                user
-                            )));
-                        }
-                    } else {
-                        return Err(CommandError::Custom(format!(
-                            "failed to fetch guild members",
-                        )));
-                    }
-
-                    Ok(Value::None)
-                } else {
-                    return Err(CommandError::Custom(format!(
-                        "Cannot use {} outside of a guild",
-                        SAY_TO
-                    )));
-                }
+                ictx.say_to_user(&user_name, &message).await?;
+                Ok(Value::None)
             }
         }
     };
@@ -259,7 +258,7 @@ const ASK_RULES: &'static [ArgRule] = &[
     ArgRule::new(ArgPos::Index(0), TEXT_TYPES),
     ArgRule::new(ArgPos::OptionalIndex(1), NUMERIC_TYPES),
 ];
-pub fn create_ask_command(rate_limit: Arc<Mutex<RateLimit>>, ictx: InterpreterContext) -> Executor {
+pub fn create_ask_command(ictx: InterpreterContext) -> Executor {
     const ASK: &str = "ask";
     const ASK_LIMIT: u64 = 300;
     const DEFAULT_TIMEOUT_SECS: f64 = 60.0 * 2.0;
@@ -269,7 +268,7 @@ pub fn create_ask_command(rate_limit: Arc<Mutex<RateLimit>>, ictx: InterpreterCo
         move |command: Command, data: Arc<InterpreterData>| {
             let ictx = ictx.clone();
             let ask_count = ask_count.clone();
-            let rate_limit = rate_limit.clone();
+            let rate_limit = ictx.rate_limit.clone();
             async move {
                 if ask_count.load(Ordering::Relaxed) >= ASK_LIMIT {
                     return Err(CommandError::Custom(format!(
@@ -282,35 +281,24 @@ pub fn create_ask_command(rate_limit: Arc<Mutex<RateLimit>>, ictx: InterpreterCo
                 sleep(Duration::from_millis(COMMAND_MESSAGE_DELAY_MS)).await;
 
                 let mut values = command.take_args();
-                let question = values.pop_front().unwrap().as_text(data.clone()).await?;
-                let timeout = if let Some(value) = values.pop_front() {
-                    let timeout = value.as_float(data).await?;
-                    if !timeout.is_finite() {
-                        return Err(CommandError::NonFiniteValue);
-                    } else if timeout.is_sign_negative() {
-                        return Err(CommandError::Custom(format!(
-                            "timeout cannot be a negative number"
-                        )));
-                    } else if timeout > MAX_TIMEOUT_SECS {
-                        return Err(CommandError::Custom(format!(
-                            "timeout cannot be greater than {} seconds",
-                            MAX_TIMEOUT_SECS
-                        )));
-                    }
-                    timeout
-                } else {
-                    DEFAULT_TIMEOUT_SECS
-                };
 
-                let question = format!("{}\n{}", ictx.author_id.mention(), question);
+                let arg_0 = values.pop_front().unwrap().as_text(data.clone()).await?;
+                let arg_1 = values
+                    .pop_front()
+                    .unwrap_or(Value::Float(DEFAULT_TIMEOUT_SECS));
+
+                let question = format!("{}\n{}", ictx.author_id.mention(), arg_0);
                 let question = format!("{}\n\n{}", question, "(enter -STOP- to quit)");
+
+                let time_out = arg_1.as_float(data.clone()).await?;
+                validate_time_out(time_out, MAX_TIMEOUT_SECS)?;
 
                 ictx.channel_id.say(&ictx.http, question).await.ok();
 
                 let mut collector = ictx
                     .channel_id
                     .await_reply(ictx.shard)
-                    .timeout(Duration::from_secs_f64(timeout))
+                    .timeout(Duration::from_secs_f64(time_out))
                     .channel_id(ictx.channel_id)
                     .author_id(ictx.author_id)
                     .stream();
@@ -334,4 +322,102 @@ pub fn create_ask_command(rate_limit: Arc<Mutex<RateLimit>>, ictx: InterpreterCo
         }
     };
     Some(Arc::new(ask_command))
+}
+
+const ASK_TO_RULES: &'static [ArgRule] = &[
+    ArgRule::new(ArgPos::Index(0), TEXT_TYPES),
+    ArgRule::new(ArgPos::Index(1), TEXT_TYPES),
+    ArgRule::new(ArgPos::OptionalIndex(1), NUMERIC_TYPES),
+];
+pub fn create_ask_to_command(ictx: InterpreterContext) -> Executor {
+    const ASK_TO: &str = "ask";
+    const ASK_TO_LIMIT: u64 = 300;
+    const DEFAULT_TIMEOUT_SECS: f64 = 60.0 * 2.0;
+    const MAX_TIMEOUT_SECS: f64 = 60.0 * 10.0;
+    let ask_count: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
+    let ask_command = {
+        move |command: Command, data: Arc<InterpreterData>| {
+            let ictx = ictx.clone();
+            let ask_count = ask_count.clone();
+            let rate_limit = ictx.rate_limit.clone();
+            async move {
+                if ask_count.load(Ordering::Relaxed) >= ASK_TO_LIMIT {
+                    return Err(CommandError::Custom(format!(
+                        "Cannot use {} more than {} times in one go",
+                        ASK_TO, ASK_TO_LIMIT
+                    )));
+                }
+                ask_count.fetch_add(1, Ordering::Relaxed);
+
+                sleep(Duration::from_millis(COMMAND_MESSAGE_DELAY_MS)).await;
+
+                let mut values = command.take_args();
+
+                let user_name = values.pop_front().unwrap().as_text(data.clone()).await?;
+                let arg_1 = values.pop_front().unwrap().as_text(data.clone()).await?;
+                let arg_2 = values
+                    .pop_front()
+                    .unwrap_or(Value::Float(DEFAULT_TIMEOUT_SECS));
+
+                let question = format!("{}\n{}", ictx.author_id.mention(), arg_1);
+                let question = format!("{}\n\n{}", question, "(enter -STOP- to quit)");
+
+                let time_out = arg_2.as_float(data.clone()).await?;
+                validate_time_out(time_out, MAX_TIMEOUT_SECS)?;
+
+                ictx.say_to_user(&user_name, &question).await?;
+
+                let mut collector = if user_name == "everyone" {
+                    ictx.channel_id
+                        .await_reply(ictx.shard)
+                        .timeout(Duration::from_secs_f64(time_out))
+                        .channel_id(ictx.channel_id)
+                        .stream()
+                } else {
+                    let user_id = ictx.get_user_id(&user_name).await?;
+                    ictx.channel_id
+                        .await_reply(ictx.shard)
+                        .timeout(Duration::from_secs_f64(time_out))
+                        .channel_id(ictx.channel_id)
+                        .author_id(user_id)
+                        .stream()
+                };
+
+                if let Err(e) = rate_limit.lock().await.check_limit(ictx.author_id) {
+                    return Err(CommandError::Custom(format!("{} on {} command", e, ASK_TO)));
+                }
+
+                if let Some(msg) = collector.next().await {
+                    if msg.content == "-STOP-" {
+                        Err(CommandError::Custom("User quit the program".into()))
+                    } else {
+                        Ok(Value::Text(msg.content))
+                    }
+                } else {
+                    Err(CommandError::Custom(format!(
+                        "Didn't receive a message before timeout ended"
+                    )))
+                }
+            }
+        }
+    };
+    Some(Arc::new(ask_command))
+}
+
+pub fn validate_time_out(time_out: f64, max: f64) -> Result<(), CommandError> {
+    const DEFAULT_TIMEOUT_SECS: f64 = 60.0 * 2.0;
+
+    if !time_out.is_finite() {
+        return Err(CommandError::NonFiniteValue);
+    } else if time_out.is_sign_negative() {
+        return Err(CommandError::Custom(format!(
+            "time_out cannot be a negative number"
+        )));
+    } else if time_out > max {
+        return Err(CommandError::Custom(format!(
+            "timeout cannot be greater than {} seconds",
+            max
+        )));
+    }
+    Ok(())
 }
