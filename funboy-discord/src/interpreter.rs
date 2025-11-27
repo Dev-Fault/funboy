@@ -86,7 +86,7 @@ impl InterpreterContext {
         }) {
             say_message(&member.mention().to_string()).await?;
         } else if user_name == "everyone" {
-            say_message(user_name).await?;
+            say_message("@everyone").await?;
         } else {
             return Err(CommandError::Custom(format!(
                 "no user named {} found",
