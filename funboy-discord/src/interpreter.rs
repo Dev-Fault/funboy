@@ -16,12 +16,12 @@ use fsl_interpreter::{
     },
 };
 use serenity::{
-    all::{Cache, ChannelId, CreateMessage, Http, Mentionable, ShardMessenger, UserId},
+    all::{Cache, ChannelId, Http, Mentionable, ShardMessenger, UserId},
     futures::StreamExt,
 };
 use tokio::time::sleep;
 
-use crate::{Context, io_format::context_extension::MESSAGE_DELAY_MS};
+use crate::Context;
 
 #[derive(Clone)]
 pub struct InterpreterContext {

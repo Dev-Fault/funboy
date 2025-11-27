@@ -233,10 +233,7 @@ pub async fn generate_ollama(ctx: Context<'_>, prompt: String) -> Result<(), Err
     let interpreted_prompt = ctx
         .data()
         .funboy
-        .generate(
-            &prompt,
-            Arc::new(Mutex::new(create_custom_interpreter(&ctx))),
-        )
+        .generate(&prompt, ctx.data().get_interpreter(ctx).await)
         .await;
 
     let result: Result<(), Error> = {

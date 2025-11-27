@@ -6,6 +6,7 @@ use std::{
 
 use ::serenity::all::{FullEvent, Interaction, UserId};
 use dotenvy::dotenv;
+use fsl_interpreter::FslInterpreter;
 use funboy_core::{
     Funboy,
     ollama::{OllamaGenerator, OllamaSettings},
@@ -15,11 +16,12 @@ use poise::serenity_prelude as serenity;
 use reqwest::Client as HttpClient;
 use songbird::{SerenityInit, typemap::TypeMapKey};
 use sqlx::{PgPool, postgres::PgPoolOptions};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, OnceCell};
 
 use crate::{
     commands::sound::TrackList,
     components::{CustomComponent, TrackComponent},
+    interpreter::create_custom_interpreter,
 };
 
 mod commands;
@@ -49,6 +51,7 @@ impl Default for OllamaData {
 
 struct Data {
     pub funboy: Funboy,
+    pub interpreter: OnceCell<Arc<tokio::sync::Mutex<FslInterpreter>>>,
     pub track_list: Arc<Mutex<TrackList>>,
     pub track_player_lock: Arc<Mutex<()>>,
     pub ollama_data: OllamaData,
@@ -61,14 +64,26 @@ impl Data {
     pub fn new(pool: Arc<PgPool>) -> Self {
         Self {
             funboy: Funboy::new(TemplateDatabase::new(pool.clone())),
+            interpreter: OnceCell::new(),
             track_list: Mutex::new(TrackList::new()).into(),
             track_player_lock: Default::default(),
             ollama_data: OllamaData::default(),
             yt_dlp_cookies_path: None,
         }
     }
+
     pub fn get_funboy(&self) -> &Funboy {
         &self.funboy
+    }
+
+    pub async fn get_interpreter(
+        &self,
+        ctx: Context<'_>,
+    ) -> Arc<tokio::sync::Mutex<FslInterpreter>> {
+        self.interpreter
+            .get_or_init(async || Arc::new(Mutex::new(create_custom_interpreter(&ctx))))
+            .await
+            .clone()
     }
 
     #[allow(dead_code)]
@@ -186,7 +201,7 @@ async fn main() {
             },
             ..Default::default()
         })
-        .setup(|_ctx, _ready, _framework| {
+        .setup(|ctx, _ready, _framework| {
             Box::pin(async move {
                 // poise::builtins::register_globally(ctx, &framework.options().commands).await?;
                 Ok(Data::new(pool))

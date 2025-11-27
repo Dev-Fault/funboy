@@ -1,19 +1,15 @@
-use std::sync::Arc;
-
 use funboy_core::{
     FunboyError,
     template_database::{KeySize, Limit, OrderBy, SortOrder},
 };
 use poise::{ChoiceParameter, CreateReply};
 use serenity::all::ComponentInteraction;
-use tokio::sync::Mutex;
 
 use crate::{
     Context, Error,
     components::{
         CANCEL_BUTTON_ID, CONFIRM_BUTTON_ID, create_confirmation_interaction, edit_interaction,
     },
-    interpreter::create_custom_interpreter,
     io_format::{
         context_extension::ContextExtension,
         discord_message_format::{
@@ -30,10 +26,7 @@ pub async fn generate(ctx: Context<'_>, input: String) -> Result<(), Error> {
     let output = ctx
         .data()
         .get_funboy()
-        .generate(
-            &input,
-            Arc::new(Mutex::new(create_custom_interpreter(&ctx))),
-        )
+        .generate(&input, ctx.data().get_interpreter(ctx).await)
         .await;
 
     match output {
