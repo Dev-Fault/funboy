@@ -1,13 +1,9 @@
-use std::sync::Arc;
-
 use funboy_core::ollama::{MAX_PREDICT, OllamaSettings};
 use poise::CreateReply;
 use serenity::all::UserId;
-use tokio::sync::Mutex;
 
 use crate::{
     Context, Error, OllamaUserSettingsMap,
-    interpreter::create_custom_interpreter,
     io_format::{context_extension::ContextExtension, discord_message_format::ellipsize_if_long},
 };
 

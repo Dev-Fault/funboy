@@ -29,6 +29,9 @@ mod components;
 mod interpreter;
 mod io_format;
 
+type Error = Box<dyn std::error::Error + Send + Sync>;
+type Context<'a> = poise::Context<'a, Data, Error>;
+
 pub type OllamaUserSettingsMap = HashMap<UserId, OllamaSettings>;
 
 struct OllamaData {
@@ -51,35 +54,26 @@ impl Default for OllamaData {
 
 struct Data {
     pub funboy: Funboy,
-    pub interpreter: OnceCell<Arc<tokio::sync::Mutex<FslInterpreter>>>,
     pub track_list: Arc<Mutex<TrackList>>,
     pub track_player_lock: Arc<Mutex<()>>,
     pub ollama_data: OllamaData,
+    interpreter: OnceCell<Arc<Mutex<FslInterpreter>>>,
     yt_dlp_cookies_path: Option<String>,
 } // User data, which is stored and accessible in all command invocations
-type Error = Box<dyn std::error::Error + Send + Sync>;
-type Context<'a> = poise::Context<'a, Data, Error>;
 
 impl Data {
     pub fn new(pool: Arc<PgPool>) -> Self {
         Self {
             funboy: Funboy::new(TemplateDatabase::new(pool.clone())),
-            interpreter: OnceCell::new(),
             track_list: Mutex::new(TrackList::new()).into(),
             track_player_lock: Default::default(),
             ollama_data: OllamaData::default(),
+            interpreter: OnceCell::new(),
             yt_dlp_cookies_path: None,
         }
     }
 
-    pub fn get_funboy(&self) -> &Funboy {
-        &self.funboy
-    }
-
-    pub async fn get_interpreter(
-        &self,
-        ctx: Context<'_>,
-    ) -> Arc<tokio::sync::Mutex<FslInterpreter>> {
+    pub async fn get_interpreter(&self, ctx: Context<'_>) -> Arc<Mutex<FslInterpreter>> {
         self.interpreter
             .get_or_init(async || Arc::new(Mutex::new(create_custom_interpreter(&ctx))))
             .await
@@ -111,8 +105,9 @@ pub async fn register(ctx: Context<'_>) -> Result<(), Error> {
 async fn main() {
     dotenv().ok();
 
-    let intents =
-        serenity::GatewayIntents::non_privileged() | serenity::GatewayIntents::MESSAGE_CONTENT;
+    let intents = serenity::GatewayIntents::non_privileged()
+        | serenity::GatewayIntents::MESSAGE_CONTENT
+        | serenity::GatewayIntents::GUILD_MEMBERS;
 
     let token = std::env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN");
     let debug_mode = std::env::var("DEBUG_MODE")
@@ -201,7 +196,7 @@ async fn main() {
             },
             ..Default::default()
         })
-        .setup(|ctx, _ready, _framework| {
+        .setup(|_ctx, _ready, _framework| {
             Box::pin(async move {
                 // poise::builtins::register_globally(ctx, &framework.options().commands).await?;
                 Ok(Data::new(pool))

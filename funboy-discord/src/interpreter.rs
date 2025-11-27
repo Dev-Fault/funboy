@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    pin::Pin,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
@@ -11,15 +12,15 @@ use fsl_interpreter::{
     FslInterpreter, InterpreterData,
     commands::{NUMERIC_TYPES, TEXT_TYPES},
     types::{
-        command::{ArgPos, ArgRule, Command, CommandError},
+        command::{ArgPos, ArgRule, Command, CommandError, CommandFn, Executor},
         value::Value,
     },
 };
 use serenity::{
-    all::{Cache, ChannelId, Http, Mentionable, ShardMessenger, UserId},
+    all::{Cache, ChannelId, GuildId, Http, Mentionable, ShardMessenger, UserId},
     futures::StreamExt,
 };
-use tokio::time::sleep;
+use tokio::{sync::Mutex, time::sleep};
 
 use crate::Context;
 
@@ -29,6 +30,7 @@ pub struct InterpreterContext {
     #[allow(dead_code)]
     pub cache: Arc<Cache>,
     pub shard: ShardMessenger,
+    pub guild_id: Option<GuildId>,
     pub channel_id: ChannelId,
     pub author_id: UserId,
 }
@@ -39,6 +41,7 @@ impl InterpreterContext {
             http: ctx.serenity_context().http.clone(),
             cache: ctx.serenity_context().cache.clone(),
             shard: ctx.serenity_context().shard.clone(),
+            guild_id: ctx.guild_id(),
             channel_id: ctx.channel_id(),
             author_id: ctx.author().id,
         }
@@ -84,10 +87,32 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> FslInterpreter {
     let mut interpreter = FslInterpreter::new();
 
     let ictx = InterpreterContext::from_poise(ctx);
-    let rate_limit = Arc::new(tokio::sync::Mutex::new(RateLimit::new(30)));
+    let rate_limit = Arc::new(Mutex::new(RateLimit::new(30)));
 
+    interpreter.add_command(
+        "say",
+        SAY_RULES,
+        create_say_command(rate_limit.clone(), ictx.clone()),
+    );
+
+    interpreter.add_command(
+        "say_to",
+        SAY_TO_RULES,
+        create_say_to_command(rate_limit.clone(), ictx.clone()),
+    );
+
+    interpreter.add_command(
+        "ask",
+        ASK_RULES,
+        create_ask_command(rate_limit.clone(), ictx.clone()),
+    );
+
+    interpreter
+}
+
+const SAY_RULES: &'static [ArgRule] = &[ArgRule::new(ArgPos::Index(0), TEXT_TYPES)];
+pub fn create_say_command(rate_limit: Arc<Mutex<RateLimit>>, ictx: InterpreterContext) -> Executor {
     const SAY: &str = "say";
-    const SAY_RULES: &'static [ArgRule] = &[ArgRule::new(ArgPos::Index(0), TEXT_TYPES)];
     const SAY_LIMIT: u64 = 300;
     let say_count: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
     let say_command = {
@@ -124,12 +149,111 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> FslInterpreter {
             }
         }
     };
+    Some(Arc::new(say_command))
+}
 
+const SAY_TO_RULES: &'static [ArgRule] = &[
+    ArgRule::new(ArgPos::Index(0), TEXT_TYPES),
+    ArgRule::new(ArgPos::Index(1), TEXT_TYPES),
+];
+pub fn create_say_to_command(
+    rate_limit: Arc<Mutex<RateLimit>>,
+    ictx: InterpreterContext,
+) -> Executor {
+    const SAY_TO: &str = "say_to";
+    const SAY_TO_LIMIT: u64 = 300;
+    let say_count: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
+    let say_command = {
+        let rate_limit = rate_limit.clone();
+        let ictx = ictx.clone();
+        move |command: Command, interpreter_data: Arc<InterpreterData>| {
+            let ictx = ictx.clone();
+            let say_count = say_count.clone();
+            let rate_limit = rate_limit.clone();
+            async move {
+                if say_count.load(Ordering::Relaxed) >= SAY_TO_LIMIT {
+                    return Err(CommandError::Custom(format!(
+                        "Cannot use say more than {} times in one go",
+                        SAY_TO_LIMIT
+                    )));
+                }
+                say_count.fetch_add(1, Ordering::Relaxed);
+
+                sleep(Duration::from_millis(COMMAND_MESSAGE_DELAY_MS)).await;
+
+                let mut values = command.take_args();
+                let user = values
+                    .pop_front()
+                    .unwrap()
+                    .as_text(interpreter_data.clone())
+                    .await?;
+                let message = values
+                    .pop_front()
+                    .unwrap()
+                    .as_text(interpreter_data)
+                    .await?;
+
+                if let Some(guild_id) = ictx.guild_id {
+                    if let Ok(members) = guild_id.members(ictx.http.clone(), None, None).await {
+                        if let Some(user) = members
+                            .iter()
+                            .find(|m| m.user.name == user || m.user.tag() == user)
+                        {
+                            let mention = user.mention();
+                            let mention_message = format!("{} {}", mention, message);
+                            if let Err(e) = ictx.channel_id.say(&ictx.http, mention_message).await {
+                                return Err(CommandError::Custom(e.to_string()));
+                            };
+
+                            if let Err(e) = rate_limit.lock().await.check_limit(ictx.author_id) {
+                                return Err(CommandError::Custom(format!(
+                                    "{} on {} command",
+                                    e, SAY_TO
+                                )));
+                            }
+                        } else if user == "everyone" {
+                            let mention_message = format!("@{} {}", user, message);
+                            if let Err(e) = ictx.channel_id.say(&ictx.http, mention_message).await {
+                                return Err(CommandError::Custom(e.to_string()));
+                            };
+
+                            if let Err(e) = rate_limit.lock().await.check_limit(ictx.author_id) {
+                                return Err(CommandError::Custom(format!(
+                                    "{} on {} command",
+                                    e, SAY_TO
+                                )));
+                            }
+                        } else {
+                            return Err(CommandError::Custom(format!(
+                                "no user named {} found",
+                                user
+                            )));
+                        }
+                    } else {
+                        return Err(CommandError::Custom(format!(
+                            "failed to fetch guild members",
+                        )));
+                    }
+
+                    Ok(Value::None)
+                } else {
+                    return Err(CommandError::Custom(format!(
+                        "Cannot use {} outside of a guild",
+                        SAY_TO
+                    )));
+                }
+            }
+        }
+    };
+    Some(Arc::new(say_command))
+}
+
+const ASK_RULES: &'static [ArgRule] = &[
+    ArgRule::new(ArgPos::Index(0), TEXT_TYPES),
+    ArgRule::new(ArgPos::OptionalIndex(1), NUMERIC_TYPES),
+];
+pub fn create_ask_command(rate_limit: Arc<Mutex<RateLimit>>, ictx: InterpreterContext) -> Executor {
     const ASK: &str = "ask";
-    const ASK_RULES: &'static [ArgRule] = &[
-        ArgRule::new(ArgPos::Index(0), TEXT_TYPES),
-        ArgRule::new(ArgPos::OptionalIndex(1), NUMERIC_TYPES),
-    ];
     const ASK_LIMIT: u64 = 300;
     const DEFAULT_TIMEOUT_SECS: f64 = 60.0 * 2.0;
     const MAX_TIMEOUT_SECS: f64 = 60.0 * 10.0;
@@ -202,18 +326,5 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> FslInterpreter {
             }
         }
     };
-
-    interpreter.add_command(
-        "say",
-        SAY_RULES,
-        FslInterpreter::construct_executor(say_command),
-    );
-
-    interpreter.add_command(
-        "ask",
-        ASK_RULES,
-        FslInterpreter::construct_executor(ask_command),
-    );
-
-    interpreter
+    Some(Arc::new(ask_command))
 }

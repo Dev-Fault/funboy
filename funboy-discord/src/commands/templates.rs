@@ -25,7 +25,7 @@ pub async fn generate(ctx: Context<'_>, input: String) -> Result<(), Error> {
 
     let output = ctx
         .data()
-        .get_funboy()
+        .funboy
         .generate(&input, ctx.data().get_interpreter(ctx).await)
         .await;
 
@@ -276,16 +276,10 @@ pub async fn add_subs(
     let add_as_single_sub = add_as_single_sub.unwrap_or(false);
 
     let result = if add_as_single_sub {
-        ctx.data()
-            .get_funboy()
-            .add_substitutes(&template, &[&subs])
-            .await
+        ctx.data().funboy.add_substitutes(&template, &[&subs]).await
     } else {
         let subs: Vec<&str> = split_by_whitespace_unless_quoted(&subs);
-        ctx.data()
-            .get_funboy()
-            .add_substitutes(&template, &subs)
-            .await
+        ctx.data().funboy.add_substitutes(&template, &subs).await
     };
 
     match result {
@@ -340,7 +334,7 @@ pub async fn copy_subs(
 ) -> Result<(), Error> {
     let result = ctx
         .data()
-        .get_funboy()
+        .funboy
         .copy_substitutes(&from_template, &to_template)
         .await;
 
@@ -380,7 +374,7 @@ pub async fn delete_subs(
             }
         } else {
             ctx.data()
-                .get_funboy()
+                .funboy
                 .delete_substitutes(&template, &[&subs])
                 .await
         }
@@ -396,10 +390,7 @@ pub async fn delete_subs(
                 )),
             }
         } else {
-            ctx.data()
-                .get_funboy()
-                .delete_substitutes(&template, &subs)
-                .await
+            ctx.data().funboy.delete_substitutes(&template, &subs).await
         }
     };
 
