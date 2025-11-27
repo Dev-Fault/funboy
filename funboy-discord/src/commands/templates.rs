@@ -35,10 +35,7 @@ pub async fn generate(ctx: Context<'_>, input: String) -> Result<(), Error> {
                 ctx.edit_long(original_message, &output, false).await?;
             } else {
                 original_message
-                    .edit(
-                        ctx,
-                        CreateReply::default().content("There was nothing to generate."),
-                    )
+                    .edit(ctx, CreateReply::default().content("Generation complete."))
                     .await?;
             }
         }
