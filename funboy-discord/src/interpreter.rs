@@ -61,7 +61,7 @@ impl RateLimit {
 
     pub fn check_limit(&mut self, user_id: UserId) -> Result<(), String> {
         let now = SystemTime::now();
-        let usage_window = now - Duration::from_secs(30);
+        let usage_window = now - Duration::from_secs(60);
 
         let uses = self.users.entry(user_id).or_insert_with(Vec::new);
 
