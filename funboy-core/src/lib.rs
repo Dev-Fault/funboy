@@ -12,7 +12,7 @@ use moka::future::{Cache, CacheBuilder};
 use ollama_rs::{generation::completion::GenerationResponse, models::ModelInfo};
 use rand::{Rng, distr::uniform::SampleUniform, random_range};
 use regex::Regex;
-use tokio::sync::Mutex;
+use tokio::{io::Interest, sync::Mutex};
 
 use crate::{
     ollama::{OllamaGenerator, OllamaSettings},
@@ -325,23 +325,12 @@ impl Funboy {
         }
     }
 
-    /* PROFILE CODE
-        let before = SystemTime::now();
-
-        let after = SystemTime::now();
-
-        let time = after.duration_since(before).unwrap();
-        unsafe {
-            static mut INTERP_TIME: Duration = Duration::new(0, 0);
-            INTERP_TIME += time;
-            dbg!(INTERP_TIME);
-        }
-    */
     async fn get_random_substitute(&self, template: &str) -> Result<Substitute, FunboyError> {
         self.validate_template_name(template)?;
 
         match self.random_sub_cache.get(template).await {
             Some(subs) => {
+                // TODO test this to see if subs are ever empty
                 let sub = subs
                     .get(random_range(0..subs.len()))
                     .expect("subs should be present in cache if match was found");
@@ -371,81 +360,18 @@ impl Funboy {
         }
     }
 
-    async fn interpret_code(
-        &self,
-        interpreter: Arc<Mutex<FslInterpreter>>,
-        input: &str,
-    ) -> Result<String, FunboyError> {
-        let mut output = String::with_capacity(input.len());
-        let mut code_stack: Vec<String> = Vec::new();
+    /* PROFILE CODE
+        let before = SystemTime::now();
 
-        let mut code_depth: i16 = 0;
+        let after = SystemTime::now();
 
-        for c in input.chars() {
-            if c == '{' {
-                code_stack.push(String::new());
-                code_depth += 1;
-            } else if c == '}' {
-                code_depth -= 1;
-                if code_depth < 0 {
-                    return Err(FunboyError::Interpreter(
-                        "Unmatched curly braces".to_string(),
-                    ));
-                } else {
-                    match code_stack.pop() {
-                        Some(code) => {
-                            let mut interpreter = interpreter.lock().await;
-                            interpreter.reset_data();
-                            match interpreter.interpret(&code).await {
-                                Ok(eval) => {
-                                    let substituted_text =
-                                        TemplateSubstitutor::new(TemplateDelimiter::BackTick)
-                                            .substitute_recursively(
-                                                eval,
-                                                |template: String| async move {
-                                                    match self
-                                                        .get_random_substitute(&template)
-                                                        .await
-                                                    {
-                                                        Ok(sub) => Some(sub.name.to_string()),
-                                                        Err(_) => None,
-                                                    }
-                                                },
-                                            )
-                                            .await;
-
-                                    match code_stack.last_mut() {
-                                        Some(code) => code.push_str(&substituted_text),
-                                        None => output.push_str(&substituted_text),
-                                    }
-                                }
-                                Err(e) => {
-                                    return Err(FunboyError::Interpreter(e.to_string()));
-                                }
-                            };
-                        }
-                        None => {}
-                    }
-                }
-            } else if code_depth == 0 {
-                output.push(c);
-            } else {
-                match code_stack.last_mut() {
-                    Some(s) => s.push(c),
-                    None => {}
-                }
-            }
+        let time = after.duration_since(before).unwrap();
+        unsafe {
+            static mut INTERP_TIME: Duration = Duration::new(0, 0);
+            INTERP_TIME += time;
+            dbg!(INTERP_TIME);
         }
-
-        if code_depth != 0 {
-            return Err(FunboyError::Interpreter(
-                "Unmatched curly braces".to_string(),
-            ));
-        }
-
-        Ok(output)
-    }
-
+    */
     /// Resolves templates and interprets embeded code in input with a single pass
     async fn interpret_input(
         &self,
@@ -455,6 +381,7 @@ impl Funboy {
         let mut substituted_text = self
             .substitute_register_templates(input, interpreter.clone())
             .await?;
+
         substituted_text = TemplateSubstitutor::new(TemplateDelimiter::Caret)
             .substitute_recursively(substituted_text, |template: String| async move {
                 match self.get_random_substitute(&template).await {
@@ -464,11 +391,22 @@ impl Funboy {
             })
             .await;
 
-        let interpreter_result = self.interpret_code(interpreter, &substituted_text).await;
+        let mut interpreter = interpreter.lock().await;
+        let interpreter_result = interpreter.interpret_embedded_code(&substituted_text).await;
 
         match interpreter_result {
-            Ok(interpreted_text) => Ok(interpreted_text),
-            Err(e) => Err(e),
+            Ok(interpreted_text) => {
+                let output = TemplateSubstitutor::new(TemplateDelimiter::BackTick)
+                    .substitute_recursively(interpreted_text, |template: String| async move {
+                        match self.get_random_substitute(&template).await {
+                            Ok(sub) => Some(sub.name.to_string()),
+                            Err(_) => None,
+                        }
+                    })
+                    .await;
+                Ok(output)
+            }
+            Err(e) => Err(FunboyError::Interpreter(e.to_string())),
         }
     }
 
@@ -525,7 +463,6 @@ impl Funboy {
         input: &str,
         interpreter: Arc<Mutex<FslInterpreter>>,
     ) -> Result<String, FunboyError> {
-        let before = SystemTime::now();
         let mut output = input.to_string();
         let mut prev_hashes = HashSet::new();
 
@@ -540,15 +477,6 @@ impl Funboy {
             } else {
                 output = self.interpret_input(output, interpreter.clone()).await?;
             }
-        }
-
-        let after = SystemTime::now();
-
-        let time = after.duration_since(before).unwrap();
-        unsafe {
-            static mut GEN_TIME: Duration = Duration::new(0, 0);
-            GEN_TIME += time;
-            dbg!(GEN_TIME);
         }
 
         Ok(output)
