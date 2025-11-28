@@ -51,7 +51,7 @@ impl Default for OllamaData {
 }
 
 struct Data {
-    pub funboy: Funboy,
+    pub funboy: Arc<Funboy>,
     pub track_list: Arc<Mutex<TrackList>>,
     pub track_player_lock: Arc<Mutex<()>>,
     pub ollama_data: OllamaData,
@@ -61,7 +61,7 @@ struct Data {
 impl Data {
     pub fn new(pool: Arc<PgPool>) -> Self {
         Self {
-            funboy: Funboy::new(TemplateDatabase::new(pool.clone())),
+            funboy: Arc::new(Funboy::new(TemplateDatabase::new(pool.clone()))),
             track_list: Mutex::new(TrackList::new()).into(),
             track_player_lock: Default::default(),
             ollama_data: OllamaData::default(),

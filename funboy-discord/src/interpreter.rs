@@ -15,6 +15,7 @@ use fsl_interpreter::{
         value::Value,
     },
 };
+use funboy_core::Funboy;
 use serenity::{
     all::{Cache, ChannelId, GuildId, Http, Member, Mentionable, ShardMessenger, UserId},
     futures::StreamExt,
@@ -33,6 +34,8 @@ pub struct InterpreterContext {
     pub channel_id: ChannelId,
     pub author_id: UserId,
     pub rate_limit: Arc<Mutex<RateLimit>>,
+    pub funboy: Arc<Funboy>,
+    interpreter: Arc<Mutex<FslInterpreter>>,
 }
 
 impl InterpreterContext {
@@ -45,6 +48,8 @@ impl InterpreterContext {
             channel_id: ctx.channel_id(),
             author_id: ctx.author().id,
             rate_limit: Arc::new(Mutex::new(RateLimit::new(30))),
+            funboy: ctx.data().funboy.clone(),
+            interpreter: Arc::new(Mutex::new(FslInterpreter::new())),
         }
     }
 
@@ -113,6 +118,19 @@ impl InterpreterContext {
             )));
         }
     }
+
+    pub async fn generate_message(&self, message: &str) -> Result<String, CommandError> {
+        match self
+            .funboy
+            .generate(&message, self.interpreter.clone())
+            .await
+        {
+            Ok(gen_msg) => Ok(gen_msg),
+            Err(e) => {
+                return Err(CommandError::Custom(e.to_string()));
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -155,20 +173,20 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> Arc<tokio::sync::Mutex<Fs
 
     let ictx = InterpreterContext::from_poise(ctx);
 
-    interpreter.add_command("say", SAY_RULES, create_say_command(ictx.clone()));
+    interpreter.add_command(SAY, SAY_RULES, create_say_command(ictx.clone()));
 
-    interpreter.add_command("say_to", SAY_TO_RULES, create_say_to_command(ictx.clone()));
+    interpreter.add_command(SAY_TO, SAY_TO_RULES, create_say_to_command(ictx.clone()));
 
-    interpreter.add_command("ask", ASK_RULES, create_ask_command(ictx.clone()));
+    interpreter.add_command(ASK, ASK_RULES, create_ask_command(ictx.clone()));
 
-    interpreter.add_command("ask_to", ASK_TO_RULES, create_ask_to_command(ictx.clone()));
+    interpreter.add_command(ASK_TO, ASK_TO_RULES, create_ask_to_command(ictx.clone()));
 
     Arc::new(tokio::sync::Mutex::new(interpreter))
 }
 
+const SAY: &str = "say";
 const SAY_RULES: &'static [ArgRule] = &[ArgRule::new(ArgPos::Index(0), TEXT_TYPES)];
 pub fn create_say_command(ictx: InterpreterContext) -> Executor {
-    const SAY: &str = "say";
     const SAY_LIMIT: u64 = 300;
     let say_count: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
     let say_command = {
@@ -196,6 +214,8 @@ pub fn create_say_command(ictx: InterpreterContext) -> Executor {
                     .as_text(interpreter_data)
                     .await?;
 
+                let message = ictx.generate_message(&message).await?;
+
                 ictx.channel_id.say(&ictx.http, message).await.ok();
 
                 if let Err(e) = rate_limit.lock().await.check_limit(ictx.author_id) {
@@ -209,16 +229,15 @@ pub fn create_say_command(ictx: InterpreterContext) -> Executor {
     Some(Arc::new(say_command))
 }
 
+const SAY_TO: &str = "say_to";
 const SAY_TO_RULES: &'static [ArgRule] = &[
     ArgRule::new(ArgPos::Index(0), TEXT_TYPES),
     ArgRule::new(ArgPos::Index(1), TEXT_TYPES),
 ];
 pub fn create_say_to_command(ictx: InterpreterContext) -> Executor {
-    const SAY_TO: &str = "say_to";
     const SAY_TO_LIMIT: u64 = 300;
     let say_count: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
     let say_command = {
-        let rate_limit = ictx.rate_limit.clone();
         let ictx = ictx.clone();
         move |command: Command, interpreter_data: Arc<InterpreterData>| {
             let ictx = ictx.clone();
@@ -246,7 +265,8 @@ pub fn create_say_to_command(ictx: InterpreterContext) -> Executor {
                     .as_text(interpreter_data)
                     .await?;
 
-                ictx.say_to_user(&user_name, &message).await?;
+                ictx.say_to_user(&user_name, &ictx.generate_message(&message).await?)
+                    .await?;
                 Ok(Value::None)
             }
         }
@@ -254,12 +274,12 @@ pub fn create_say_to_command(ictx: InterpreterContext) -> Executor {
     Some(Arc::new(say_command))
 }
 
+const ASK: &str = "ask";
 const ASK_RULES: &'static [ArgRule] = &[
     ArgRule::new(ArgPos::Index(0), TEXT_TYPES),
     ArgRule::new(ArgPos::OptionalIndex(1), NUMERIC_TYPES),
 ];
 pub fn create_ask_command(ictx: InterpreterContext) -> Executor {
-    const ASK: &str = "ask";
     const ASK_LIMIT: u64 = 300;
     const DEFAULT_TIMEOUT_SECS: f64 = 60.0 * 2.0;
     const MAX_TIMEOUT_SECS: f64 = 60.0 * 10.0;
@@ -293,11 +313,14 @@ pub fn create_ask_command(ictx: InterpreterContext) -> Executor {
                 let time_out = arg_1.as_float(data.clone()).await?;
                 validate_time_out(time_out, MAX_TIMEOUT_SECS)?;
 
-                ictx.channel_id.say(&ictx.http, question).await.ok();
+                ictx.channel_id
+                    .say(&ictx.http, ictx.generate_message(&question).await?)
+                    .await
+                    .ok();
 
                 let mut collector = ictx
                     .channel_id
-                    .await_reply(ictx.shard)
+                    .await_reply(ictx.shard.clone())
                     .timeout(Duration::from_secs_f64(time_out))
                     .channel_id(ictx.channel_id)
                     .author_id(ictx.author_id)
@@ -311,7 +334,7 @@ pub fn create_ask_command(ictx: InterpreterContext) -> Executor {
                     if msg.content == "-STOP-" {
                         Err(CommandError::Custom("User quit the program".into()))
                     } else {
-                        Ok(Value::Text(msg.content))
+                        Ok(Value::Text(ictx.generate_message(&msg.content).await?))
                     }
                 } else {
                     Err(CommandError::Custom(format!(
@@ -324,13 +347,13 @@ pub fn create_ask_command(ictx: InterpreterContext) -> Executor {
     Some(Arc::new(ask_command))
 }
 
+const ASK_TO: &str = "ask";
 const ASK_TO_RULES: &'static [ArgRule] = &[
     ArgRule::new(ArgPos::Index(0), TEXT_TYPES),
     ArgRule::new(ArgPos::Index(1), TEXT_TYPES),
-    ArgRule::new(ArgPos::OptionalIndex(1), NUMERIC_TYPES),
+    ArgRule::new(ArgPos::OptionalIndex(2), NUMERIC_TYPES),
 ];
 pub fn create_ask_to_command(ictx: InterpreterContext) -> Executor {
-    const ASK_TO: &str = "ask";
     const ASK_TO_LIMIT: u64 = 300;
     const DEFAULT_TIMEOUT_SECS: f64 = 60.0 * 2.0;
     const MAX_TIMEOUT_SECS: f64 = 60.0 * 10.0;
@@ -365,18 +388,19 @@ pub fn create_ask_to_command(ictx: InterpreterContext) -> Executor {
                 let time_out = arg_2.as_float(data.clone()).await?;
                 validate_time_out(time_out, MAX_TIMEOUT_SECS)?;
 
-                ictx.say_to_user(&user_name, &question).await?;
+                ictx.say_to_user(&user_name, &ictx.generate_message(&question).await?)
+                    .await?;
 
                 let mut collector = if user_name == "everyone" {
                     ictx.channel_id
-                        .await_reply(ictx.shard)
+                        .await_reply(ictx.shard.clone())
                         .timeout(Duration::from_secs_f64(time_out))
                         .channel_id(ictx.channel_id)
                         .stream()
                 } else {
                     let user_id = ictx.get_user_id(&user_name).await?;
                     ictx.channel_id
-                        .await_reply(ictx.shard)
+                        .await_reply(ictx.shard.clone())
                         .timeout(Duration::from_secs_f64(time_out))
                         .channel_id(ictx.channel_id)
                         .author_id(user_id)
@@ -391,7 +415,7 @@ pub fn create_ask_to_command(ictx: InterpreterContext) -> Executor {
                     if msg.content == "-STOP-" {
                         Err(CommandError::Custom("User quit the program".into()))
                     } else {
-                        Ok(Value::Text(msg.content))
+                        Ok(Value::Text(ictx.generate_message(&msg.content).await?))
                     }
                 } else {
                     Err(CommandError::Custom(format!(
@@ -405,8 +429,6 @@ pub fn create_ask_to_command(ictx: InterpreterContext) -> Executor {
 }
 
 pub fn validate_time_out(time_out: f64, max: f64) -> Result<(), CommandError> {
-    const DEFAULT_TIMEOUT_SECS: f64 = 60.0 * 2.0;
-
     if !time_out.is_finite() {
         return Err(CommandError::NonFiniteValue);
     } else if time_out.is_sign_negative() {
