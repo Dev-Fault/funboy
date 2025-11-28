@@ -174,11 +174,8 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> Arc<tokio::sync::Mutex<Fs
     let ictx = InterpreterContext::from_poise(ctx);
 
     interpreter.add_command(SAY, SAY_RULES, create_say_command(ictx.clone()));
-
     interpreter.add_command(SAY_TO, SAY_TO_RULES, create_say_to_command(ictx.clone()));
-
     interpreter.add_command(ASK, ASK_RULES, create_ask_command(ictx.clone()));
-
     interpreter.add_command(ASK_TO, ASK_TO_RULES, create_ask_to_command(ictx.clone()));
 
     Arc::new(tokio::sync::Mutex::new(interpreter))

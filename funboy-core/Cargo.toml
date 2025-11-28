@@ -16,3 +16,4 @@ strum = "0.27.2"
 strum_macros = "0.27.2"
 async-recursion = "1.1.1"
 fsl_interpreter = { version = "0.1.0", path = "../../fsl_interpreter" }
+moka = { version = "0.12.11", features = ["future"] }
