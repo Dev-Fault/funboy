@@ -3,12 +3,13 @@ use std::{
     hash::{DefaultHasher, Hash, Hasher},
     str::FromStr,
     sync::Arc,
+    time::{Duration, SystemTime},
 };
 
 use async_recursion::async_recursion;
 use fsl_interpreter::FslInterpreter;
 use ollama_rs::{generation::completion::GenerationResponse, models::ModelInfo};
-use rand::{Rng, distr::uniform::SampleUniform};
+use rand::{Rng, distr::uniform::SampleUniform, random_range};
 use regex::Regex;
 use tokio::sync::Mutex;
 
@@ -62,6 +63,7 @@ pub struct Funboy {
     template_db: TemplateDatabase,
     ollama_generator: OllamaGenerator,
     valid_template_regex: Regex,
+    random_sub_cache: Mutex<HashMap<String, Vec<Substitute>>>,
 }
 
 impl Funboy {
@@ -70,6 +72,7 @@ impl Funboy {
             template_db,
             ollama_generator: OllamaGenerator::default(),
             valid_template_regex: Regex::new(&format!("^[{}]+$", VALID_TEMPLATE_CHARS)).unwrap(),
+            random_sub_cache: Mutex::new(HashMap::new()),
         }
     }
 
@@ -320,18 +323,34 @@ impl Funboy {
     async fn get_random_substitute(&self, template: &str) -> Result<Substitute, FunboyError> {
         self.validate_template_name(template)?;
 
-        match self
-            .get_substitutes(template, None, OrderBy::Random, Limit::Count(1))
-            .await
-        {
-            Ok(subs) => match subs.get(0) {
-                Some(sub) => Ok(sub.clone()),
-                None => Err(FunboyError::Database(format!(
-                    "No substitutes were present in template \"{}\"",
-                    template
-                ))),
-            },
-            Err(e) => Err(e.into()),
+        let mut sub_map = self.random_sub_cache.lock().await;
+
+        match sub_map.get(template) {
+            Some(subs) => {
+                let sub = subs
+                    .get(random_range(0..subs.len()))
+                    .expect("subs should be present in cache if match was found");
+                Ok(sub.clone())
+            }
+            None => {
+                match self
+                    .get_substitutes(template, None, OrderBy::Random, Limit::Count(200))
+                    .await
+                {
+                    Ok(subs) => {
+                        let sub = subs.get(0).cloned();
+                        sub_map.insert(template.to_string(), subs);
+                        match sub {
+                            Some(sub) => Ok(sub.clone()),
+                            None => Err(FunboyError::Database(format!(
+                                "No substitutes were present in template \"{}\"",
+                                template
+                            ))),
+                        }
+                    }
+                    Err(e) => Err(e.into()),
+                }
+            }
         }
     }
 
@@ -409,6 +428,19 @@ impl Funboy {
 
         Ok(output)
     }
+
+    /* PROFILE CODE
+        let before = SystemTime::now();
+
+        let after = SystemTime::now();
+
+        let time = after.duration_since(before).unwrap();
+        unsafe {
+            static mut INTERP_TIME: Duration = Duration::new(0, 0);
+            INTERP_TIME += time;
+            dbg!(INTERP_TIME);
+        }
+    */
 
     /// Resolves templates and interprets embeded code in input with a single pass
     async fn interpret_input(
@@ -505,6 +537,7 @@ impl Funboy {
             }
         }
 
+        self.random_sub_cache.lock().await.clear();
         Ok(output)
     }
 
