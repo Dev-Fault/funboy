@@ -347,7 +347,7 @@ pub fn create_ask_command(ictx: InterpreterContext) -> Executor {
     Some(Arc::new(ask_command))
 }
 
-const ASK_TO: &str = "ask";
+const ASK_TO: &str = "ask_to";
 const ASK_TO_RULES: &'static [ArgRule] = &[
     ArgRule::new(ArgPos::Index(0), TEXT_TYPES),
     ArgRule::new(ArgPos::Index(1), TEXT_TYPES),
