@@ -55,7 +55,7 @@ pub async fn list_ollama_settings(ctx: Context<'_>) -> Result<(), Error> {
     let mut ollama_settings_map = ctx.data().ollama_data.user_settings.lock().await;
     let settings = get_ollama_user_settings(&mut ollama_settings_map, &user_id);
 
-    let current_model = ctx.data().ollama_data.model.lock().await.clone();
+    let current_model = ctx.data().funboy.get_ollama_model().await;
 
     ctx.say_ephemeral(&format!(
         "Current Model: {}\n{}",
@@ -71,7 +71,6 @@ pub async fn list_ollama_settings(ctx: Context<'_>) -> Result<(), Error> {
 #[poise::command(slash_command, prefix_command, category = "Ollama")]
 pub async fn set_ollama_model(ctx: Context<'_>, model: String) -> Result<(), Error> {
     let ollama_generator = ctx.data().ollama_data.generator.lock().await;
-    let mut current_model = ctx.data().ollama_data.model.lock().await;
     let models = ollama_generator.get_models().await;
     drop(ollama_generator);
     match models {
@@ -84,7 +83,10 @@ pub async fn set_ollama_model(ctx: Context<'_>, model: String) -> Result<(), Err
                 .map(|model| &model.name)
                 .any(|name| *name == model)
             {
-                *current_model = Some(model.clone());
+                ctx.data()
+                    .funboy
+                    .set_ollama_model(Some(model.clone()))
+                    .await;
                 ctx.say_ephemeral(&format!("Set ollama model to: \"{}\"", model))
                     .await?;
             } else {
@@ -252,7 +254,7 @@ pub async fn generate_ollama(ctx: Context<'_>, prompt: String) -> Result<(), Err
                     get_ollama_user_settings_mut(&mut ollama_settings_map, &user_id).clone();
                 drop(ollama_settings_map);
                 let ollama_generator = ctx.data().ollama_data.generator.lock().await;
-                let model = ctx.data().ollama_data.model.lock().await.clone();
+                let model = ctx.data().funboy.get_ollama_model().await;
                 let response = ollama_generator.generate(&prompt, &settings, model).await;
                 match response {
                     Err(e) => {

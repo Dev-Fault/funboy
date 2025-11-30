@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    fmt::Debug,
     hash::{DefaultHasher, Hash, Hasher},
     str::FromStr,
     sync::Arc,
@@ -9,9 +10,9 @@ use std::{
 use async_recursion::async_recursion;
 use fsl_interpreter::{
     FslInterpreter, InterpreterData,
-    commands::TEXT_TYPES,
+    commands::{INDEX_TYPES, TEXT_TYPES, WHOLE_NUMBER_TYPES},
     types::{
-        command::{ArgPos, ArgRule, Command, CommandError, Executor},
+        command::{ArgPos, ArgRule, Command, CommandError, Executor, UserCommand},
         value::Value,
     },
 };
@@ -71,6 +72,7 @@ impl From<sqlx::Error> for FunboyError {
 #[derive(Debug, Clone)]
 pub struct Funboy {
     template_db: TemplateDatabase,
+    ollama_model: Arc<Mutex<Option<String>>>,
     ollama_generator: OllamaGenerator,
     valid_template_regex: Regex,
     random_sub_cache: Arc<Cache<String, Vec<Substitute>>>,
@@ -81,6 +83,7 @@ impl Funboy {
         Self {
             template_db,
             ollama_generator: OllamaGenerator::default(),
+            ollama_model: Arc::new(Mutex::new(None)),
             valid_template_regex: Regex::new(&format!("^[{}]+$", VALID_TEMPLATE_CHARS)).unwrap(),
             random_sub_cache: Arc::new(
                 CacheBuilder::new(20)
@@ -88,6 +91,15 @@ impl Funboy {
                     .build(),
             ),
         }
+    }
+
+    pub async fn get_ollama_model(&self) -> Option<String> {
+        self.ollama_model.lock().await.clone()
+    }
+
+    pub async fn set_ollama_model(&self, new_model: Option<String>) {
+        let mut model = self.ollama_model.lock().await;
+        *model = new_model;
     }
 
     fn gen_rand_num_inclusive<T: SampleUniform + PartialOrd>(min: T, max: T) -> T {
@@ -456,7 +468,12 @@ impl Funboy {
 
         let mut modified_interpreter = interpreter.lock().await;
         let funboy = Arc::new(self.clone());
-        modified_interpreter.add_command(GET_SUB, GET_SUB_RULES, create_get_sub_command(funboy));
+        modified_interpreter.add_command(
+            GET_SUB,
+            GET_SUB_RULES,
+            create_get_sub_command(funboy.clone()),
+        );
+        modified_interpreter.add_command(ASK_AI, ASK_AI_RULES, create_ask_ai_command(funboy));
         drop(modified_interpreter);
 
         const MAX_GENERATIONS: u8 = 255;
@@ -531,6 +548,53 @@ fn create_get_sub_command(funboy: Arc<Funboy>) -> Executor {
                         "template name must be preceeded by a single ` (backtick)\nThis ensures if the template is renamed this {} will not be invalid",
                         GET_SUB
                     )));
+                }
+            }
+        }
+    };
+    Some(Arc::new(get_sub_command))
+}
+
+const ASK_AI: &str = "ask_ai";
+const ASK_AI_RULES: &[ArgRule] = &[
+    ArgRule::new(ArgPos::Index(0), TEXT_TYPES),
+    ArgRule::new(ArgPos::Index(1), WHOLE_NUMBER_TYPES),
+];
+const MAX_WORD_LIMIT: i64 = 100;
+fn create_ask_ai_command(funboy: Arc<Funboy>) -> Executor {
+    let get_sub_command = {
+        move |command: Command, data: Arc<InterpreterData>| {
+            let funboy = funboy.clone();
+            async move {
+                let mut args = command.take_args();
+                let prompt = args.pop_front().unwrap().as_text(data.clone()).await?;
+
+                let word_limit = args.pop_front().unwrap().as_int(data).await?;
+                if word_limit <= 0 {
+                    return Err(CommandError::Custom(
+                        "word limit must be greater than zero".to_string(),
+                    ));
+                } else if word_limit > MAX_WORD_LIMIT {
+                    return Err(CommandError::Custom(format!(
+                        "word limit cannot be greater than {}",
+                        MAX_WORD_LIMIT
+                    )));
+                }
+
+                let mut ollama_settings = OllamaSettings::default();
+                ollama_settings.set_output_limit(word_limit as u16);
+                let ollama_generator = OllamaGenerator::default();
+                let model = funboy.get_ollama_model().await;
+
+                let response = ollama_generator
+                    .generate(&prompt, &ollama_settings, model)
+                    .await;
+                match response {
+                    Ok(response) => {
+                        let response = response.response;
+                        Ok(Value::Text(response))
+                    }
+                    Err(e) => Err(CommandError::Custom(e.to_string())),
                 }
             }
         }

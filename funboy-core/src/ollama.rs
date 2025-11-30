@@ -199,7 +199,11 @@ impl OllamaGenerator {
             None => {
                 let available_models = self.get_models().await;
                 match available_models {
-                    Ok(models) => models[0].name.clone(),
+                    Ok(models) => {
+                        dbg!(&models);
+                        dbg!(&models[0]);
+                        models[0].name.clone()
+                    }
                     Err(e) => {
                         return Err(e);
                     }

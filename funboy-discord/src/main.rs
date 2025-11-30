@@ -35,7 +35,6 @@ pub type OllamaUserSettingsMap = HashMap<UserId, OllamaSettings>;
 struct OllamaData {
     pub users: Mutex<HashSet<UserId>>,
     pub generator: Mutex<OllamaGenerator>,
-    pub model: Arc<Mutex<Option<String>>>,
     pub user_settings: Arc<Mutex<OllamaUserSettingsMap>>,
 }
 
@@ -44,7 +43,6 @@ impl Default for OllamaData {
         Self {
             users: Default::default(),
             generator: Default::default(),
-            model: Default::default(),
             user_settings: Default::default(),
         }
     }
