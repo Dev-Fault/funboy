@@ -3,7 +3,7 @@ use std::{
     hash::{DefaultHasher, Hash, Hasher},
     str::FromStr,
     sync::Arc,
-    time::{Duration, SystemTime},
+    time::Duration,
 };
 
 use async_recursion::async_recursion;
@@ -12,7 +12,7 @@ use moka::future::{Cache, CacheBuilder};
 use ollama_rs::{generation::completion::GenerationResponse, models::ModelInfo};
 use rand::{Rng, distr::uniform::SampleUniform, random_range};
 use regex::Regex;
-use tokio::{io::Interest, sync::Mutex};
+use tokio::sync::Mutex;
 
 use crate::{
     ollama::{OllamaGenerator, OllamaSettings},
@@ -54,9 +54,10 @@ impl ToString for FunboyError {
     }
 }
 
-impl Into<FunboyError> for sqlx::Error {
-    fn into(self) -> FunboyError {
-        FunboyError::Database(self.to_string())
+impl From<sqlx::Error> for FunboyError {
+    fn from(value: sqlx::Error) -> Self {
+        eprintln!("{}", value);
+        FunboyError::Database(value.to_string())
     }
 }
 
@@ -74,7 +75,7 @@ impl Funboy {
             ollama_generator: OllamaGenerator::default(),
             valid_template_regex: Regex::new(&format!("^[{}]+$", VALID_TEMPLATE_CHARS)).unwrap(),
             random_sub_cache: Arc::new(
-                CacheBuilder::new(100)
+                CacheBuilder::new(20)
                     .time_to_live(Duration::from_secs(60))
                     .build(),
             ),
@@ -169,14 +170,10 @@ impl Funboy {
     ) -> Result<SubstituteReceipt, FunboyError> {
         self.validate_template_name(template)?;
 
-        match self
-            .template_db
-            .create_substitutes(template, substitutes)
-            .await
-        {
-            Ok(subs) => Ok(subs),
-            Err(e) => Err(e.into()),
-        }
+        let receipt = self.template_db.create_substitutes(template, substitutes);
+        let receipt = receipt.await?;
+        self.random_sub_cache.invalidate(template).await;
+        Ok(receipt)
     }
 
     pub async fn delete_substitutes<'a>(
@@ -186,24 +183,26 @@ impl Funboy {
     ) -> Result<SubstituteReceipt, FunboyError> {
         self.validate_template_name(template)?;
 
-        match self
+        let receipt = self
             .template_db
-            .delete_substitutes_by_name(template, substitutes)
-            .await
-        {
-            Ok(sub_record) => Ok(sub_record),
-            Err(e) => Err(e.into()),
-        }
+            .delete_substitutes_by_name(template, substitutes);
+        let receipt = receipt.await?;
+        self.random_sub_cache.invalidate(template).await;
+        Ok(receipt)
     }
 
     pub async fn delete_substitutes_by_id(
         &self,
         ids: &[KeySize],
     ) -> Result<SubstituteReceipt, FunboyError> {
-        match self.template_db.delete_substitutes_by_id(ids).await {
-            Ok(subs) => Ok(subs),
-            Err(e) => Err(e.into()),
+        let receipt = self.template_db.delete_substitutes_by_id(ids);
+        let receipt = receipt.await?;
+        for sub in &receipt.updated {
+            let template = self.template_db.read_template_by_id(sub.template_id);
+            let template = template.await?.expect("sub must be inside template");
+            self.random_sub_cache.invalidate(&template.name).await;
         }
+        Ok(receipt)
     }
 
     pub async fn copy_substitutes(
@@ -214,14 +213,12 @@ impl Funboy {
         self.validate_template_name(from_template)?;
         self.validate_template_name(to_template)?;
 
-        match self
+        let subs = self
             .template_db
-            .copy_substitutes_from_template_to_template(from_template, to_template)
-            .await
-        {
-            Ok(subs) => Ok(subs),
-            Err(e) => Err(e.into()),
-        }
+            .copy_substitutes_from_template_to_template(from_template, to_template);
+        let subs = subs.await?;
+        self.random_sub_cache.invalidate(to_template).await;
+        Ok(subs)
     }
 
     pub async fn replace_substitute(
@@ -232,14 +229,12 @@ impl Funboy {
     ) -> Result<Option<Substitute>, FunboyError> {
         self.validate_template_name(template)?;
 
-        match self
+        let sub = self
             .template_db
-            .update_substitute_by_name(template, old, new)
-            .await
-        {
-            Ok(sub) => Ok(sub),
-            Err(e) => Err(e.into()),
-        }
+            .update_substitute_by_name(template, old, new);
+        let sub = sub.await?;
+        self.random_sub_cache.invalidate(template).await;
+        Ok(sub)
     }
 
     pub async fn replace_substitute_by_id(
@@ -247,19 +242,25 @@ impl Funboy {
         id: KeySize,
         new: &str,
     ) -> Result<Option<Substitute>, FunboyError> {
-        match self.template_db.update_substitute_by_id(id, new).await {
-            Ok(sub) => Ok(sub),
-            Err(e) => Err(e.into()),
+        let sub = self.template_db.update_substitute_by_id(id, new);
+        let sub = sub.await?;
+        if let Some(sub) = sub.as_ref() {
+            let template = self.template_db.read_template_by_id(sub.template_id);
+            let template = template.await?.expect("sub must be inside template");
+            self.random_sub_cache.invalidate(&template.name).await;
         }
+        Ok(sub)
     }
 
     pub async fn delete_template(&self, template: &str) -> Result<Option<Template>, FunboyError> {
         self.validate_template_name(template)?;
 
-        match self.template_db.delete_template_by_name(template).await {
-            Ok(template) => Ok(template),
-            Err(e) => Err(e.into()),
+        let template = self.template_db.delete_template_by_name(template);
+        let template = template.await?;
+        if let Some(template) = template.as_ref() {
+            self.random_sub_cache.invalidate(&template.name).await;
         }
+        Ok(template)
     }
 
     pub async fn delete_templates(
@@ -270,10 +271,12 @@ impl Funboy {
             self.validate_template_name(template)?;
         }
 
-        match self.template_db.delete_templates_by_name(templates).await {
-            Ok(template) => Ok(template),
-            Err(e) => Err(e.into()),
+        let receipt = self.template_db.delete_templates_by_name(templates);
+        let receipt = receipt.await?;
+        for template in &receipt.updated {
+            self.random_sub_cache.invalidate(&template.name).await;
         }
+        Ok(receipt)
     }
 
     pub async fn rename_template(
@@ -284,10 +287,10 @@ impl Funboy {
         self.validate_template_name(from)?;
         self.validate_template_name(to)?;
 
-        match self.template_db.update_template_by_name(from, to).await {
-            Ok(template) => Ok(template),
-            Err(e) => Err(e.into()),
-        }
+        let template = self.template_db.update_template_by_name(from, to);
+        let template = template.await?;
+        self.random_sub_cache.invalidate(from).await;
+        Ok(template)
     }
 
     pub async fn get_templates(
@@ -296,14 +299,9 @@ impl Funboy {
         order: OrderBy,
         limit: Limit,
     ) -> Result<Vec<Template>, FunboyError> {
-        match self
-            .template_db
-            .read_templates(search_term, order, limit)
-            .await
-        {
-            Ok(templates) => Ok(templates),
-            Err(e) => Err(e.into()),
-        }
+        let templates = self.template_db.read_templates(search_term, order, limit);
+        let templates = templates.await?;
+        Ok(templates)
     }
 
     pub async fn get_substitutes(
@@ -314,15 +312,11 @@ impl Funboy {
         limit: Limit,
     ) -> Result<Vec<Substitute>, FunboyError> {
         self.validate_template_name(template)?;
-
-        match self
-            .template_db
-            .read_substitutes_from_template(template, search_term, order, limit)
-            .await
-        {
-            Ok(substitutes) => Ok(substitutes),
-            Err(e) => Err(e.into()),
-        }
+        let subs =
+            self.template_db
+                .read_substitutes_from_template(template, search_term, order, limit);
+        let subs = subs.await?;
+        Ok(subs)
     }
 
     async fn get_random_substitute(&self, template: &str) -> Result<Substitute, FunboyError> {
@@ -336,29 +330,24 @@ impl Funboy {
                 Ok(sub.clone())
             }
             None => {
-                match self
-                    .get_substitutes(template, None, OrderBy::Random, Limit::Count(200))
-                    .await
-                {
-                    Ok(subs) => {
-                        if !subs.is_empty() {
-                            let rnd_range = random_range(0..subs.len());
-                            let sub = subs
-                                .get(rnd_range)
-                                .cloned()
-                                .expect("subs cannot be empty due to explicit check");
-                            self.random_sub_cache
-                                .insert(template.to_string(), subs)
-                                .await;
-                            Ok(sub)
-                        } else {
-                            Err(FunboyError::Database(format!(
-                                "No substitutes were present in template \"{}\"",
-                                template
-                            )))
-                        }
-                    }
-                    Err(e) => Err(e.into()),
+                let subs = self.get_substitutes(template, None, OrderBy::Random, Limit::Count(200));
+                let subs = subs.await?;
+
+                if !subs.is_empty() {
+                    let rnd_range = random_range(0..subs.len());
+                    let sub = subs
+                        .get(rnd_range)
+                        .cloned()
+                        .expect("subs cannot be empty due to explicit check");
+                    self.random_sub_cache
+                        .insert(template.to_string(), subs)
+                        .await;
+                    Ok(sub)
+                } else {
+                    Err(FunboyError::Database(format!(
+                        "No substitutes were present in template \"{}\"",
+                        template
+                    )))
                 }
             }
         }
