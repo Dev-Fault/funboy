@@ -330,11 +330,17 @@ impl Funboy {
 
         match self.random_sub_cache.get(template).await {
             Some(subs) => {
-                // TODO test this to see if subs are ever empty
-                let sub = subs
-                    .get(random_range(0..subs.len()))
-                    .expect("subs should be present in cache if match was found");
-                Ok(sub.clone())
+                if subs.len() == 0 {
+                    return Err(FunboyError::Database(format!(
+                        "No substitutes were present in template \"{}\"",
+                        template
+                    )));
+                } else {
+                    let sub = subs
+                        .get(random_range(0..subs.len()))
+                        .expect("subs should be present in cache if match was found");
+                    return Ok(sub.clone());
+                }
             }
             None => {
                 match self
