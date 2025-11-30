@@ -330,17 +330,10 @@ impl Funboy {
 
         match self.random_sub_cache.get(template).await {
             Some(subs) => {
-                if subs.len() == 0 {
-                    return Err(FunboyError::Database(format!(
-                        "No substitutes were present in template \"{}\"",
-                        template
-                    )));
-                } else {
-                    let sub = subs
-                        .get(random_range(0..subs.len()))
-                        .expect("subs should be present in cache if match was found");
-                    return Ok(sub.clone());
-                }
+                let sub = subs
+                    .get(random_range(0..subs.len()))
+                    .expect("subs should be present in cache if match was found");
+                Ok(sub.clone())
             }
             None => {
                 match self
@@ -349,9 +342,11 @@ impl Funboy {
                 {
                     Ok(subs) => {
                         let sub = subs.get(0).cloned();
-                        self.random_sub_cache
-                            .insert(template.to_string(), subs)
-                            .await;
+                        if subs.len() != 0 {
+                            self.random_sub_cache
+                                .insert(template.to_string(), subs)
+                                .await;
+                        }
                         match sub {
                             Some(sub) => Ok(sub.clone()),
                             None => Err(FunboyError::Database(format!(
@@ -366,18 +361,6 @@ impl Funboy {
         }
     }
 
-    /* PROFILE CODE
-        let before = SystemTime::now();
-
-        let after = SystemTime::now();
-
-        let time = after.duration_since(before).unwrap();
-        unsafe {
-            static mut INTERP_TIME: Duration = Duration::new(0, 0);
-            INTERP_TIME += time;
-            dbg!(INTERP_TIME);
-        }
-    */
     /// Resolves templates and interprets embeded code in input with a single pass
     async fn interpret_input(
         &self,
@@ -463,6 +446,18 @@ impl Funboy {
         }
     }
 
+    /* PROFILE CODE
+        let before = SystemTime::now();
+
+        let after = SystemTime::now();
+
+        let time = after.duration_since(before).unwrap();
+        unsafe {
+            static mut INTERP_TIME: Duration = Duration::new(0, 0);
+            INTERP_TIME += time;
+            dbg!(INTERP_TIME);
+        }
+    */
     /// Resolves templates and fsl code until output is complete or depth limit is reached
     pub async fn generate(
         &self,
@@ -485,6 +480,14 @@ impl Funboy {
             }
         }
 
+        let after = SystemTime::now();
+
+        let time = after.duration_since(before).unwrap();
+        unsafe {
+            static mut INTERP_TIME: Duration = Duration::new(0, 0);
+            INTERP_TIME += time;
+            dbg!(INTERP_TIME);
+        }
         Ok(output)
     }
 
