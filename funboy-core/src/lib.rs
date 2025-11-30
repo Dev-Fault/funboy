@@ -341,18 +341,21 @@ impl Funboy {
                     .await
                 {
                     Ok(subs) => {
-                        let sub = subs.get(0).cloned();
-                        if subs.len() != 0 {
+                        if !subs.is_empty() {
+                            let rnd_range = random_range(0..subs.len());
+                            let sub = subs
+                                .get(rnd_range)
+                                .cloned()
+                                .expect("subs cannot be empty due to explicit check");
                             self.random_sub_cache
                                 .insert(template.to_string(), subs)
                                 .await;
-                        }
-                        match sub {
-                            Some(sub) => Ok(sub.clone()),
-                            None => Err(FunboyError::Database(format!(
+                            Ok(sub)
+                        } else {
+                            Err(FunboyError::Database(format!(
                                 "No substitutes were present in template \"{}\"",
                                 template
-                            ))),
+                            )))
                         }
                     }
                     Err(e) => Err(e.into()),
