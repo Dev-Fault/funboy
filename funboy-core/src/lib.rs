@@ -7,7 +7,14 @@ use std::{
 };
 
 use async_recursion::async_recursion;
-use fsl_interpreter::FslInterpreter;
+use fsl_interpreter::{
+    FslInterpreter, InterpreterData,
+    commands::TEXT_TYPES,
+    types::{
+        command::{ArgPos, ArgRule, Command, CommandError, Executor},
+        value::Value,
+    },
+};
 use moka::future::{Cache, CacheBuilder};
 use ollama_rs::{generation::completion::GenerationResponse, models::ModelInfo};
 use rand::{Rng, distr::uniform::SampleUniform, random_range};
@@ -61,6 +68,7 @@ impl From<sqlx::Error> for FunboyError {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Funboy {
     template_db: TemplateDatabase,
     ollama_generator: OllamaGenerator,
@@ -376,17 +384,7 @@ impl Funboy {
         let interpreter_result = interpreter.interpret_embedded_code(&substituted_text).await;
 
         match interpreter_result {
-            Ok(interpreted_text) => {
-                let output = TemplateSubstitutor::new(TemplateDelimiter::BackTick)
-                    .substitute_recursively(interpreted_text, |template: String| async move {
-                        match self.get_random_substitute(&template).await {
-                            Ok(sub) => Some(sub.name.to_string()),
-                            Err(_) => None,
-                        }
-                    })
-                    .await;
-                Ok(output)
-            }
+            Ok(interpreted_text) => Ok(interpreted_text),
             Err(e) => Err(FunboyError::Interpreter(e.to_string())),
         }
     }
@@ -459,6 +457,11 @@ impl Funboy {
         let mut output = input.to_string();
         let mut prev_hashes = HashSet::new();
 
+        let mut modified_interpreter = interpreter.lock().await;
+        let funboy = Arc::new(self.clone());
+        modified_interpreter.add_command(GET_SUB, GET_SUB_RULES, create_get_sub_command(funboy));
+        drop(modified_interpreter);
+
         const MAX_GENERATIONS: u8 = 255;
         for _ in 0..MAX_GENERATIONS {
             let mut hasher = DefaultHasher::new();
@@ -507,6 +510,33 @@ impl Funboy {
             Err(e) => Err(FunboyError::Ollama(e.to_string())),
         }
     }
+}
+
+const GET_SUB: &str = "get_sub";
+const GET_SUB_RULES: &[ArgRule] = &[ArgRule::new(ArgPos::Index(0), TEXT_TYPES)];
+fn create_get_sub_command(funboy: Arc<Funboy>) -> Executor {
+    let get_sub_command = {
+        move |command: Command, data: Arc<InterpreterData>| {
+            let funboy = funboy.clone();
+            async move {
+                let mut args = command.take_args();
+                let template = args.pop_front().unwrap().as_text(data).await?;
+                if template.starts_with('`') {
+                    let template = template.trim_matches('`');
+                    let sub = funboy.get_random_substitute(template).await;
+                    match sub {
+                        Ok(sub) => Ok(Value::Text(sub.name)),
+                        Err(e) => Err(CommandError::Custom(e.to_string())),
+                    }
+                } else {
+                    return Err(CommandError::Custom(
+                        "template name must be preceeded by `".to_string(),
+                    ));
+                }
+            }
+        }
+    };
+    Some(Arc::new(get_sub_command))
 }
 
 #[cfg(test)]

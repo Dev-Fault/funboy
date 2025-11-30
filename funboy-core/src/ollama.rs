@@ -146,6 +146,7 @@ impl ToString for OllamaSettings {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct OllamaGenerator {
     ollama: Ollama,
 }

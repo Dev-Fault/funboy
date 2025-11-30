@@ -161,7 +161,7 @@ impl TemplateReceipt {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TemplateDatabase {
     pool: Arc<Pool<Postgres>>,
 }
