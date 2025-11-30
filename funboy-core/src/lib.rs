@@ -137,7 +137,6 @@ impl Funboy {
         }
     }
 
-    // Previously "random_word"
     pub fn random_entry<'b>(list: &[&'b str]) -> Result<&'b str, FunboyError> {
         if list.len() < 2 {
             Err(FunboyError::UserInput(
@@ -649,14 +648,14 @@ mod core {
         funboy
             .add_substitutes(
                 "sentence",
-                &["A ^adj brown ^noun ^verb^ed over the lazy dog."],
+                &["A ^gtadj brown ^gtnoun ^gtverb^ed over the lazy dog."],
             )
             .await
             .unwrap();
 
-        funboy.add_substitutes("adj", &["quick"]).await.unwrap();
-        funboy.add_substitutes("noun", &["fox"]).await.unwrap();
-        funboy.add_substitutes("verb", &["jump"]).await.unwrap();
+        funboy.add_substitutes("gtadj", &["quick"]).await.unwrap();
+        funboy.add_substitutes("gtnoun", &["fox"]).await.unwrap();
+        funboy.add_substitutes("gtverb", &["jump"]).await.unwrap();
 
         let output = funboy
             .generate("^sentence", Arc::new(Mutex::new(FslInterpreter::new())))
@@ -682,7 +681,10 @@ mod core {
 
         let output = funboy
             .generate(
-                "$noun $noun $noun $noun $noun",
+                &format!(
+                    "{0}noun {0}noun {0}noun {0}noun {0}noun",
+                    TemplateDelimiter::Plus.to_char()
+                ),
                 Arc::new(Mutex::new(FslInterpreter::new())),
             )
             .await
@@ -710,15 +712,22 @@ mod core {
             .unwrap();
 
         let output = funboy
-            .generate(
-                "$noun-1 $noun-1 $noun-2 $noun-2 $noun-2 $noun-999 $noun-999 $noun-999$$noun-999$",
+            .generate(&format!(
+                "{0}noun-1 {0}noun-1 {0}noun-2 {0}noun-2 {0}noun-2 {0}noun-999 {0}noun-999 {0}noun-999{0}noun-999{0}",
+                TemplateDelimiter::Plus.to_char()),
                 Arc::new(Mutex::new(FslInterpreter::new())),
             )
             .await
             .unwrap();
 
-        // relies on random, can't assert, dbg output
-        dbg!(output);
+        dbg!(&output);
+
+        let subs = output.split_whitespace().collect::<Vec<&str>>();
+        assert!(subs[0] == subs[1]);
+        assert!(subs[2] == subs[3]);
+        assert!(subs[3] == subs[4]);
+        assert!(subs[5] == subs[6]);
+        assert!(subs[6] != subs[7]);
     }
 
     #[tokio::test]
