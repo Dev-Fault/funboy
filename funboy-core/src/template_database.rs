@@ -1,8 +1,4 @@
-use std::{
-    collections::HashSet,
-    sync::Arc,
-    time::{Duration, SystemTime},
-};
+use std::{collections::HashSet, sync::Arc};
 
 use sqlx::{Error, FromRow, PgPool, Pool, Postgres, Transaction};
 
@@ -206,7 +202,7 @@ impl TemplateDatabase {
                 .fetch_all(&mut *tx)
                 .await?;
 
-        let substitutor = TemplateSubstitutor::new(delimiter);
+        let substitutor = TemplateSubstitutor::new(delimiter).await;
 
         // Replace references to old template with new template
         for sub in substitutes {

@@ -265,9 +265,7 @@ impl Funboy {
 
         let template = self.template_db.delete_template_by_name(template);
         let template = template.await?;
-        if let Some(template) = template.as_ref() {
-            self.random_sub_cache.invalidate(&template.name).await;
-        }
+        self.random_sub_cache.invalidate_all();
         Ok(template)
     }
 
@@ -281,9 +279,7 @@ impl Funboy {
 
         let receipt = self.template_db.delete_templates_by_name(templates);
         let receipt = receipt.await?;
-        for template in &receipt.updated {
-            self.random_sub_cache.invalidate(&template.name).await;
-        }
+        self.random_sub_cache.invalidate_all();
         Ok(receipt)
     }
 
@@ -297,7 +293,7 @@ impl Funboy {
 
         let template = self.template_db.update_template_by_name(from, to);
         let template = template.await?;
-        self.random_sub_cache.invalidate(from).await;
+        self.random_sub_cache.invalidate_all();
         Ok(template)
     }
 
@@ -372,6 +368,7 @@ impl Funboy {
             .await?;
 
         substituted_text = TemplateSubstitutor::new(TemplateDelimiter::Caret)
+            .await
             .substitute_recursively(substituted_text, |template: String| async move {
                 match self.get_random_substitute(&template).await {
                     Ok(sub) => Some(sub.name.to_string()),
@@ -398,6 +395,7 @@ impl Funboy {
         let sub_map: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
         let funboy_error: Arc<Mutex<Option<FunboyError>>> = Arc::new(Mutex::new(None));
         let output = TemplateSubstitutor::new(TemplateDelimiter::PlusRegister)
+            .await
             .substitute_recursively(input, |template: String| {
                 let sub_map = sub_map.clone();
                 let interpreter = interpreter.clone();
@@ -521,7 +519,8 @@ fn create_get_sub_command(funboy: Arc<Funboy>) -> Executor {
             async move {
                 let mut args = command.take_args();
                 let template = args.pop_front().unwrap().as_text(data).await?;
-                if template.starts_with('`') {
+                let regex = TemplateDelimiter::BackTick.to_regex().await;
+                if regex.is_match(&template) {
                     let template = template.trim_matches('`');
                     let sub = funboy.get_random_substitute(template).await;
                     match sub {
@@ -529,9 +528,10 @@ fn create_get_sub_command(funboy: Arc<Funboy>) -> Executor {
                         Err(e) => Err(CommandError::Custom(e.to_string())),
                     }
                 } else {
-                    return Err(CommandError::Custom(
-                        "template name must be preceeded by `".to_string(),
-                    ));
+                    return Err(CommandError::Custom(format!(
+                        "template name must be preceeded by a single ` (backtick)\nThis ensures if the template is renamed this {} will not be invalid",
+                        GET_SUB
+                    )));
                 }
             }
         }

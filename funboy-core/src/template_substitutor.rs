@@ -5,6 +5,7 @@ use std::{
 
 use regex::Regex;
 use strum_macros::EnumIter;
+use tokio::sync::OnceCell;
 
 pub const VALID_TEMPLATE_CHARS: &str = "a-z0-9_";
 
@@ -15,6 +16,11 @@ pub enum TemplateDelimiter {
     PlusRegister,
     BackTick,
 }
+
+static CARET_REGEX: OnceCell<Regex> = OnceCell::const_new();
+static PLUS_REGEX: OnceCell<Regex> = OnceCell::const_new();
+static PLUS_REGISTER_REGEX: OnceCell<Regex> = OnceCell::const_new();
+static BACKTICK_REGEX: OnceCell<Regex> = OnceCell::const_new();
 
 impl TemplateDelimiter {
     pub fn to_char(&self) -> char {
@@ -34,33 +40,52 @@ impl TemplateDelimiter {
             TemplateDelimiter::PlusRegister => format!(r"\+[a-z0-9-_]+\+?"),
         }
     }
+
+    pub async fn to_regex(&self) -> &'static Regex {
+        match self {
+            TemplateDelimiter::Caret => {
+                CARET_REGEX
+                    .get_or_init(|| async { Regex::new(&self.to_regex_pattern()).unwrap() })
+                    .await
+            }
+            TemplateDelimiter::Plus => {
+                PLUS_REGEX
+                    .get_or_init(|| async { Regex::new(&self.to_regex_pattern()).unwrap() })
+                    .await
+            }
+            TemplateDelimiter::PlusRegister => {
+                PLUS_REGISTER_REGEX
+                    .get_or_init(|| async { Regex::new(&self.to_regex_pattern()).unwrap() })
+                    .await
+            }
+            TemplateDelimiter::BackTick => {
+                BACKTICK_REGEX
+                    .get_or_init(|| async { Regex::new(&self.to_regex_pattern()).unwrap() })
+                    .await
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
 pub struct TemplateSubstitutor {
     delimiter: TemplateDelimiter,
-    regex: Regex,
+    regex: &'static Regex,
     depth_limit: u16,
 }
 
-impl Default for TemplateSubstitutor {
-    fn default() -> Self {
-        let delimiter = TemplateDelimiter::Caret;
+impl TemplateSubstitutor {
+    pub async fn new(delimiter: TemplateDelimiter) -> Self {
+        let regex = delimiter.to_regex().await;
         Self {
             delimiter,
-            regex: Regex::new(&delimiter.to_regex_pattern()).unwrap(),
+            regex,
             depth_limit: 255,
         }
     }
-}
 
-impl TemplateSubstitutor {
-    pub fn new(delimiter: TemplateDelimiter) -> Self {
-        Self {
-            delimiter,
-            regex: Regex::new(&delimiter.to_regex_pattern()).unwrap(),
-            ..Default::default()
-        }
+    pub async fn default() -> Self {
+        Self::new(TemplateDelimiter::Caret).await
     }
 }
 
@@ -171,7 +196,7 @@ mod template_substitutor_test {
             "The ^adj ^color_adj ^noun ^verb^ed over the lazy dog.",
         );
         let template_map = Arc::new(template_map);
-        let template_substitutor = TemplateSubstitutor::default();
+        let template_substitutor = TemplateSubstitutor::default().await;
         let output = template_substitutor
             .substitute_recursively("^sentence".to_string(), |template| {
                 let template_map = template_map.clone();
@@ -200,7 +225,7 @@ mod template_substitutor_test {
             "The^adj^^color_adj^^noun^^verb^edoverthelazydog.",
         );
         let template_map = Arc::new(template_map);
-        let template_substitutor = TemplateSubstitutor::default();
+        let template_substitutor = TemplateSubstitutor::default().await;
         let output = template_substitutor
             .substitute_recursively("^sentence".to_string(), |template| {
                 let template_map = template_map.clone();
@@ -220,7 +245,7 @@ mod template_substitutor_test {
     async fn non_existant_template() {
         let template_map: HashMap<String, String> = HashMap::new();
         let template_map = Arc::new(template_map);
-        let template_substitutor = TemplateSubstitutor::default();
+        let template_substitutor = TemplateSubstitutor::default().await;
         let output = template_substitutor
             .substitute_recursively("^sentence".to_string(), |template| {
                 let template_map = template_map.clone();
@@ -243,7 +268,7 @@ mod template_substitutor_test {
         template_map.insert("over_there", "^over_here");
         template_map.insert("back_there", "^over_there");
         let template_map = Arc::new(template_map);
-        let template_substitutor = TemplateSubstitutor::default();
+        let template_substitutor = TemplateSubstitutor::default().await;
         let output = template_substitutor
             .substitute_recursively("^over_here".to_string(), |template| {
                 let template_map = template_map.clone();
