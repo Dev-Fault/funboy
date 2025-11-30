@@ -480,14 +480,6 @@ impl Funboy {
             }
         }
 
-        let after = SystemTime::now();
-
-        let time = after.duration_since(before).unwrap();
-        unsafe {
-            static mut INTERP_TIME: Duration = Duration::new(0, 0);
-            INTERP_TIME += time;
-            dbg!(INTERP_TIME);
-        }
         Ok(output)
     }
 
