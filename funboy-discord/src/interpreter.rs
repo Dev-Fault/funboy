@@ -138,21 +138,21 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> Arc<tokio::sync::Mutex<Fs
     Arc::new(tokio::sync::Mutex::new(interpreter))
 }
 
-const MAX_MSG_COMMAND_USES: u32 = 200;
+const MAX_RATE_LIMITS: u32 = 8;
 async fn check_limits(ictx: InterpreterContext) -> Result<(), CommandError> {
-    let mut uses = ictx.total_uses.lock().await;
-    if *uses >= MAX_MSG_COMMAND_USES {
-        *uses = 0;
-        return Err(CommandError::Custom(
-            "exceeded message limit per generation".to_string(),
-        ));
-    }
-    *uses = uses.saturating_add(1);
-    drop(uses);
-
     let mut rate_limit = ictx.rate_limit.lock().await;
 
     if rate_limit.is_at_limit(ictx.author_id) {
+        let mut uses = ictx.total_uses.lock().await;
+        if *uses >= MAX_RATE_LIMITS {
+            *uses = 0;
+            return Err(CommandError::Custom(format!(
+                "rate limit exceeded {} times, please wait a bit before trying again",
+                MAX_RATE_LIMITS
+            )));
+        }
+        *uses = uses.saturating_add(1);
+        drop(uses);
         std::thread::sleep(Duration::from_secs(5));
     }
     drop(rate_limit);
