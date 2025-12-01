@@ -3,7 +3,7 @@ use funboy_core::{
     template_database::{KeySize, Limit, OrderBy, SortOrder},
 };
 use poise::{ChoiceParameter, CreateReply};
-use serenity::all::ComponentInteraction;
+use serenity::all::{Attachment, ComponentInteraction, CreateAttachment};
 
 use crate::{
     Context, Error,
@@ -326,6 +326,46 @@ pub async fn add_subs(
 }
 
 #[poise::command(slash_command, prefix_command)]
+pub async fn upload_sub(
+    ctx: Context<'_>,
+    template: String,
+    #[description = "Upload a text file"] sub_file: Attachment,
+) -> Result<(), Error> {
+    const ALLOWED_TYPES: &[&str] = &["text/plain; charset=utf-8"];
+
+    if !ALLOWED_TYPES.contains(&sub_file.content_type.as_deref().unwrap_or("")) {
+        ctx.say_ephemeral("Only text files are allowed.").await?;
+        return Ok(());
+    }
+
+    let bytes = sub_file.download().await?;
+    let sub = String::from_utf8(bytes);
+
+    match sub {
+        Ok(sub) => {
+            let result = ctx.data().funboy.add_substitutes(&template, &[&sub]).await;
+            match result {
+                Ok(_) => {
+                    ctx.say_ephemeral(&format!(
+                        "Added substitute from file {}",
+                        ellipsize_if_long(&sub_file.filename, DISCORD_PRETTY_WIDTH)
+                    ))
+                    .await?;
+                }
+                Err(e) => {
+                    ctx.say_ephemeral(&e.to_string()).await?;
+                }
+            }
+        }
+        Err(_) => {
+            ctx.say_ephemeral("Text must be valid utf8.").await?;
+        }
+    }
+
+    Ok(())
+}
+
+#[poise::command(slash_command, prefix_command)]
 pub async fn copy_subs(
     ctx: Context<'_>,
     from_template: String,
@@ -442,6 +482,7 @@ pub enum ListStyle {
     Default,
     Numeric,
     ID,
+    File,
 }
 
 #[poise::command(slash_command, prefix_command)]
@@ -470,24 +511,25 @@ pub async fn list_subs(
                 return Ok(());
             }
 
-            let subs: Vec<String> = if matches!(list_style, Some(ListStyle::ID)) {
-                subs.iter()
-                    .map(|sub| {
-                        format!(
-                            "\nID: {}\nValue: {}{}\n",
-                            sub.id,
-                            if sub.name.len() > DISCORD_PRETTY_WIDTH {
-                                "\n"
-                            } else {
-                                ""
-                            },
-                            sub.name,
-                        )
-                    })
-                    .collect()
-            } else {
-                subs.iter().map(|sub| sub.name.clone()).collect()
-            };
+            let subs: Vec<String> =
+                if matches!(list_style, Some(ListStyle::ID) | Some(ListStyle::File)) {
+                    subs.iter()
+                        .map(|sub| {
+                            format!(
+                                "\nID: {}\n{}{}\n",
+                                sub.id,
+                                if sub.name.len() > DISCORD_PRETTY_WIDTH {
+                                    "\n"
+                                } else {
+                                    ""
+                                },
+                                sub.name,
+                            )
+                        })
+                        .collect()
+                } else {
+                    subs.iter().map(|sub| sub.name.clone()).collect()
+                };
 
             let subs = subs.to_ref();
 
@@ -526,6 +568,13 @@ pub async fn list_subs(
                     )
                     .await?;
                 }
+                ListStyle::File => {
+                    ctx.send(CreateReply::default().attachment(CreateAttachment::bytes(
+                        subs.iter().map(|s| s.to_string()).collect::<String>(),
+                        "message.txt",
+                    )))
+                    .await?;
+                }
             }
         }
         Err(e) => {
@@ -557,17 +606,18 @@ pub async fn list_templates(
                 return Ok(());
             }
 
-            let templates: Vec<String> = if matches!(list_style, Some(ListStyle::ID)) {
-                templates
-                    .iter()
-                    .map(|template| format!("\nID: {}\nValue: {}\n", template.id, template.name,))
-                    .collect()
-            } else {
-                templates
-                    .iter()
-                    .map(|template| template.name.clone())
-                    .collect()
-            };
+            let templates: Vec<String> =
+                if matches!(list_style, Some(ListStyle::ID) | Some(ListStyle::File)) {
+                    templates
+                        .iter()
+                        .map(|template| format!("\nID: {}\n{}\n", template.id, template.name,))
+                        .collect()
+                } else {
+                    templates
+                        .iter()
+                        .map(|template| template.name.clone())
+                        .collect()
+                };
 
             let templates = templates.to_ref();
 
@@ -604,6 +654,13 @@ pub async fn list_templates(
                             )
                         })),
                     )
+                    .await?;
+                }
+                ListStyle::File => {
+                    ctx.send(CreateReply::default().attachment(CreateAttachment::bytes(
+                        templates.iter().map(|s| s.to_string()).collect::<String>(),
+                        "message.txt",
+                    )))
                     .await?;
                 }
             }

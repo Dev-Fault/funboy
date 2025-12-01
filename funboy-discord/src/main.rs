@@ -138,6 +138,7 @@ async fn main() {
                 commands::templates::generate(),
                 commands::templates::rename_template(),
                 commands::templates::add_subs(),
+                commands::templates::upload_sub(),
                 commands::templates::copy_subs(),
                 commands::templates::replace_sub(),
                 commands::templates::delete_subs(),
