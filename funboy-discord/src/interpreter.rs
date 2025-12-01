@@ -150,6 +150,7 @@ async fn check_limits(ictx: InterpreterContext) -> Result<(), CommandError> {
         )));
     }
     *call_count = call_count.saturating_add(1);
+    dbg!(&call_count);
 
     match rate_limit.check(ictx.author_id) {
         crate::rate_limiter::RateLimitResult::MaxLimitsReached => {
@@ -158,7 +159,7 @@ async fn check_limits(ictx: InterpreterContext) -> Result<(), CommandError> {
             )));
         }
         crate::rate_limiter::RateLimitResult::UsesPerIntervalreached => {
-            std::thread::sleep(Duration::from_secs(2));
+            std::thread::sleep(Duration::from_secs(3));
             Ok(())
         }
         crate::rate_limiter::RateLimitResult::Ok => Ok(()),

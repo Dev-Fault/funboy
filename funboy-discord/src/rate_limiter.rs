@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    thread::sleep,
     time::{Duration, SystemTime},
 };
 
@@ -28,7 +27,7 @@ pub struct RateLimit {
     users: HashMap<UserId, Uses>,
     uses_per_interval: usize,
     interval: u64,
-    max_times_limited: u16,
+    limits_before_timeout: u16,
     timeout: u64,
 }
 
@@ -39,19 +38,20 @@ pub enum RateLimitResult {
 }
 
 impl RateLimit {
-    pub fn new(
-        uses_per_interval: usize,
-        interval: u64,
-        max_times_limited: u16,
-        timeout: u64,
-    ) -> Self {
+    pub fn new(uses_per_interval: usize, interval: u64) -> Self {
         Self {
             users: HashMap::new(),
             uses_per_interval,
             interval,
-            max_times_limited,
-            timeout,
+            limits_before_timeout: 0,
+            timeout: 0,
         }
+    }
+
+    pub fn with_timeout(mut self, timeout: u64, limits_before_timeout: u16) -> Self {
+        self.timeout = timeout;
+        self.limits_before_timeout = limits_before_timeout;
+        self
     }
 
     pub fn check(&mut self, user_id: UserId) -> RateLimitResult {
@@ -62,7 +62,7 @@ impl RateLimit {
 
         uses.time_stamps.retain(|&t| t > usage_window);
 
-        if uses.times_limited >= self.max_times_limited {
+        if self.limits_before_timeout != 0 && uses.times_limited >= self.limits_before_timeout {
             let dur_since = now.duration_since(uses.timeout_start);
             if dur_since.is_ok_and(|t| t >= Duration::from_secs(self.timeout)) {
                 uses.times_limited = 0;
@@ -73,7 +73,7 @@ impl RateLimit {
 
         if uses.time_stamps.len() >= self.uses_per_interval {
             uses.times_limited = uses.times_limited.saturating_add(1);
-            if uses.times_limited >= self.max_times_limited {
+            if self.limits_before_timeout != 0 && uses.times_limited >= self.limits_before_timeout {
                 uses.timeout_start = SystemTime::now();
                 return RateLimitResult::MaxLimitsReached;
             } else {
@@ -83,9 +83,5 @@ impl RateLimit {
 
         uses.time_stamps.push(now);
         return RateLimitResult::Ok;
-    }
-
-    pub fn reset(&mut self, user_id: UserId) {
-        self.users.remove_entry(&user_id);
     }
 }
