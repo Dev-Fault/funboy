@@ -14,8 +14,9 @@ use crate::{
     io_format::{
         context_extension::ContextExtension,
         discord_message_format::{
-            SeperatedListOptions, StringVecToRef, ellipsize_if_long, format_as_item_seperated_list,
-            format_as_numeric_list, split_by_whitespace_unless_quoted,
+            DISCORD_PRETTY_WIDTH, SeperatedListOptions, StringVecToRef, ellipsize_if_long,
+            format_as_item_seperated_list, format_as_numeric_list,
+            split_by_whitespace_unless_quoted,
         },
     },
 };
@@ -475,7 +476,11 @@ pub async fn list_subs(
                         format!(
                             "\nID: {}\nValue: {}{}\n",
                             sub.id,
-                            if sub.name.len() > 100 { "\n" } else { "" },
+                            if sub.name.len() > DISCORD_PRETTY_WIDTH {
+                                "\n"
+                            } else {
+                                ""
+                            },
                             sub.name,
                         )
                     })

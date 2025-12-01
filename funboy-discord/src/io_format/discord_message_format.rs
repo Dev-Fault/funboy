@@ -1,6 +1,9 @@
+use std::borrow::Cow;
+
 use super::quote_filter::QuoteFilter;
 
 pub const DISCORD_CHARACTER_LIMIT: usize = 2000;
+pub const DISCORD_PRETTY_WIDTH: usize = 100;
 
 pub trait StringVecToRef {
     fn to_ref(&self) -> Vec<&str>;
@@ -103,13 +106,13 @@ pub fn split_message(input: &str) -> Vec<&str> {
     messages
 }
 
-pub fn ellipsize_if_long(item: &str, limit: usize) -> String {
+pub fn ellipsize_if_long<'a>(item: &'_ str, limit: usize) -> Cow<'_, str> {
     if limit > item.len() {
-        item.to_string()
+        Cow::Borrowed(item)
     } else {
         match item.get(0..limit) {
-            Some(substr) => substr.to_owned() + "...",
-            None => String::new(),
+            Some(substr) => Cow::Owned(substr.to_owned() + "..."),
+            None => Cow::Borrowed(""),
         }
     }
 }
@@ -119,7 +122,6 @@ pub struct SeperatedListOptions<'a> {
     pub item_seperator: &'a str,
     pub markdown: &'a str,
     pub quote_on_whitespace: bool,
-    pub ellipsize_if_long: bool,
 }
 
 impl SeperatedListOptions<'_> {
@@ -128,7 +130,6 @@ impl SeperatedListOptions<'_> {
             item_seperator: "",
             markdown: "",
             quote_on_whitespace: false,
-            ellipsize_if_long: false,
         }
     }
 }
@@ -139,7 +140,6 @@ impl Default for SeperatedListOptions<'_> {
             item_seperator: ", ",
             markdown: "```",
             quote_on_whitespace: true,
-            ellipsize_if_long: true,
         }
     }
 }
@@ -167,11 +167,7 @@ pub fn format_as_item_seperated_list(
                 - appended_text.len()
                 - options.item_seperator.len()
         {
-            if options.ellipsize_if_long {
-                format!("{}", ellipsize_if_long(&item, 255))
-            } else {
-                item
-            }
+            format!("{}", ellipsize_if_long(&item, DISCORD_PRETTY_WIDTH))
         } else {
             item
         };
@@ -211,7 +207,15 @@ pub fn format_as_numeric_list(items: &[&str]) -> Vec<String> {
     items
         .iter()
         .map(|s| {
-            let numbered = i.to_string() + ": " + s + "\n";
+            let numbered = i.to_string()
+                + ": "
+                + if s.len() > DISCORD_PRETTY_WIDTH {
+                    "\n"
+                } else {
+                    ""
+                }
+                + &ellipsize_if_long(s, DISCORD_PRETTY_WIDTH)
+                + "\n";
             i += 1;
             numbered
         })
