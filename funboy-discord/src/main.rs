@@ -20,12 +20,14 @@ use tokio::sync::Mutex;
 use crate::{
     commands::sound::TrackList,
     components::{CustomComponent, TrackComponent},
+    rate_limiter::RateLimit,
 };
 
 mod commands;
 mod components;
 mod interpreter;
 mod io_format;
+mod rate_limiter;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type Context<'a> = poise::Context<'a, Data, Error>;
@@ -53,6 +55,7 @@ struct Data {
     pub track_list: Arc<Mutex<TrackList>>,
     pub track_player_lock: Arc<Mutex<()>>,
     pub ollama_data: OllamaData,
+    pub interpreter_rate_limit: Arc<Mutex<RateLimit>>,
     yt_dlp_cookies_path: Option<String>,
 } // User data, which is stored and accessible in all command invocations
 
@@ -63,6 +66,7 @@ impl Data {
             track_list: Mutex::new(TrackList::new()).into(),
             track_player_lock: Default::default(),
             ollama_data: OllamaData::default(),
+            interpreter_rate_limit: Arc::new(Mutex::new(RateLimit::new(20, 30))),
             yt_dlp_cookies_path: None,
         }
     }
