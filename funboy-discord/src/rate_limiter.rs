@@ -10,6 +10,7 @@ use serenity::all::UserId;
 pub struct Uses {
     times_limited: u16,
     time_stamps: Vec<SystemTime>,
+    timeout_start: SystemTime,
 }
 
 impl Uses {
@@ -17,6 +18,7 @@ impl Uses {
         Self {
             times_limited: 0,
             time_stamps: Vec::new(),
+            timeout_start: SystemTime::now(),
         }
     }
 }
@@ -27,6 +29,7 @@ pub struct RateLimit {
     uses_per_interval: usize,
     interval: u64,
     max_times_limited: u16,
+    timeout: u64,
 }
 
 pub enum RateLimitResult {
@@ -36,12 +39,18 @@ pub enum RateLimitResult {
 }
 
 impl RateLimit {
-    pub fn new(uses_per_interval: usize, interval: u64, max_times_limited: u16) -> Self {
+    pub fn new(
+        uses_per_interval: usize,
+        interval: u64,
+        max_times_limited: u16,
+        timeout: u64,
+    ) -> Self {
         Self {
             users: HashMap::new(),
             uses_per_interval,
             interval,
             max_times_limited,
+            timeout,
         }
     }
 
@@ -53,13 +62,19 @@ impl RateLimit {
 
         uses.time_stamps.retain(|&t| t > usage_window);
 
-        if uses.time_stamps.len() == 0 {
-            uses.times_limited = 0;
+        if uses.times_limited >= self.max_times_limited {
+            let dur_since = now.duration_since(uses.timeout_start);
+            if dur_since.is_ok_and(|t| t >= Duration::from_secs(self.timeout)) {
+                uses.times_limited = 0;
+            } else {
+                return RateLimitResult::MaxLimitsReached;
+            }
         }
 
         if uses.time_stamps.len() >= self.uses_per_interval {
             uses.times_limited = uses.times_limited.saturating_add(1);
             if uses.times_limited >= self.max_times_limited {
+                uses.timeout_start = SystemTime::now();
                 return RateLimitResult::MaxLimitsReached;
             } else {
                 return RateLimitResult::UsesPerIntervalreached;
