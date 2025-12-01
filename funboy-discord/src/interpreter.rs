@@ -138,6 +138,7 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> Arc<tokio::sync::Mutex<Fs
 
 async fn check_limits(ictx: InterpreterContext) -> Result<(), CommandError> {
     let mut rate_limit = ictx.rate_limit.lock().await;
+    dbg!(&rate_limit);
 
     match rate_limit.check(ictx.author_id) {
         crate::rate_limiter::RateLimitResult::MaxLimitsReached => {
