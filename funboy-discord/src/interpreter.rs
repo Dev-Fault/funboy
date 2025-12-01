@@ -138,7 +138,7 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> Arc<tokio::sync::Mutex<Fs
     Arc::new(tokio::sync::Mutex::new(interpreter))
 }
 
-const MAX_RATE_LIMITS: u32 = 8;
+const MAX_RATE_LIMITS: u32 = 5;
 async fn check_limits(ictx: InterpreterContext) -> Result<(), CommandError> {
     let mut rate_limit = ictx.rate_limit.lock().await;
 

@@ -66,7 +66,7 @@ impl Data {
             track_list: Mutex::new(TrackList::new()).into(),
             track_player_lock: Default::default(),
             ollama_data: OllamaData::default(),
-            interpreter_rate_limit: Arc::new(Mutex::new(RateLimit::new(20, 30))),
+            interpreter_rate_limit: Arc::new(Mutex::new(RateLimit::new(9, 10))),
             yt_dlp_cookies_path: None,
         }
     }
