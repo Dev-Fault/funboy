@@ -29,7 +29,6 @@ pub struct InterpreterContext {
     pub funboy: Arc<Funboy>,
     pub rate_limit: Arc<Mutex<RateLimit>>,
     interpreter: Arc<Mutex<FslInterpreter>>,
-    total_uses: Arc<Mutex<u32>>,
 }
 
 impl InterpreterContext {
@@ -44,7 +43,6 @@ impl InterpreterContext {
             funboy: ctx.data().funboy.clone(),
             rate_limit: ctx.data().interpreter_rate_limit.clone(),
             interpreter: Arc::new(Mutex::new(FslInterpreter::new())),
-            total_uses: Arc::new(Mutex::new(0)),
         }
     }
 
@@ -138,26 +136,21 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> Arc<tokio::sync::Mutex<Fs
     Arc::new(tokio::sync::Mutex::new(interpreter))
 }
 
-const MAX_RATE_LIMITS: u32 = 5;
 async fn check_limits(ictx: InterpreterContext) -> Result<(), CommandError> {
     let mut rate_limit = ictx.rate_limit.lock().await;
 
-    if rate_limit.is_at_limit(ictx.author_id) {
-        let mut uses = ictx.total_uses.lock().await;
-        if *uses >= MAX_RATE_LIMITS {
-            *uses = 0;
+    match rate_limit.check(ictx.author_id) {
+        crate::rate_limiter::RateLimitResult::MaxLimitsReached => {
             return Err(CommandError::Custom(format!(
-                "rate limit exceeded {} times, please wait a bit before trying again",
-                MAX_RATE_LIMITS
+                "exceeded rate limit too many times, please wait a bit before trying again",
             )));
         }
-        *uses = uses.saturating_add(1);
-        drop(uses);
-        std::thread::sleep(Duration::from_secs(5));
+        crate::rate_limiter::RateLimitResult::UsesPerIntervalreached => {
+            std::thread::sleep(Duration::from_secs(5));
+            Ok(())
+        }
+        crate::rate_limiter::RateLimitResult::Ok => Ok(()),
     }
-    drop(rate_limit);
-
-    Ok(())
 }
 
 const SAY: &str = "say";
