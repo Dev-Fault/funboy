@@ -560,7 +560,7 @@ const ASK_AI_RULES: &[ArgRule] = &[
     ArgRule::new(ArgPos::Index(0), TEXT_TYPES),
     ArgRule::new(ArgPos::Index(1), WHOLE_NUMBER_TYPES),
 ];
-const MAX_WORD_LIMIT: i64 = 100;
+const MAX_WORD_LIMIT: i64 = 500;
 fn create_ask_ai_command(funboy: Arc<Funboy>) -> Executor {
     let get_sub_command = {
         move |command: Command, data: Arc<InterpreterData>| {
