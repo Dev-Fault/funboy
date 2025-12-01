@@ -28,6 +28,7 @@ pub struct InterpreterContext {
     pub author_id: UserId,
     pub funboy: Arc<Funboy>,
     pub rate_limit: Arc<Mutex<RateLimit>>,
+    pub command_call_count: Arc<Mutex<u16>>,
     interpreter: Arc<Mutex<FslInterpreter>>,
 }
 
@@ -42,6 +43,7 @@ impl InterpreterContext {
             author_id: ctx.author().id,
             funboy: ctx.data().funboy.clone(),
             rate_limit: ctx.data().interpreter_rate_limit.clone(),
+            command_call_count: Arc::new(Mutex::new(0)),
             interpreter: Arc::new(Mutex::new(FslInterpreter::new())),
         }
     }
@@ -136,8 +138,18 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> Arc<tokio::sync::Mutex<Fs
     Arc::new(tokio::sync::Mutex::new(interpreter))
 }
 
+const MAX_CALLS: u16 = 200;
 async fn check_limits(ictx: InterpreterContext) -> Result<(), CommandError> {
     let mut rate_limit = ictx.rate_limit.lock().await;
+    let mut call_count = ictx.command_call_count.lock().await;
+    if *call_count >= MAX_CALLS {
+        *call_count = 0;
+        return Err(CommandError::Custom(format!(
+            "cannot use commands that send messages more than {} per generation",
+            MAX_CALLS
+        )));
+    }
+    *call_count = call_count.saturating_add(1);
 
     match rate_limit.check(ictx.author_id) {
         crate::rate_limiter::RateLimitResult::MaxLimitsReached => {
