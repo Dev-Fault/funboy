@@ -8,7 +8,8 @@ use crate::{
     },
 };
 
-#[poise::command(slash_command, prefix_command)]
+/// Generates a random number between or including the min and max provided
+#[poise::command(slash_command, prefix_command, category = "Random")]
 pub async fn random_number(ctx: Context<'_>, min: String, max: String) -> Result<(), Error> {
     let number = Funboy::random_number(&min, &max, false);
     match number {
@@ -22,7 +23,10 @@ pub async fn random_number(ctx: Context<'_>, min: String, max: String) -> Result
     Ok(())
 }
 
-#[poise::command(slash_command, prefix_command)]
+/// Randomly selects an item from the list given
+///
+/// Entries are seperated by spaces and multi-word entries can be enclosed in quotes like "hot dog"
+#[poise::command(slash_command, prefix_command, category = "Random")]
 pub async fn random_entry(ctx: Context<'_>, entries: String) -> Result<(), Error> {
     let entries = split_by_whitespace_unless_quoted(&entries);
     let entry = Funboy::random_entry(&entries);

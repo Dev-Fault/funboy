@@ -2,34 +2,39 @@ use std::collections::HashMap;
 
 use crate::{
     Context, Error,
-    io_format::{context_extension::ContextExtension, discord_message_format::extract_image_urls},
+    io_format::{
+        context_extension::ContextExtension,
+        discord_message_format::{DISCORD_CHARACTER_LIMIT, extract_image_urls},
+    },
 };
 
 use poise::{
     CreateReply,
     serenity_prelude::{self as serenity, ChannelId, CreateEmbed, CreateMessage},
 };
+use tokio::sync::OnceCell;
 #[derive(PartialEq, Eq)]
 struct CommandInfo<'a> {
     pub name: &'a String,
     pub description: &'a Option<String>,
+    pub help_text: &'a Option<String>,
 }
 
-/// List all available commands
-#[poise::command(slash_command, prefix_command, category = "Utility")]
-pub async fn help(ctx: Context<'_>, show_descriptions: Option<bool>) -> Result<(), Error> {
-    let commands = &ctx.framework().options().commands;
+static HELP_MESSAGES: OnceCell<Vec<String>> = OnceCell::const_new();
+static HELP_MESSAGES_WITH_DESCRIPTIONS: OnceCell<Vec<String>> = OnceCell::const_new();
 
-    let empty = "Miscellaneous".to_string();
-    let mut help_text = String::new();
+async fn generate_help_messages<'a>(ctx: Context<'_>, show_descriptions: bool) -> Vec<String> {
+    let commands = &ctx.framework().options().commands;
     let mut command_map = HashMap::<&str, Vec<CommandInfo>>::new();
     for command in commands {
         let command_info = CommandInfo {
             name: &command.name,
             description: &command.description,
+            help_text: &command.help_text,
         };
-        let category = command.category.as_ref().unwrap_or(&empty).as_str();
-        if !command.hide_in_help {
+
+        if let Some(category) = &command.category {
+            let category = category.as_str();
             if !command_map.contains_key(category) {
                 command_map.insert(category, vec![]);
             }
@@ -40,32 +45,129 @@ pub async fn help(ctx: Context<'_>, show_descriptions: Option<bool>) -> Result<(
         }
     }
 
+    let mut help_messages: Vec<String> = Vec::new();
+    help_messages.push(String::new());
+    let mut msg_i = 0;
     let mut keys: Vec<&&str> = command_map.keys().collect();
     keys.sort();
     for key in keys {
-        help_text.push_str(&format!("**{}**\n", key));
+        let mut help_message = String::new();
+        help_message.push_str(&format!("**{}**\n", key));
+
         for value in command_map.get(key).unwrap() {
-            help_text.push_str(&format!("- /{}\n", value.name));
-            if show_descriptions.is_some_and(|show| show) {
+            help_message.push_str(&format!("- /{}\n", value.name));
+
+            if show_descriptions {
                 if let Some(description) = value.description.as_ref() {
-                    help_text.push_str(&format!("\t- {}\n", description))
+                    help_message.push_str(&format!("\t- {}\n", description));
                 };
             }
         }
+
+        if help_message.len() > DISCORD_CHARACTER_LIMIT {
+            let mut messages: Vec<String> = Vec::new();
+            messages.push(String::new());
+            let mut i = 0;
+            for line in help_message.split_inclusive('\n') {
+                if line.len() + messages[i].len() < DISCORD_CHARACTER_LIMIT {
+                    let msg = messages.get_mut(i).unwrap();
+                    msg.push_str(line);
+                } else {
+                    messages.push(line.to_string());
+                    i += 1;
+                }
+            }
+
+            for msg in messages {
+                help_messages.push(msg);
+            }
+        } else if help_messages[msg_i].len() + help_message.len() > DISCORD_CHARACTER_LIMIT {
+            help_messages.push(help_message);
+            msg_i += 1;
+        } else {
+            let msg = help_messages.get_mut(msg_i).unwrap();
+            msg.push_str(&help_message);
+        }
     }
 
-    ctx.say_long(&help_text, true).await?;
+    help_messages
+}
+
+/// Lists out all available commands optionally showing their descriptions
+#[poise::command(slash_command, prefix_command, category = "Utility")]
+pub async fn help(ctx: Context<'_>, show_descriptions: Option<bool>) -> Result<(), Error> {
+    let show_descriptions = show_descriptions.unwrap_or(false);
+    let help_messages = if show_descriptions {
+        HELP_MESSAGES_WITH_DESCRIPTIONS
+            .get_or_init(|| generate_help_messages(ctx, true))
+            .await
+    } else {
+        HELP_MESSAGES
+            .get_or_init(|| generate_help_messages(ctx, false))
+            .await
+    };
+
+    for message in help_messages {
+        ctx.say_ephemeral(&message).await?;
+    }
+
+    ctx.say_ephemeral("Use /help_command for more detailed information on a command")
+        .await?;
 
     Ok(())
 }
 
-#[poise::command(prefix_command, hide_in_help = true)]
+/// Lists out all available commands optionally showing their descriptions
+#[poise::command(slash_command, prefix_command, category = "Utility")]
+pub async fn help_command(ctx: Context<'_>, command: String) -> Result<(), Error> {
+    let commands = &ctx.framework().options().commands;
+    match commands.iter().find(|c| c.name == command) {
+        Some(command) => {
+            if command
+                .help_text
+                .as_ref()
+                .is_some_and(|text| !text.is_empty())
+            {
+                ctx.say_long(
+                    &format!(
+                        "# {}\n{}\n{}",
+                        command.name,
+                        command
+                            .description
+                            .as_ref()
+                            .unwrap_or(&format!("No description available for {}.", command.name)),
+                        command.help_text.as_ref().unwrap()
+                    ),
+                    true,
+                )
+                .await?;
+            } else {
+                ctx.say_ephemeral(&format!(
+                    "{}",
+                    command.description.as_ref().unwrap_or(&format!(
+                        "No available information for command {}.",
+                        command.name
+                    ))
+                ))
+                .await?;
+            }
+            Ok(())
+        }
+        None => {
+            ctx.say_ephemeral(&format!("No command named {} exists", command))
+                .await?;
+            Ok(())
+        }
+    }
+}
+
+#[poise::command(prefix_command)]
 pub async fn register(ctx: Context<'_>) -> Result<(), Error> {
     poise::builtins::register_application_commands_buttons(ctx).await?;
     Ok(())
 }
 
-/// Move pinned messages posted by the bot to a selected channel
+/// Moves pinned bot messages to the selected channel and creates an embed for them
 ///
 /// Example usage: **/move_bot_pins** to_channel: **my-channel**
 #[poise::command(slash_command, prefix_command, category = "Utility")]

@@ -153,6 +153,7 @@ async fn main() {
                 commands::sound::stop_tracks(),
                 commands::sound::list_tracks(),
                 commands::utility::help(),
+                commands::utility::help_command(),
                 commands::utility::move_bot_pins(),
                 commands::utility::age(),
                 commands::ollama::list_ollama_models(),
