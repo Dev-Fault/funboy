@@ -111,13 +111,13 @@ pub async fn help(ctx: Context<'_>, show_descriptions: Option<bool>) -> Result<(
         ctx.say_ephemeral(&message).await?;
     }
 
-    ctx.say_ephemeral("Use /help_command for more detailed information on a command")
+    ctx.say_ephemeral("Use `/help_command` for more detailed information on a command")
         .await?;
 
     Ok(())
 }
 
-/// Lists out all available commands optionally showing their descriptions
+/// Get detailed information on an individual command
 #[poise::command(slash_command, prefix_command, category = "Utility")]
 pub async fn help_command(ctx: Context<'_>, command: String) -> Result<(), Error> {
     let commands = &ctx.framework().options().commands;
