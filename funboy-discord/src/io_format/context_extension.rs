@@ -68,7 +68,11 @@ impl<'a> ContextExtension for Context<'a> {
         };
 
         for (i, split_message) in split_messages(messages).iter().enumerate() {
-            self.defer_ephemeral().await?;
+            if ephemeral {
+                self.defer_ephemeral().await?;
+            } else {
+                self.defer().await?;
+            }
             self.send(
                 CreateReply::default()
                     .content(split_message)

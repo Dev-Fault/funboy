@@ -118,7 +118,7 @@ pub async fn add_subs(
 
                 ctx.say_list(
                     &subs,
-                    true,
+                    false,
                     Some(Box::new(move |subs| {
                         format_as_item_seperated_list(
                             subs,
@@ -223,7 +223,7 @@ pub async fn delete_subs(
 
                 ctx.say_list(
                     &subs,
-                    true,
+                    false,
                     Some(Box::new(move |subs| {
                         format_as_item_seperated_list(
                             subs,
@@ -283,7 +283,7 @@ pub async fn upload_sub(
             let result = ctx.data().funboy.add_substitutes(&template, &[&sub]).await;
             match result {
                 Ok(_) => {
-                    ctx.say_ephemeral(&format!(
+                    ctx.say(&format!(
                         "Added substitute from file {}",
                         ellipsize_if_long(&sub_file.filename, DISCORD_PRETTY_WIDTH)
                     ))
@@ -319,7 +319,7 @@ pub async fn copy_subs(
 
     match result {
         Ok(_) => {
-            ctx.say_ephemeral(&format!(
+            ctx.say(&format!(
                 "Copied substitutes from `{}` to `{}`",
                 from_template, to_template
             ))
@@ -500,7 +500,7 @@ pub async fn delete_templates(ctx: Context<'_>, names: String) -> Result<(), Err
         if templates.len() > 1 { "their" } else { "it's" }
     );
 
-    match create_confirmation_interaction(ctx, &interaction_text, 30).await? {
+    match create_confirmation_interaction(ctx, &interaction_text, 30, false).await? {
         Some(interaction) => match interaction.data.custom_id.as_str() {
             CANCEL_BUTTON_ID => {
                 interaction

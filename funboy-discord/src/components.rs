@@ -115,6 +115,7 @@ pub async fn create_confirmation_interaction<'a>(
     ctx: Context<'a>,
     interaction_msg: &str,
     timeout_secs: u64,
+    ephemeral: bool,
 ) -> Result<Option<ComponentInteraction>, Error> {
     let action_row =
         CreateActionRow::Buttons(vec![create_cancel_button(), create_confirm_button()]);
@@ -123,7 +124,7 @@ pub async fn create_confirmation_interaction<'a>(
         .send(
             CreateReply::default()
                 .content(interaction_msg)
-                .ephemeral(true)
+                .ephemeral(ephemeral)
                 .components(vec![action_row]),
         )
         .await?;
@@ -132,6 +133,7 @@ pub async fn create_confirmation_interaction<'a>(
         .message()
         .await?
         .await_component_interaction(ctx)
+        .author_id(ctx.author().id)
         .timeout(std::time::Duration::from_secs(timeout_secs))
         .await)
 }
