@@ -391,12 +391,23 @@ impl TemplateDatabase {
     async fn read_or_create_template(&self, template_name: &str) -> Result<Template, Error> {
         let template = sqlx::query_as::<_, Template>(
             "INSERT INTO templates (name) VALUES ($1)
-             ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+             ON CONFLICT (name) DO NOTHING
              RETURNING *",
         )
         .bind(template_name)
-        .fetch_one(self.pool.as_ref())
+        .fetch_optional(self.pool.as_ref())
         .await?;
+
+        let template = match template {
+            Some(t) => t,
+            None => {
+                sqlx::query_as::<_, Template>("SELECT * FROM templates WHERE name = $1")
+                    .bind(template_name)
+                    .fetch_one(self.pool.as_ref())
+                    .await?
+            }
+        };
+
         Ok(template)
     }
 
