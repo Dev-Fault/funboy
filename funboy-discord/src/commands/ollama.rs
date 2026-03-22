@@ -59,7 +59,7 @@ pub async fn list_ollama_settings(ctx: Context<'_>) -> Result<(), Error> {
 
     ctx.say_ephemeral(&format!(
         "Current Model: {}\n{}",
-        &current_model.unwrap_or("Default".to_string()),
+        &current_model.unwrap_or("Unset".to_string()),
         &settings.to_string()
     ))
     .await?;

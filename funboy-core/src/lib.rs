@@ -94,7 +94,11 @@ impl Funboy {
     }
 
     pub async fn get_ollama_model(&self) -> Option<String> {
-        self.ollama_model.lock().await.clone()
+        let model = self.ollama_model.lock().await.clone();
+        match model {
+            Some(_) => model,
+            None => self.ollama_generator.get_default_model().await,
+        }
     }
 
     pub async fn set_ollama_model(&self, new_model: Option<String>) {
