@@ -268,34 +268,30 @@ pub async fn upload_sub(
     template: String,
     #[description = "Upload a text file"] sub_file: Attachment,
 ) -> Result<(), Error> {
-    const ALLOWED_TYPES: &[&str] = &["text/plain; charset=utf-8"];
-
-    if !ALLOWED_TYPES.contains(&sub_file.content_type.as_deref().unwrap_or("")) {
-        ctx.say_ephemeral("Only text files are allowed.").await?;
-        return Ok(());
-    }
-
     let bytes = sub_file.download().await?;
     let sub = String::from_utf8(bytes);
 
-    match sub {
-        Ok(sub) => {
-            let result = ctx.data().funboy.add_substitutes(&template, &[&sub]).await;
-            match result {
-                Ok(_) => {
-                    ctx.say(&format!(
-                        "Added substitute from file {}",
-                        ellipsize_if_long(&sub_file.filename, DISCORD_PRETTY_WIDTH)
-                    ))
-                    .await?;
-                }
-                Err(e) => {
-                    ctx.say_ephemeral(&e.to_string()).await?;
-                }
-            }
-        }
+    let sub = match sub {
+        Ok(s) => s,
         Err(_) => {
-            ctx.say_ephemeral("Text must be valid utf8.").await?;
+            ctx.say_ephemeral("Only text files are allowed (file must be valid UTF-8).")
+                .await?;
+            return Ok(());
+        }
+    };
+
+    let result = ctx.data().funboy.add_substitutes(&template, &[&sub]).await;
+    match result {
+        Ok(_) => {
+            ctx.say(&format!(
+                "Added substitute from file {} to `{}`",
+                ellipsize_if_long(&sub_file.filename, DISCORD_PRETTY_WIDTH),
+                template
+            ))
+            .await?;
+        }
+        Err(e) => {
+            ctx.say_ephemeral(&e.to_string()).await?;
         }
     }
 
