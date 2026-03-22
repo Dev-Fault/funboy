@@ -136,6 +136,7 @@ async fn main() {
             commands: vec![
                 register(),
                 commands::templates::generate(),
+                commands::templates::generate_file(),
                 commands::templates::rename_template(),
                 commands::templates::add_subs(),
                 commands::templates::upload_sub(),

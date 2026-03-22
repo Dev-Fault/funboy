@@ -21,7 +21,7 @@ use crate::{
     },
 };
 
-/// Generates text by replacing templates with substitutes and interpreting any embedded code
+/// Generates text by preforming template substitution and interpreting fsl code
 ///
 /// ## Templates
 /// Templates are any text preceded or optionally followed by a template character.
@@ -64,7 +64,49 @@ pub async fn generate(ctx: Context<'_>, input: String) -> Result<(), Error> {
 
     match output {
         Ok(output) => {
-            if !output.is_empty() {
+            if !output.trim().is_empty() {
+                ctx.edit_long(original_message, &output, false).await?;
+            } else {
+                original_message
+                    .edit(ctx, CreateReply::default().content("Generation complete."))
+                    .await?;
+            }
+        }
+        Err(e) => {
+            ctx.say_ephemeral(&e.to_string()).await?;
+        }
+    };
+    Ok(())
+}
+
+/// Generates text by preforming template substitution and intepreting fsl code from a file
+///  
+/// See /generate command for more info
+#[poise::command(slash_command, prefix_command, category = "Templates")]
+pub async fn generate_file(ctx: Context<'_>, file: Attachment) -> Result<(), Error> {
+    let bytes = file.download().await?;
+    let input = String::from_utf8(bytes);
+
+    let input = match input {
+        Ok(i) => i,
+        Err(_) => {
+            ctx.say_ephemeral("Only text files are allowed (file must be valid UTF-8).")
+                .await?;
+            return Ok(());
+        }
+    };
+
+    let original_message = ctx.say("Generating...").await?;
+
+    let output = ctx
+        .data()
+        .funboy
+        .generate(&input, create_custom_interpreter(&ctx))
+        .await;
+
+    match output {
+        Ok(output) => {
+            if !output.trim().is_empty() {
                 ctx.edit_long(original_message, &output, false).await?;
             } else {
                 original_message
