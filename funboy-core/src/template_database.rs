@@ -16,6 +16,7 @@ pub struct Template {
 #[derive(Debug, FromRow, Clone)]
 pub struct Substitute {
     pub id: KeySize,
+    pub name_hash: String,
     pub name: String,
     pub template_id: KeySize,
 }
@@ -443,7 +444,7 @@ impl TemplateDatabase {
             let substitute = sqlx::query_as::<_, Substitute>(
                 "
                     INSERT INTO substitutes (name, template_id) VALUES ($1, $2)
-                    ON CONFLICT (name, template_id) DO NOTHING
+                    ON CONFLICT (name_hash, template_id) DO NOTHING
                     RETURNING *
                 ",
             )
@@ -475,7 +476,7 @@ impl TemplateDatabase {
                 JOIN templates t_source ON s.template_id = t_source.id
                 JOIN templates t_dest ON t_dest.name = $1
                 WHERE t_source.name = $2
-                ON CONFLICT (name, template_id) DO NOTHING
+                ON CONFLICT (name_hash, template_id) DO NOTHING
                 RETURNING *
             ",
         )
