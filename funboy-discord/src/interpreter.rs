@@ -232,14 +232,14 @@ pub fn create_say_to_command(ictx: InterpreterContext) -> Executor {
     Some(Arc::new(say_command))
 }
 
+const DEFAULT_TIMEOUT_SECS: f64 = 60.0 * 5.0;
+const MAX_TIMEOUT_SECS: f64 = 60.0 * 10.0;
 const ASK: &str = "ask";
 const ASK_RULES: &'static [ArgRule] = &[
     ArgRule::new(ArgPos::Index(0), TEXT_TYPES),
     ArgRule::new(ArgPos::OptionalIndex(1), NUMERIC_TYPES),
 ];
 pub fn create_ask_command(ictx: InterpreterContext) -> Executor {
-    const DEFAULT_TIMEOUT_SECS: f64 = 60.0 * 2.0;
-    const MAX_TIMEOUT_SECS: f64 = 60.0 * 10.0;
     let ask_command = {
         move |command: Command, data: Arc<InterpreterData>| {
             let ictx = ictx.clone();
@@ -298,8 +298,6 @@ const ASK_TO_RULES: &'static [ArgRule] = &[
     ArgRule::new(ArgPos::OptionalIndex(2), NUMERIC_TYPES),
 ];
 pub fn create_ask_to_command(ictx: InterpreterContext) -> Executor {
-    const DEFAULT_TIMEOUT_SECS: f64 = 60.0 * 2.0;
-    const MAX_TIMEOUT_SECS: f64 = 60.0 * 10.0;
     let ask_command = {
         move |command: Command, data: Arc<InterpreterData>| {
             let ictx = ictx.clone();
