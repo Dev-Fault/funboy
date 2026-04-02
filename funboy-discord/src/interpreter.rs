@@ -15,7 +15,11 @@ use serenity::{
 };
 use tokio::{sync::Mutex, time::sleep};
 
-use crate::{Context, rate_limiter::RateLimit};
+use crate::{
+    Context,
+    io_format::{context_extension::BOT_MAX_MESSAGE_SIZE, discord_message_format::split_message},
+    rate_limiter::RateLimit,
+};
 
 #[derive(Clone)]
 pub struct InterpreterContext {
@@ -66,10 +70,19 @@ impl InterpreterContext {
         let members = self.get_guild_members().await?;
 
         let say_message = async |mention: &str| {
-            let mention_message = format!("{} {}", mention, message);
-            if let Err(e) = self.channel_id.say(&self.http, mention_message).await {
-                return Err(CommandError::Custom(e.to_string()));
-            };
+            if message.len() < BOT_MAX_MESSAGE_SIZE {
+                let mention_message = &format!("{} {}", mention, message);
+                for m in split_message(mention_message) {
+                    if let Err(e) = self.channel_id.say(&self.http, m).await {
+                        return Err(CommandError::Custom(e.to_string()));
+                    };
+                }
+            } else {
+                return Err(CommandError::Custom(format!(
+                    "Message exceeded max length of {} characters",
+                    BOT_MAX_MESSAGE_SIZE,
+                )));
+            }
 
             Ok(())
         };
@@ -186,9 +199,17 @@ pub fn create_say_command(ictx: InterpreterContext) -> Executor {
 
                 let message = ictx.generate_message(&message).await?;
 
-                ictx.channel_id.say(&ictx.http, message).await.ok();
-
-                Ok(Value::None)
+                if message.len() < BOT_MAX_MESSAGE_SIZE {
+                    for m in split_message(&message) {
+                        ictx.channel_id.say(&ictx.http, m).await.ok();
+                    }
+                    Ok(Value::None)
+                } else {
+                    return Err(CommandError::Custom(format!(
+                        "Message exceeded max length of {} characters",
+                        BOT_MAX_MESSAGE_SIZE,
+                    )));
+                }
             }
         }
     };
@@ -261,10 +282,18 @@ pub fn create_ask_command(ictx: InterpreterContext) -> Executor {
                 let time_out = arg_1.as_float(data.clone()).await?;
                 validate_time_out(time_out, MAX_TIMEOUT_SECS)?;
 
-                ictx.channel_id
-                    .say(&ictx.http, ictx.generate_message(&question).await?)
-                    .await
-                    .ok();
+                let question = ictx.generate_message(&question).await?;
+
+                if question.len() < BOT_MAX_MESSAGE_SIZE {
+                    for m in split_message(&question) {
+                        ictx.channel_id.say(&ictx.http, m).await.ok();
+                    }
+                } else {
+                    return Err(CommandError::Custom(format!(
+                        "Message exceeded max length of {} characters",
+                        BOT_MAX_MESSAGE_SIZE,
+                    )));
+                }
 
                 let mut collector = ictx
                     .channel_id
