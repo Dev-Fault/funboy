@@ -16,7 +16,7 @@ use crate::{
         discord_message_format::{
             DISCORD_PRETTY_WIDTH, SeperatedListOptions, StringVecToRef, ellipsize_if_long,
             format_as_item_seperated_list, format_as_numeric_list,
-            split_by_whitespace_unless_quoted,
+            split_by_whitespace_unless_quoted, split_message,
         },
     },
 };
@@ -54,6 +54,10 @@ use crate::{
 /// For more FSL information, use `/help_fsl`
 #[poise::command(slash_command, prefix_command, category = "Templates")]
 pub async fn generate(ctx: Context<'_>, input: String) -> Result<(), Error> {
+    let start = std::time::Instant::now();
+    let http = ctx.http();
+    let channel_id = ctx.channel_id();
+
     let original_message = ctx.say("Generating...").await?;
 
     let output = ctx
@@ -62,19 +66,36 @@ pub async fn generate(ctx: Context<'_>, input: String) -> Result<(), Error> {
         .generate(&input, create_custom_interpreter(&ctx))
         .await;
 
+    // Don't use ctx if the webhook token expired or is close to expiring
+    let ctx_window_over = start.elapsed() > std::time::Duration::from_secs(60 * 10);
+
     match output {
         Ok(output) => {
             if !output.trim().is_empty() {
-                ctx.edit_long(original_message, &output, false).await?;
+                if ctx_window_over {
+                    for m in split_message(&output) {
+                        channel_id.say(&http, m).await?;
+                    }
+                } else {
+                    ctx.edit_long(original_message, &output, false).await?;
+                }
             } else {
-                original_message
-                    .edit(ctx, CreateReply::default().content("Generation complete."))
-                    .await?;
+                if ctx_window_over {
+                    return Ok(());
+                } else {
+                    original_message
+                        .edit(ctx, CreateReply::default().content("Generation complete."))
+                        .await?;
+                }
             }
         }
         Err(e) => {
-            eprintln!("{}", e.to_string());
-            ctx.say_ephemeral(&e.to_string()).await?;
+            eprintln!("{:?}", e);
+            if ctx_window_over {
+                channel_id.say(&http, &e.to_string()).await?;
+            } else {
+                ctx.say_ephemeral(&e.to_string()).await?;
+            }
         }
     };
     Ok(())
