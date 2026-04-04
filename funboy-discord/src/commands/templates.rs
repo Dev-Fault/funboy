@@ -73,6 +73,7 @@ pub async fn generate(ctx: Context<'_>, input: String) -> Result<(), Error> {
             }
         }
         Err(e) => {
+            eprintln!("{}", e.to_string());
             ctx.say_ephemeral(&e.to_string()).await?;
         }
     };

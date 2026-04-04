@@ -18,7 +18,7 @@ use tokio::{sync::Mutex, time::sleep};
 use crate::{
     Context,
     io_format::{context_extension::BOT_MAX_MESSAGE_SIZE, discord_message_format::split_message},
-    rate_limiter::RateLimit,
+    rate_limiter::{RateLimit, RateLimitResult},
 };
 
 #[derive(Clone)]
@@ -151,7 +151,7 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> Arc<tokio::sync::Mutex<Fs
     Arc::new(tokio::sync::Mutex::new(interpreter))
 }
 
-const MAX_CALLS: u16 = 200;
+const MAX_CALLS: u16 = 2000;
 async fn check_limits(ictx: InterpreterContext) -> Result<(), CommandError> {
     let mut rate_limit = ictx.rate_limit.lock().await;
     let mut call_count = ictx.command_call_count.lock().await;
@@ -165,16 +165,16 @@ async fn check_limits(ictx: InterpreterContext) -> Result<(), CommandError> {
     *call_count = call_count.saturating_add(1);
 
     match rate_limit.check(ictx.author_id) {
-        crate::rate_limiter::RateLimitResult::MaxLimitsReached => {
+        RateLimitResult::MaxLimitsReached => {
             return Err(CommandError::Custom(format!(
                 "exceeded rate limit too many times, please wait a bit before trying again",
             )));
         }
-        crate::rate_limiter::RateLimitResult::UsesPerIntervalreached => {
+        RateLimitResult::UsesPerIntervalreached => {
             std::thread::sleep(Duration::from_secs(3));
             Ok(())
         }
-        crate::rate_limiter::RateLimitResult::Ok => Ok(()),
+        RateLimitResult::Ok => Ok(()),
     }
 }
 
