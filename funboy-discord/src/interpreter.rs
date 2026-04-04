@@ -198,7 +198,7 @@ pub fn create_say_command(ictx: InterpreterContext) -> Executor {
 
                 if message.len() < BOT_MAX_MESSAGE_SIZE {
                     for m in split_message(&message) {
-                        // ictx.channel_id.say(&ictx.http, m).await.ok();
+                        ictx.channel_id.say(&ictx.http, m).await.ok();
                     }
                     Ok(Value::None)
                 } else {
@@ -250,8 +250,8 @@ pub fn create_say_to_command(ictx: InterpreterContext) -> Executor {
     Some(Arc::new(say_command))
 }
 
-const DEFAULT_TIMEOUT_SECS: f64 = 60.0 * 5.0;
-const MAX_TIMEOUT_SECS: f64 = 60.0 * 10.0;
+const DEFAULT_TIMEOUT_SECS: f64 = 60.0 * 30.0;
+const MAX_TIMEOUT_SECS: f64 = 60.0 * 60.0;
 const ASK: &str = "ask";
 const ASK_RULES: &'static [ArgRule] = &[
     ArgRule::new(ArgPos::Index(0), TEXT_TYPES),
