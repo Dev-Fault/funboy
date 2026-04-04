@@ -158,7 +158,7 @@ async fn check_limits(ictx: InterpreterContext) -> Result<(), CommandError> {
     if *call_count >= MAX_CALLS {
         *call_count = 0;
         return Err(CommandError::Custom(format!(
-            "cannot use commands that send messages more than {} per generation",
+            "cannot use commands that send more than {} messages per generation",
             MAX_CALLS
         )));
     }
@@ -170,10 +170,7 @@ async fn check_limits(ictx: InterpreterContext) -> Result<(), CommandError> {
                 "exceeded rate limit too many times, please wait a bit before trying again",
             )));
         }
-        RateLimitResult::UsesPerIntervalreached => {
-            std::thread::sleep(Duration::from_secs(3));
-            Ok(())
-        }
+        RateLimitResult::UsesPerIntervalreached => Ok(()),
         RateLimitResult::Ok => Ok(()),
     }
 }
@@ -201,7 +198,7 @@ pub fn create_say_command(ictx: InterpreterContext) -> Executor {
 
                 if message.len() < BOT_MAX_MESSAGE_SIZE {
                     for m in split_message(&message) {
-                        ictx.channel_id.say(&ictx.http, m).await.ok();
+                        // ictx.channel_id.say(&ictx.http, m).await.ok();
                     }
                     Ok(Value::None)
                 } else {
