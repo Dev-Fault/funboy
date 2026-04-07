@@ -100,7 +100,8 @@ impl FromStr for ListStyle {
 #[derive(Parser, Debug)]
 enum Command {
     Generate {
-        input: String,
+        #[arg(trailing_var_arg = true)]
+        input: Vec<String>,
 
         #[arg(short, long)]
         file: bool,
@@ -277,6 +278,7 @@ pub async fn interpret_input(
                 file,
                 ollama,
             } => {
+                let input = input.join(" ");
                 let input = if file {
                     let input = match std::fs::read_to_string(input) {
                         Ok(input) => input,
