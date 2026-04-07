@@ -1,8 +1,4 @@
-use std::{
-    io::{self, Write},
-    sync::Arc,
-    time::Duration,
-};
+use std::{sync::Arc, time::Duration};
 
 use dotenvy::dotenv;
 use fsl_interpreter::{
@@ -19,7 +15,11 @@ use funboy_cli::{
     ParseError::{EmptyInput, UnknownCommand},
     interpret_input,
 };
-use funboy_core::{self, Funboy, template_database::TemplateDatabase};
+use funboy_core::{
+    self, Funboy,
+    ollama::{MAX_PREDICT, OllamaSettings},
+    template_database::TemplateDatabase,
+};
 use rustyline::DefaultEditor;
 use sqlx::postgres::PgPoolOptions;
 use tokio::sync::Mutex;
@@ -27,6 +27,7 @@ use tokio::sync::Mutex;
 struct Env {
     debug_mode: bool,
     db_url: String,
+    default_ollama_model: Option<String>,
 }
 
 const SAY: &str = "say";
@@ -83,6 +84,7 @@ pub fn create_ask_command(funboy: Arc<Funboy>, rl: Arc<Mutex<DefaultEditor>>) ->
                     .unwrap_or(Value::Float(DEFAULT_TIMEOUT_SECS));
 
                 let question = format!("{}", arg_0);
+                let question = format!("{}\n{}", question, "(enter -STOP- to quit)");
 
                 let question = funboy
                     .generate(&question, Arc::new(Mutex::new(FslInterpreter::new())))
@@ -100,9 +102,17 @@ pub fn create_ask_command(funboy: Arc<Funboy>, rl: Arc<Mutex<DefaultEditor>>) ->
                 println!("{}", question);
 
                 let mut rl = rl.lock().await;
-                let result = rl.readline("answer> ");
+                let result = rl.readline("A> ");
                 match result {
-                    Ok(output) => Ok(Value::Text(output)),
+                    Ok(output) => {
+                        if output == "-STOP-" {
+                            Err(fsl_interpreter::types::command::CommandError::Custom(
+                                format!("{}", "user quit the program"),
+                            ))
+                        } else {
+                            Ok(Value::Text(output))
+                        }
+                    }
                     Err(e) => {
                         return Err(fsl_interpreter::types::command::CommandError::Custom(
                             format!("{:?}", e),
@@ -131,7 +141,13 @@ async fn get_env() -> Env {
         std::env::var("DEBUG_DATABASE_URL").expect("missing DATABASE_URL")
     };
 
-    Env { debug_mode, db_url }
+    let default_ollama_model = std::env::var("DEFAULT_OLLAMA_MODEL").ok();
+
+    Env {
+        debug_mode,
+        db_url,
+        default_ollama_model,
+    }
 }
 
 async fn get_funboy(env: &Env) -> Funboy {
@@ -155,10 +171,10 @@ async fn get_funboy(env: &Env) -> Funboy {
 }
 
 pub async fn enter_interactive_generation(
-    rl: Arc<Mutex<DefaultEditor>>,
-    interpreter: Arc<Mutex<FslInterpreter>>,
     funboy: Arc<Funboy>,
+    rl: Arc<Mutex<DefaultEditor>>,
 ) -> rustyline::Result<()> {
+    let interpreter = create_interpreter(funboy.clone(), rl.clone()).await;
     loop {
         let mut rl = rl.lock().await;
         let readline = rl.readline("G> ");
@@ -184,9 +200,10 @@ pub async fn enter_interactive_generation(
 }
 
 pub async fn enter_interpreter(
-    interpreter: Arc<Mutex<FslInterpreter>>,
+    funboy: Arc<Funboy>,
     rl: Arc<Mutex<DefaultEditor>>,
 ) -> rustyline::Result<()> {
+    let interpreter = create_interpreter(funboy.clone(), rl.clone()).await;
     loop {
         let mut rl = rl.lock().await;
         let readline = rl.readline("I> ");
@@ -219,7 +236,7 @@ async fn create_interpreter(
     funboy: Arc<Funboy>,
     rl: Arc<Mutex<DefaultEditor>>,
 ) -> Arc<Mutex<FslInterpreter>> {
-    let interpreter = Arc::new(Mutex::new(FslInterpreter::new()));
+    let interpreter = Arc::new(Mutex::new(FslInterpreter::new_unbounded()));
     let mut interpreter_lock = interpreter.lock().await;
     interpreter_lock.add_command(SAY, SAY_RULES, create_say_command(funboy.clone()));
     interpreter_lock.add_command(
@@ -235,8 +252,10 @@ async fn create_interpreter(
 async fn main() -> rustyline::Result<()> {
     let env = get_env().await;
     let funboy = Arc::new(get_funboy(&env).await);
+    funboy.set_ollama_model(env.default_ollama_model).await;
     let rl = Arc::new(Mutex::new(DefaultEditor::new()?));
-
+    let mut ollama_settings = OllamaSettings::default();
+    ollama_settings.set_output_limit(MAX_PREDICT);
     loop {
         let mut rl_lock = rl.lock().await;
         let readline = rl_lock.readline(">> ");
@@ -247,6 +266,7 @@ async fn main() -> rustyline::Result<()> {
                 match interpret_input(
                     funboy.clone(),
                     create_interpreter(funboy.clone(), rl.clone()).await,
+                    ollama_settings.clone(),
                     &line,
                 )
                 .await
@@ -257,36 +277,28 @@ async fn main() -> rustyline::Result<()> {
                             Context::Normal => {
                                 todo!()
                             }
-                            Context::InteractiveGeneration => {
-                                enter_interactive_generation(
-                                    rl.clone(),
-                                    create_interpreter(funboy.clone(), rl.clone()).await,
-                                    funboy.clone(),
-                                )
-                                .await?;
+                            Context::Generate => {
+                                enter_interactive_generation(funboy.clone(), rl.clone()).await?;
                             }
-                            Context::Interpreter => {
-                                enter_interpreter(
-                                    create_interpreter(funboy.clone(), rl.clone()).await,
-                                    rl.clone(),
-                                )
-                                .await?;
+                            Context::FSL => {
+                                enter_interpreter(funboy.clone(), rl.clone()).await?;
                             }
                         },
                     },
                     Err(e) => match e {
-                        CommandError(e) => eprintln!("{:?}", e),
+                        CommandError(e) => println!("{}", e.to_string()),
                         ParseError(parse_error) => match parse_error {
                             EmptyInput => {
                                 continue;
                             }
-                            UnknownCommand(e) => eprintln!("{:?}", e),
+                            UnknownCommand(e) => eprintln!("{}", e),
+                            funboy_cli::ParseError::MissingArg(e) => eprintln!("{}", e),
                         },
                     },
                 }
             }
             Err(e) => {
-                eprintln!("{:?}", e);
+                eprintln!("{}", e);
                 break;
             }
         }
