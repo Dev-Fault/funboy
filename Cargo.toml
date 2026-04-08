@@ -4,4 +4,5 @@ members = [
 	"funboy-core",
 	"funboy-cli",
 	"funboy-discord",
+	"funboy-matrix",
 ]
