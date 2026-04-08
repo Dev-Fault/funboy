@@ -338,14 +338,19 @@ impl TemplateDatabase {
             None => "%".to_string(),
         };
 
-        let templates = sqlx::query_as::<_, Template>(&format!(
-            "SELECT * FROM templates WHERE name LIKE $1 ORDER BY {} LIMIT {}",
+        let mut builder =
+            sqlx::QueryBuilder::<sqlx::Postgres>::new("SELECT * FROM templates WHERE name LIKE ");
+        builder.push_bind(search_term);
+        builder.push(format!(
+            " ORDER BY {} LIMIT {}",
             order_by.as_sql(None),
             limit.as_sql(),
-        ))
-        .bind(search_term)
-        .fetch_all(self.pool.as_ref())
-        .await?;
+        ));
+
+        let templates = builder
+            .build_query_as::<Template>()
+            .fetch_all(self.pool.as_ref())
+            .await?;
 
         Ok(templates)
     }
@@ -500,23 +505,27 @@ impl TemplateDatabase {
             None => "%".to_string(),
         };
 
-        let substitutes = sqlx::query_as::<_, Substitute>(&format!(
+        let mut builder = sqlx::QueryBuilder::<sqlx::Postgres>::new(
             "
                  SELECT s.*
                  FROM substitutes s
                  JOIN templates t ON s.template_id = t.id
-                 WHERE t.name = $1
-                 AND s.name LIKE $2
-                 ORDER BY {}
-                 LIMIT {}
-             ",
+                 WHERE t.name = 
+            ",
+        );
+        builder.push_bind(template_name);
+        builder.push(" AND s.name LIKE ");
+        builder.push_bind(search_term);
+        builder.push(format!(
+            " ORDER BY {} LIMIT {} ",
             order_by.as_sql(Some("s")),
             limit.as_sql(),
-        ))
-        .bind(template_name)
-        .bind(search_term)
-        .fetch_all(self.pool.as_ref())
-        .await?;
+        ));
+
+        let substitutes = builder
+            .build_query_as::<Substitute>()
+            .fetch_all(self.pool.as_ref())
+            .await?;
 
         Ok(substitutes)
     }
@@ -526,19 +535,22 @@ impl TemplateDatabase {
         template_name: &str,
         substitute_name: &str,
     ) -> Result<Option<Substitute>, Error> {
-        let substitute = sqlx::query_as::<_, Substitute>(&format!(
+        let mut builder = sqlx::QueryBuilder::<sqlx::Postgres>::new(
             "
                  SELECT s.*
                  FROM substitutes s
                  JOIN templates t ON s.template_id = t.id
-                 WHERE t.name = $1
-                 AND s.name = $2
-             ",
-        ))
-        .bind(template_name)
-        .bind(substitute_name)
-        .fetch_optional(self.pool.as_ref())
-        .await?;
+                 WHERE t.name = 
+            ",
+        );
+        builder.push_bind(template_name);
+        builder.push(" AND s.name = ");
+        builder.push_bind(substitute_name);
+
+        let substitute = builder
+            .build_query_as::<Substitute>()
+            .fetch_optional(self.pool.as_ref())
+            .await?;
 
         Ok(substitute)
     }
