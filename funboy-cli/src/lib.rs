@@ -47,13 +47,11 @@ pub enum Error {
     ParseError(ParseError),
 }
 
-const NORMAL: &str = "normal";
 const GENERATE: &str = "generate";
 const FSL: &str = "fsl";
 
 #[derive(Debug, Copy, Clone)]
 pub enum Context {
-    Normal,
     Generate,
     FSL,
 }
@@ -63,7 +61,6 @@ impl FromStr for Context {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            NORMAL => Ok(Context::Normal),
             GENERATE => Ok(Context::Generate),
             FSL => Ok(Context::FSL),
             _ => Err(format!("Unknown context {}", s)),
@@ -74,6 +71,7 @@ impl FromStr for Context {
 pub enum CommandResult {
     Text(String),
     ContextSwitch(Context),
+    Exit,
 }
 
 const DEFAULT: &str = "default";
@@ -192,16 +190,34 @@ impl FromStr for OllamaListOption {
 #[derive(Parser, Debug, Clone)]
 enum OllamaSetOptions {
     #[command(name = "model")]
-    Model {
-        model: String,
+    Model { model: String },
+    #[command(name = "system_prompt")]
+    SystemPrompt {
+        #[arg(trailing_var_arg = true)]
+        system_prompt: Vec<String>,
     },
-    Template,
-    OutputLimit,
-    Temperature,
-    TopK,
-    TopP,
-    RepeatPenalty,
+    #[command(name = "template")]
+    Template { template: String },
+    #[command(name = "output_limit")]
+    OutputLimit { limit: u16 },
+    #[command(name = "temperature")]
+    Temperature { temperature: f32 },
+    #[command(name = "top_k")]
+    TopK { top_k: u32 },
+    #[command(name = "top_p")]
+    TopP { top_p: f32 },
+    #[command(name = "repeat_penalty")]
+    RepeatPenalty { repeat_penalty: f32 },
 }
+/*
+#[derive(Copy, Clone)]
+pub struct OllamaParameters {
+    pub temperature: Option<f32>,
+    pub repeat_penalty: Option<f32>,
+    pub top_k: Option<u32>,
+    pub top_p: Option<f32>,
+}
+*/
 
 #[derive(Parser, Debug)]
 enum OllamaAction {
@@ -255,10 +271,14 @@ fn parse_substitutes<'a>(input: &'a str, single: bool) -> Vec<&'a str> {
     }
 }
 
-pub async fn interpret_input(
-    funboy: Arc<Funboy>,
-    interpreter: Arc<Mutex<FslInterpreter>>,
-    ollama_settings: OllamaSettings,
+pub struct BotData {
+    pub funboy: Arc<Funboy>,
+    pub interpreter: Arc<Mutex<FslInterpreter>>,
+    pub ollama_settings: Arc<Mutex<OllamaSettings>>,
+}
+
+pub async fn interpret_bot_commands(
+    bot_data: &BotData,
     input: &str,
 ) -> Result<CommandResult, Error> {
     let input = input.trim();
@@ -270,6 +290,10 @@ pub async fn interpret_input(
 
     let mut full_args = vec!["funboy"];
     full_args.extend(&args);
+
+    let funboy = &bot_data.funboy;
+    let interpreter = &bot_data.interpreter;
+    let ollama_settings = &bot_data.ollama_settings;
 
     match Command::try_parse_from(full_args) {
         Ok(command) => match command {
@@ -293,17 +317,18 @@ pub async fn interpret_input(
                     input
                 };
                 let result = if ollama {
+                    let ollama_settings = ollama_settings.lock().await;
                     funboy
                         .generate_ollama(
                             funboy.get_ollama_model().await,
                             &ollama_settings,
                             &input,
-                            interpreter,
+                            interpreter.clone(),
                         )
                         .await
                         .map(|o| o.response)
                 } else {
-                    funboy.generate(&input, interpreter).await
+                    funboy.generate(&input, interpreter.clone()).await
                 };
                 match result {
                     Ok(output) => return Ok(CommandResult::Text(output)),
@@ -459,20 +484,80 @@ pub async fn interpret_input(
                         }
                     }
                     OllamaListOption::Settings => {
-                        return Ok(CommandResult::Text(ollama_settings.to_string()));
+                        let ollama_settings = ollama_settings.lock().await;
+                        let settings_string = ollama_settings.to_string();
+                        return Ok(CommandResult::Text(settings_string));
                     }
                 },
                 OllamaAction::Set { option } => match option {
+                    OllamaSetOptions::SystemPrompt { system_prompt } => {
+                        let mut ollama_settings = ollama_settings.lock().await;
+                        let system_prompt = system_prompt.join(" ");
+                        ollama_settings.set_system_prompt(&system_prompt);
+                        drop(ollama_settings);
+                        Ok(CommandResult::Text(format!(
+                            "Set ollama system prompt to {}",
+                            system_prompt
+                        )))
+                    }
                     OllamaSetOptions::Model { model } => {
                         funboy.set_ollama_model(Some(model.to_string())).await;
                         return Ok(CommandResult::Text(format!("Set model to {}", model)));
                     }
-                    OllamaSetOptions::Template => todo!(),
-                    OllamaSetOptions::OutputLimit => todo!(),
-                    OllamaSetOptions::Temperature => todo!(),
-                    OllamaSetOptions::TopK => todo!(),
-                    OllamaSetOptions::TopP => todo!(),
-                    OllamaSetOptions::RepeatPenalty => todo!(),
+                    OllamaSetOptions::Template { template } => {
+                        let mut ollama_settings = ollama_settings.lock().await;
+                        ollama_settings.set_template(&template);
+                        drop(ollama_settings);
+                        Ok(CommandResult::Text(format!(
+                            "Set ollama template to {}",
+                            template
+                        )))
+                    }
+                    OllamaSetOptions::OutputLimit { limit } => {
+                        let mut ollama_settings = ollama_settings.lock().await;
+                        ollama_settings.set_output_limit(limit);
+                        drop(ollama_settings);
+                        Ok(CommandResult::Text(format!(
+                            "Set ollama output limit to {}",
+                            limit
+                        )))
+                    }
+                    OllamaSetOptions::Temperature { temperature } => {
+                        let mut ollama_settings = ollama_settings.lock().await;
+                        ollama_settings.set_temperature(temperature);
+                        drop(ollama_settings);
+                        Ok(CommandResult::Text(format!(
+                            "Set ollama temperature limit to {}",
+                            temperature
+                        )))
+                    }
+                    OllamaSetOptions::TopK { top_k } => {
+                        let mut ollama_settings = ollama_settings.lock().await;
+                        ollama_settings.set_top_k(top_k);
+                        drop(ollama_settings);
+                        Ok(CommandResult::Text(format!(
+                            "Set ollama top_k to {}",
+                            top_k
+                        )))
+                    }
+                    OllamaSetOptions::TopP { top_p } => {
+                        let mut ollama_settings = ollama_settings.lock().await;
+                        ollama_settings.set_top_p(top_p);
+                        drop(ollama_settings);
+                        Ok(CommandResult::Text(format!(
+                            "Set ollama top_p to {}",
+                            top_p
+                        )))
+                    }
+                    OllamaSetOptions::RepeatPenalty { repeat_penalty } => {
+                        let mut ollama_settings = ollama_settings.lock().await;
+                        ollama_settings.set_repeat_penalty(repeat_penalty);
+                        drop(ollama_settings);
+                        Ok(CommandResult::Text(format!(
+                            "Set ollama repeat penalty to {}",
+                            repeat_penalty
+                        )))
+                    }
                 },
             },
             Command::Copy {
@@ -581,7 +666,7 @@ pub async fn interpret_input(
                     }
                 }
             }
-            Command::Exit => todo!(),
+            Command::Exit => Ok(CommandResult::Exit),
         },
         Err(e) => Err(Error::ParseError(ParseError::UnknownCommand(e.to_string()))),
     }

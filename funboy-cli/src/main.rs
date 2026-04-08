@@ -10,10 +10,10 @@ use fsl_interpreter::{
     },
 };
 use funboy_cli::{
-    Context,
+    BotData, CommandResult, Context,
     Error::{CommandError, ParseError},
     ParseError::{EmptyInput, UnknownCommand},
-    interpret_input,
+    interpret_bot_commands,
 };
 use funboy_core::{
     self, Funboy,
@@ -256,6 +256,13 @@ async fn main() -> rustyline::Result<()> {
     let rl = Arc::new(Mutex::new(DefaultEditor::new()?));
     let mut ollama_settings = OllamaSettings::default();
     ollama_settings.set_output_limit(MAX_PREDICT);
+
+    let bot_data = BotData {
+        funboy: funboy.clone(),
+        interpreter: create_interpreter(funboy.clone(), rl.clone()).await,
+        ollama_settings: Arc::new(Mutex::new(OllamaSettings::default())),
+    };
+
     loop {
         let mut rl_lock = rl.lock().await;
         let readline = rl_lock.readline(">> ");
@@ -263,20 +270,10 @@ async fn main() -> rustyline::Result<()> {
             Ok(line) => {
                 rl_lock.add_history_entry(&line)?;
                 drop(rl_lock);
-                match interpret_input(
-                    funboy.clone(),
-                    create_interpreter(funboy.clone(), rl.clone()).await,
-                    ollama_settings.clone(),
-                    &line,
-                )
-                .await
-                {
+                match interpret_bot_commands(&bot_data, &line).await {
                     Ok(output) => match output {
-                        funboy_cli::CommandResult::Text(text) => println!("{}", text),
-                        funboy_cli::CommandResult::ContextSwitch(context) => match context {
-                            Context::Normal => {
-                                todo!()
-                            }
+                        CommandResult::Text(text) => println!("{}", text),
+                        CommandResult::ContextSwitch(context) => match context {
                             Context::Generate => {
                                 enter_interactive_generation(funboy.clone(), rl.clone()).await?;
                             }
@@ -284,6 +281,9 @@ async fn main() -> rustyline::Result<()> {
                                 enter_interpreter(funboy.clone(), rl.clone()).await?;
                             }
                         },
+                        CommandResult::Exit => {
+                            break;
+                        }
                     },
                     Err(e) => match e {
                         CommandError(e) => println!("{}", e.to_string()),
