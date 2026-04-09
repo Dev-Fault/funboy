@@ -75,7 +75,7 @@ pub async fn create_interpreter(
     funboy_ctx: FunboyCtx,
     matrix_ctx: MatrixCtx,
 ) -> Arc<Mutex<FslInterpreter>> {
-    let mut interpreter = FslInterpreter::new_unbounded();
+    let mut interpreter = FslInterpreter::new();
     let fsl_ctx = FslCtx::new(funboy_ctx, matrix_ctx);
     interpreter.add_command(SAY, SAY_RULES, create_say_command(fsl_ctx.clone()));
     interpreter.add_command(ASK, ASK_RULES, create_ask_command(fsl_ctx.clone()));
