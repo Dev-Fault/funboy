@@ -1,17 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use fsl_interpreter::{
-    FslInterpreter, InterpreterData,
-    types::{
-        command::{CommandError, Executor},
-        value::Value,
-    },
-};
-use funboy_cli::{
-    ASK, ASK_RULES, BotData, DEFAULT_TIMEOUT_SECS, Permissions, SAY, SAY_RULES,
-    interpret_bot_commands,
-};
-use funboy_core::Funboy;
+use funboy_cli::{FunboyCtx, Permissions, interpret_bot_commands};
 use matrix_sdk::{
     Client, Room, RoomState,
     ruma::{
@@ -30,7 +19,7 @@ use tokio::{
 
 use crate::{
     commands::interpret_matrix_commands,
-    interpreter::{create_ask_command, create_say_command},
+    interpreter::{MatrixCtx, create_interpreter},
 };
 
 mod commands;
@@ -57,7 +46,7 @@ fn markdown_to_html(input: &str) -> String {
 pub async fn on_room_message(
     event: OriginalSyncRoomMessageEvent,
     room: Room,
-    bot_data: Arc<BotData>,
+    funboy_ctx: FunboyCtx,
     pending_ask: Arc<Mutex<Option<(OwnedUserId, oneshot::Sender<String>)>>>,
 ) {
     // First, we need to unpack the message: We only want messages from rooms we are
@@ -83,24 +72,17 @@ pub async fn on_room_message(
     }
 
     tokio::spawn(async move {
-        let funboy = bot_data.funboy.clone();
+        let funboy = funboy_ctx.funboy.clone();
 
-        let mut interpreter = bot_data.interpreter.lock().await;
-        interpreter.add_command(
-            SAY,
-            SAY_RULES,
-            create_say_command(funboy.clone(), room.clone()),
-        );
-        interpreter.add_command(
-            ASK,
-            ASK_RULES,
-            create_ask_command(funboy, room.clone(), pending_ask, event.sender),
-        );
-        drop(interpreter);
+        let interpreter = create_interpreter(
+            funboy_ctx.clone(),
+            MatrixCtx::new(room.clone(), pending_ask, event.sender),
+        )
+        .await;
 
         if text_content.body.starts_with("!") {
             let usr_message = text_content.body.trim_start_matches("!");
-            let result = interpret_matrix_commands(&bot_data, room.clone(), usr_message).await;
+            let result = interpret_matrix_commands(&funboy_ctx, room.clone(), usr_message).await;
             if let Err(err) = result {
                 match err {
                     funboy_cli::CommandError::ExecutionFailed(e) => {
@@ -123,7 +105,8 @@ pub async fn on_room_message(
             }
 
             let result = interpret_bot_commands(
-                &bot_data,
+                &funboy_ctx,
+                interpreter,
                 &Permissions::power_user(),
                 text_content.body.trim_start_matches("!"),
             )

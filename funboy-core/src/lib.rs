@@ -10,14 +10,14 @@ use std::{
 use async_recursion::async_recursion;
 use fsl_interpreter::{
     FslInterpreter, InterpreterData,
-    commands::{INDEX_TYPES, TEXT_TYPES, WHOLE_NUMBER_TYPES},
+    commands::{TEXT_TYPES, WHOLE_NUMBER_TYPES},
     types::{
-        command::{ArgPos, ArgRule, Command, CommandError, Executor, UserCommand},
+        command::{ArgPos, ArgRule, Command, CommandError, Executor},
         value::Value,
     },
 };
 use moka::future::{Cache, CacheBuilder};
-use ollama_rs::{generation::completion::GenerationResponse, models::ModelInfo};
+use ollama_rs::models::ModelInfo;
 use rand::{Rng, distr::uniform::SampleUniform, random_range};
 use regex::Regex;
 use tokio::sync::Mutex;
@@ -67,6 +67,11 @@ impl From<sqlx::Error> for FunboyError {
         eprintln!("{}", value);
         FunboyError::Database(value.to_string())
     }
+}
+
+pub struct OllamaResponse {
+    pub prompt: String,
+    pub generated_text: String,
 }
 
 #[derive(Debug, Clone)]
@@ -517,14 +522,17 @@ impl Funboy {
         ollama_settings: &OllamaSettings,
         prompt: &str,
         interpreter: Arc<Mutex<FslInterpreter>>,
-    ) -> Result<GenerationResponse, FunboyError> {
+    ) -> Result<OllamaResponse, FunboyError> {
         let prompt = self.generate(prompt, interpreter).await?;
         match self
             .ollama_generator
             .generate(&prompt, ollama_settings, model)
             .await
         {
-            Ok(output) => Ok(output),
+            Ok(output) => Ok(OllamaResponse {
+                prompt: prompt,
+                generated_text: output.response,
+            }),
             Err(e) => Err(FunboyError::Ollama(e.to_string())),
         }
     }
@@ -868,6 +876,6 @@ mod core {
             .await
             .unwrap();
 
-        println!("Ollama response: {}", generation_response.response);
+        println!("Ollama response: {}", generation_response.generated_text);
     }
 }

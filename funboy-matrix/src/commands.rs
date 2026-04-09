@@ -1,13 +1,6 @@
 use clap::Parser;
-use funboy_cli::{BotData, CommandError, CommandResult, Permissions};
-use matrix_sdk::{
-    Room,
-    attachment::AttachmentConfig,
-    ruma::{
-        api::client,
-        events::{message::OriginalSyncMessageEvent, room::message::TextMessageEventContent},
-    },
-};
+use funboy_cli::{CommandError, CommandResult, FunboyCtx};
+use matrix_sdk::{Room, attachment::AttachmentConfig};
 
 #[derive(Parser, Debug)]
 enum ImageAction {
@@ -23,7 +16,7 @@ enum MatrixCommand {
 }
 
 pub async fn interpret_matrix_commands(
-    bot_data: &BotData,
+    funboy_ctx: &FunboyCtx,
     room: Room,
     input: &str,
 ) -> Result<CommandResult, CommandError> {
@@ -38,10 +31,9 @@ pub async fn interpret_matrix_commands(
     let mut full_args = vec!["funboy"];
     full_args.extend(&args);
 
-    let funboy = &bot_data.funboy;
-    let ollama_settings = &bot_data.ollama_settings;
+    let funboy = &funboy_ctx.funboy;
+    let ollama_settings = &funboy_ctx.ollama_settings;
 
-    dbg!(input);
     match MatrixCommand::try_parse_from(full_args) {
         Ok(command) => match command {
             MatrixCommand::Image { action } => match action {

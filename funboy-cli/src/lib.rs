@@ -371,14 +371,49 @@ impl Permissions {
     }
 }
 
-pub struct BotData {
+#[derive(Clone)]
+pub struct FunboyCtx {
     pub funboy: Arc<Funboy>,
-    pub interpreter: Arc<Mutex<FslInterpreter>>,
     pub ollama_settings: Arc<Mutex<OllamaSettings>>,
 }
 
+#[derive(Clone)]
+pub struct FslContext {
+    pub funboy_ctx: FunboyCtx,
+    pub interpreter: Arc<Mutex<FslInterpreter>>,
+}
+
+impl FslContext {
+    pub fn new(funboy_ctx: FunboyCtx) -> Self {
+        Self {
+            funboy_ctx: funboy_ctx,
+            interpreter: Arc::new(Mutex::new(FslInterpreter::new())),
+        }
+    }
+
+    pub async fn generate_message(
+        &self,
+        message: &str,
+    ) -> Result<String, fsl_interpreter::types::command::CommandError> {
+        match self
+            .funboy_ctx
+            .funboy
+            .generate(&message, self.interpreter.clone())
+            .await
+        {
+            Ok(gen_msg) => Ok(gen_msg),
+            Err(e) => {
+                return Err(fsl_interpreter::types::command::CommandError::Custom(
+                    e.to_string(),
+                ));
+            }
+        }
+    }
+}
+
 pub async fn interpret_bot_commands(
-    bot_data: &BotData,
+    funboy_ctx: &FunboyCtx,
+    interpreter: Arc<Mutex<FslInterpreter>>,
     permissions: &Permissions,
     input: &str,
 ) -> Result<CommandResult, CommandError> {
@@ -392,8 +427,8 @@ pub async fn interpret_bot_commands(
     let mut full_args = vec!["funboy"];
     full_args.extend(&args);
 
-    let funboy = &bot_data.funboy;
-    let ollama_settings = &bot_data.ollama_settings;
+    let funboy = &funboy_ctx.funboy;
+    let ollama_settings = &funboy_ctx.ollama_settings;
 
     match Command::try_parse_from(full_args) {
         Ok(command) => match command {
@@ -407,7 +442,7 @@ pub async fn interpret_bot_commands(
                 } else if ollama && !permissions.can_use_ollama() {
                     return Err(CommandError::LackingPermission(Permission::OllamaUsage).into());
                 }
-                generate(bot_data, input, file, ollama).await
+                generate(funboy_ctx, interpreter, input, file, ollama).await
             }
             Command::Context { context } => return Ok(CommandResult::ContextSwitch(context)),
             Command::Add {
@@ -817,13 +852,13 @@ async fn add(
 }
 
 async fn generate(
-    bot_data: &BotData,
+    funboy_ctx: &FunboyCtx,
+    interpreter: Arc<Mutex<FslInterpreter>>,
     input: Vec<String>,
     file: bool,
     ollama: bool,
 ) -> Result<CommandResult, CommandError> {
-    let funboy = bot_data.funboy.clone();
-    let interpreter = bot_data.interpreter.clone();
+    let funboy = funboy_ctx.funboy.clone();
 
     let input = input.join(" ");
     let input = if file {
@@ -838,7 +873,7 @@ async fn generate(
         input
     };
     let result = if ollama {
-        let ollama_settings = bot_data.ollama_settings.lock().await;
+        let ollama_settings = funboy_ctx.ollama_settings.lock().await;
         funboy
             .generate_ollama(
                 funboy.get_ollama_model().await,
@@ -847,7 +882,7 @@ async fn generate(
                 interpreter.clone(),
             )
             .await
-            .map(|o| o.response)
+            .map(|o| format!("{}{}", o.prompt, o.generated_text))
     } else {
         funboy.generate(&input, interpreter.clone()).await
     };

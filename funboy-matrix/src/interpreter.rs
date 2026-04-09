@@ -4,7 +4,7 @@ use fsl_interpreter::{
     FslInterpreter, InterpreterData,
     types::{command::Executor, value::Value},
 };
-use funboy_cli::DEFAULT_TIMEOUT_SECS;
+use funboy_cli::{ASK, ASK_RULES, DEFAULT_TIMEOUT_SECS, FunboyCtx, SAY, SAY_RULES};
 use funboy_core::Funboy;
 use matrix_sdk::{
     Room,
@@ -14,19 +14,82 @@ use tokio::sync::{Mutex, oneshot};
 
 use crate::markdown_to_html;
 
-pub fn create_ask_command(
-    funboy: Arc<Funboy>,
-    room: Room,
-    pending_ask: Arc<Mutex<Option<(OwnedUserId, oneshot::Sender<String>)>>>,
-    sender: OwnedUserId,
-) -> Executor {
+#[derive(Clone)]
+pub struct MatrixCtx {
+    pub room: Room,
+    pub pending_ask: Arc<Mutex<Option<(OwnedUserId, oneshot::Sender<String>)>>>,
+    pub sender: OwnedUserId,
+}
+
+impl MatrixCtx {
+    pub fn new(
+        room: Room,
+        pending_ask: Arc<Mutex<Option<(OwnedUserId, oneshot::Sender<String>)>>>,
+        sender: OwnedUserId,
+    ) -> Self {
+        Self {
+            room,
+            pending_ask,
+            sender,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct FslCtx {
+    pub funboy_ctx: FunboyCtx,
+    pub matrix_ctx: MatrixCtx,
+    pub interpreter: Arc<Mutex<FslInterpreter>>,
+}
+
+impl FslCtx {
+    pub fn new(funboy_ctx: FunboyCtx, matrix_ctx: MatrixCtx) -> Self {
+        Self {
+            funboy_ctx: funboy_ctx,
+            matrix_ctx,
+            interpreter: Arc::new(Mutex::new(FslInterpreter::new())),
+        }
+    }
+
+    pub async fn generate_message(
+        &self,
+        message: &str,
+    ) -> Result<String, fsl_interpreter::types::command::CommandError> {
+        match self
+            .funboy_ctx
+            .funboy
+            .generate(&message, self.interpreter.clone())
+            .await
+        {
+            Ok(gen_msg) => Ok(gen_msg),
+            Err(e) => {
+                return Err(fsl_interpreter::types::command::CommandError::Custom(
+                    e.to_string(),
+                ));
+            }
+        }
+    }
+}
+
+pub async fn create_interpreter(
+    funboy_ctx: FunboyCtx,
+    matrix_ctx: MatrixCtx,
+) -> Arc<Mutex<FslInterpreter>> {
+    let mut interpreter = FslInterpreter::new_unbounded();
+    let fsl_ctx = FslCtx::new(funboy_ctx, matrix_ctx);
+    interpreter.add_command(SAY, SAY_RULES, create_say_command(fsl_ctx.clone()));
+    interpreter.add_command(ASK, ASK_RULES, create_ask_command(fsl_ctx.clone()));
+    Arc::new(Mutex::new(interpreter))
+}
+
+pub fn create_ask_command(fsl_ctx: FslCtx) -> Executor {
     let ask_command = {
         move |command: fsl_interpreter::types::command::Command, data: Arc<InterpreterData>| {
-            let room = room.clone();
-            let pending_ask = pending_ask.clone();
-            let sender = sender.clone();
+            let fsl_ctx = fsl_ctx.clone();
+            let room = fsl_ctx.matrix_ctx.room.clone();
+            let sender = fsl_ctx.matrix_ctx.sender.clone();
+            let pending_ask = fsl_ctx.matrix_ctx.pending_ask.clone();
             {
-                let funboy = funboy.clone();
                 async move {
                     let mut values = command.take_args();
 
@@ -38,9 +101,7 @@ pub fn create_ask_command(
                     let question = format!("{}", arg_0);
                     let question = format!("{}\n{}", question, "(enter -STOP- to quit)");
 
-                    let question = funboy
-                        .generate(&question, Arc::new(Mutex::new(FslInterpreter::new())))
-                        .await;
+                    let question = fsl_ctx.generate_message(&question).await;
 
                     let question = match question {
                         Ok(question) => question,
@@ -65,7 +126,7 @@ pub fn create_ask_command(
                                     format!("{}", "user quit the program"),
                                 ));
                             } else {
-                                return Ok(Value::Text(response));
+                                return Ok(Value::Text(fsl_ctx.generate_message(&response).await?));
                             }
                         }
                         Err(e) => {
@@ -81,12 +142,12 @@ pub fn create_ask_command(
     Some(Arc::new(ask_command))
 }
 
-pub fn create_say_command(funboy: Arc<Funboy>, room: Room) -> Executor {
+pub fn create_say_command(fsl_ctx: FslCtx) -> Executor {
     let say_command = {
         move |command: fsl_interpreter::types::command::Command, interpreter_data| {
-            let room = room.clone();
+            let fsl_ctx = fsl_ctx.clone();
+            let room = fsl_ctx.matrix_ctx.room.clone();
             {
-                let funboy = funboy.clone();
                 async move {
                     let mut values = command.take_args();
                     let message = values
@@ -95,9 +156,7 @@ pub fn create_say_command(funboy: Arc<Funboy>, room: Room) -> Executor {
                         .as_text(interpreter_data)
                         .await?;
 
-                    let message = funboy
-                        .generate(&message, Arc::new(Mutex::new(FslInterpreter::new())))
-                        .await;
+                    let message = fsl_ctx.generate_message(&message).await;
 
                     match message {
                         Ok(output) => {

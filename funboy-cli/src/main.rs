@@ -5,67 +5,93 @@ use fsl_interpreter::{
     types::{command::Executor, value::Value},
 };
 use funboy_cli::{
-    ASK, ASK_RULES, BotData, CommandResult, Context, DEFAULT_TIMEOUT_SECS, Permissions, SAY,
+    ASK, ASK_RULES, CommandResult, Context, DEFAULT_TIMEOUT_SECS, FunboyCtx, Permissions, SAY,
     SAY_RULES, get_env, get_funboy, interpret_bot_commands,
 };
-use funboy_core::{
-    Funboy,
-    ollama::{MAX_PREDICT, OllamaSettings},
-};
+use funboy_core::ollama::{MAX_PREDICT, OllamaSettings};
 use rustyline::DefaultEditor;
 use tokio::sync::Mutex;
 
-pub fn create_say_command(funboy: Arc<Funboy>) -> Executor {
+#[derive(Clone)]
+pub struct FslContext {
+    pub funboy_ctx: FunboyCtx,
+    pub interpreter: Arc<Mutex<FslInterpreter>>,
+}
+
+impl FslContext {
+    pub fn new(funboy_ctx: FunboyCtx) -> Self {
+        Self {
+            funboy_ctx: funboy_ctx,
+            interpreter: Arc::new(Mutex::new(FslInterpreter::new())),
+        }
+    }
+
+    pub async fn generate_message(
+        &self,
+        message: &str,
+    ) -> Result<String, fsl_interpreter::types::command::CommandError> {
+        match self
+            .funboy_ctx
+            .funboy
+            .generate(&message, self.interpreter.clone())
+            .await
+        {
+            Ok(gen_msg) => Ok(gen_msg),
+            Err(e) => {
+                return Err(fsl_interpreter::types::command::CommandError::Custom(
+                    e.to_string(),
+                ));
+            }
+        }
+    }
+}
+
+fn create_say_command(fsl_ctx: FslContext) -> Executor {
     let say_command = {
         move |command: fsl_interpreter::types::command::Command, interpreter_data| {
-            let funboy = funboy.clone();
-            async move {
-                let mut values = command.take_args();
-                let message = values
-                    .pop_front()
-                    .unwrap()
-                    .as_text(interpreter_data)
-                    .await?;
+            let fsl_ctx = fsl_ctx.clone();
+            {
+                async move {
+                    let mut values = command.take_args();
+                    let message = values
+                        .pop_front()
+                        .unwrap()
+                        .as_text(interpreter_data)
+                        .await?;
 
-                let message = funboy
-                    .generate(&message, Arc::new(Mutex::new(FslInterpreter::new())))
-                    .await;
+                    let message = fsl_ctx.generate_message(&message).await;
 
-                match message {
-                    Ok(output) => println!("{}", output),
-                    Err(e) => {
-                        return Err(fsl_interpreter::types::command::CommandError::Custom(
-                            format!("{}", e.to_string()),
-                        ));
+                    match message {
+                        Ok(output) => println!("{}", output),
+                        Err(e) => {
+                            return Err(fsl_interpreter::types::command::CommandError::Custom(
+                                format!("{}", e.to_string()),
+                            ));
+                        }
                     }
-                }
 
-                Ok(Value::None)
+                    Ok(Value::None)
+                }
             }
         }
     };
     Some(Arc::new(say_command))
 }
 
-pub fn create_ask_command(funboy: Arc<Funboy>, rl: Arc<Mutex<DefaultEditor>>) -> Executor {
+fn create_ask_command(fsl_ctx: FslContext, rl: Arc<Mutex<DefaultEditor>>) -> Executor {
     let ask_command = {
         move |command: fsl_interpreter::types::command::Command, data: Arc<InterpreterData>| {
-            let funboy = funboy.clone();
+            let fsl_ctx = fsl_ctx.clone();
             let rl = rl.clone();
             async move {
                 let mut values = command.take_args();
 
                 let arg_0 = values.pop_front().unwrap().as_text(data.clone()).await?;
-                let arg_1 = values
-                    .pop_front()
-                    .unwrap_or(Value::Float(DEFAULT_TIMEOUT_SECS));
 
                 let question = format!("{}", arg_0);
                 let question = format!("{}\n{}", question, "(enter -STOP- to quit)");
 
-                let question = funboy
-                    .generate(&question, Arc::new(Mutex::new(FslInterpreter::new())))
-                    .await;
+                let question = fsl_ctx.generate_message(&question).await;
 
                 let question = match question {
                     Ok(question) => question,
@@ -87,7 +113,7 @@ pub fn create_ask_command(funboy: Arc<Funboy>, rl: Arc<Mutex<DefaultEditor>>) ->
                                 format!("{}", "user quit the program"),
                             ))
                         } else {
-                            Ok(Value::Text(output))
+                            Ok(Value::Text(fsl_ctx.generate_message(&output).await?))
                         }
                     }
                     Err(e) => {
@@ -103,10 +129,10 @@ pub fn create_ask_command(funboy: Arc<Funboy>, rl: Arc<Mutex<DefaultEditor>>) ->
 }
 
 pub async fn enter_interactive_generation(
-    funboy: Arc<Funboy>,
+    funboy_ctx: FunboyCtx,
     rl: Arc<Mutex<DefaultEditor>>,
 ) -> rustyline::Result<()> {
-    let interpreter = create_interpreter(funboy.clone(), rl.clone()).await;
+    let interpreter = create_interpreter(funboy_ctx.clone(), rl.clone()).await;
     loop {
         let mut rl = rl.lock().await;
         let readline = rl.readline("G> ");
@@ -114,7 +140,11 @@ pub async fn enter_interactive_generation(
             Ok(input) => {
                 rl.add_history_entry(&input)?;
                 drop(rl);
-                match funboy.generate(&input, interpreter.clone()).await {
+                match funboy_ctx
+                    .funboy
+                    .generate(&input, interpreter.clone())
+                    .await
+                {
                     Ok(output) => println!("{}", output),
                     Err(e) => {
                         eprint!("{:?}", e);
@@ -132,10 +162,10 @@ pub async fn enter_interactive_generation(
 }
 
 pub async fn enter_interpreter(
-    funboy: Arc<Funboy>,
+    funboy_ctx: FunboyCtx,
     rl: Arc<Mutex<DefaultEditor>>,
 ) -> rustyline::Result<()> {
-    let interpreter = create_interpreter(funboy.clone(), rl.clone()).await;
+    let interpreter = create_interpreter(funboy_ctx, rl.clone()).await;
     loop {
         let mut rl = rl.lock().await;
         let readline = rl.readline("I> ");
@@ -165,19 +195,18 @@ pub async fn enter_interpreter(
 }
 
 async fn create_interpreter(
-    funboy: Arc<Funboy>,
+    funboy_ctx: FunboyCtx,
     rl: Arc<Mutex<DefaultEditor>>,
 ) -> Arc<Mutex<FslInterpreter>> {
-    let interpreter = Arc::new(Mutex::new(FslInterpreter::new_unbounded()));
-    let mut interpreter_lock = interpreter.lock().await;
-    interpreter_lock.add_command(SAY, SAY_RULES, create_say_command(funboy.clone()));
-    interpreter_lock.add_command(
+    let mut interpreter = FslInterpreter::new_unbounded();
+    let fsl_context = FslContext::new(funboy_ctx);
+    interpreter.add_command(SAY, SAY_RULES, create_say_command(fsl_context.clone()));
+    interpreter.add_command(
         ASK,
         ASK_RULES,
-        create_ask_command(funboy.clone(), rl.clone()),
+        create_ask_command(fsl_context.clone(), rl.clone()),
     );
-    drop(interpreter_lock);
-    interpreter
+    Arc::new(Mutex::new(interpreter))
 }
 
 #[tokio::main]
@@ -189,9 +218,8 @@ async fn main() -> rustyline::Result<()> {
     let mut ollama_settings = OllamaSettings::default();
     ollama_settings.set_output_limit(MAX_PREDICT);
 
-    let bot_data = BotData {
+    let funboy_ctx = FunboyCtx {
         funboy: funboy.clone(),
-        interpreter: create_interpreter(funboy.clone(), rl.clone()).await,
         ollama_settings: Arc::new(Mutex::new(OllamaSettings::default())),
     };
 
@@ -204,15 +232,23 @@ async fn main() -> rustyline::Result<()> {
             Ok(line) => {
                 rl_lock.add_history_entry(&line)?;
                 drop(rl_lock);
-                match interpret_bot_commands(&bot_data, &permissions, &line).await {
+                match interpret_bot_commands(
+                    &funboy_ctx.clone(),
+                    create_interpreter(funboy_ctx.clone(), rl.clone()).await,
+                    &permissions,
+                    &line,
+                )
+                .await
+                {
                     Ok(output) => match output {
                         CommandResult::Text(text) => println!("{}", text),
                         CommandResult::ContextSwitch(context) => match context {
                             Context::Generate => {
-                                enter_interactive_generation(funboy.clone(), rl.clone()).await?;
+                                enter_interactive_generation(funboy_ctx.clone(), rl.clone())
+                                    .await?;
                             }
                             Context::FSL => {
-                                enter_interpreter(funboy.clone(), rl.clone()).await?;
+                                enter_interpreter(funboy_ctx.clone(), rl.clone()).await?;
                             }
                         },
                         CommandResult::None => {

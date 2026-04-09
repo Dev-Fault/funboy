@@ -1,7 +1,7 @@
 use std::{env, sync::Arc, time::Duration};
 
 use fsl_interpreter::FslInterpreter;
-use funboy_cli::{BotData, get_env, get_funboy};
+use funboy_cli::{FunboyCtx, get_env, get_funboy};
 use funboy_core::ollama::OllamaSettings;
 use funboy_matrix::{on_room_message, on_stripped_state_member};
 use matrix_sdk::{
@@ -58,17 +58,16 @@ async fn main() {
 
     let funboy = Arc::new(get_funboy(&get_env()).await);
 
-    let bot_data = Arc::new(BotData {
+    let funboy_ctx = FunboyCtx {
         funboy: funboy.clone(),
-        interpreter: Arc::new(Mutex::new(FslInterpreter::new())),
         ollama_settings: Arc::new(Mutex::new(OllamaSettings::default())),
-    });
+    };
 
     let pending_ask: Arc<Mutex<Option<(OwnedUserId, oneshot::Sender<String>)>>> =
         Arc::new(Mutex::new(None));
 
     client.add_event_handler(move |event: OriginalSyncRoomMessageEvent, room: Room| {
-        on_room_message(event, room, bot_data.clone(), pending_ask)
+        on_room_message(event, room, funboy_ctx, pending_ask)
     });
 
     let settings = SyncSettings::default().token(sync_token);
