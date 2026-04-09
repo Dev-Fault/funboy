@@ -19,4 +19,6 @@ async-recursion = "1.1.1"
 fsl_interpreter = { version = "0.1.0", path = "../../fsl_interpreter" }
 tracing-subscriber = "0.3.23"
 pulldown-cmark = "0.13.3"
+clap = "4.6.0"
+mime = "0.3.17"
 

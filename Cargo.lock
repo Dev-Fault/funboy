@@ -1470,11 +1470,13 @@ name = "funboy-matrix"
 version = "0.1.0"
 dependencies = [
  "async-recursion",
+ "clap",
  "dotenvy",
  "fsl_interpreter",
  "funboy-cli",
  "funboy-core",
  "matrix-sdk",
+ "mime",
  "ollama-rs",
  "pulldown-cmark 0.13.3",
  "rand 0.9.2",
