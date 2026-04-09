@@ -75,42 +75,23 @@ pub async fn get_funboy(env: &FunboyEnv) -> Funboy {
     Funboy::new(TemplateDatabase::new(pool))
 }
 
-#[derive(Debug)]
-pub enum ParseError {
-    EmptyInput,
-    UnknownCommand(String),
-    MissingArg(String),
-}
-
-impl Into<Error> for ParseError {
-    fn into(self) -> Error {
-        Error::ParseError(self)
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum CommandError {
     ExecutionFailed(String),
+    LackingPermission(Permission),
+    UnknownCommand(String),
 }
 
 impl ToString for CommandError {
     fn to_string(&self) -> String {
         match self {
             CommandError::ExecutionFailed(error_text) => error_text.clone(),
+            CommandError::LackingPermission(permission) => {
+                format!("User lacks {} permission", permission.to_string())
+            }
+            CommandError::UnknownCommand(e) => e.clone(),
         }
     }
-}
-
-impl Into<Error> for CommandError {
-    fn into(self) -> Error {
-        Error::CommandError(self)
-    }
-}
-
-#[derive(Debug)]
-pub enum Error {
-    CommandError(CommandError),
-    ParseError(ParseError),
 }
 
 const GENERATE: &str = "generate";
@@ -137,6 +118,7 @@ impl FromStr for Context {
 pub enum CommandResult {
     Text(String),
     ContextSwitch(Context),
+    None,
     Exit,
 }
 
@@ -159,6 +141,66 @@ impl FromStr for ListStyle {
             _ => Err(format!("Unknown context {}", s)),
         }
     }
+}
+
+const MODEL: &str = "model";
+const MODELS: &str = "models";
+const SETTINGS: &str = "settings";
+
+#[derive(Parser, Debug, Copy, Clone)]
+enum OllamaListOption {
+    Model,
+    Models,
+    Settings,
+}
+
+impl FromStr for OllamaListOption {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            MODEL => Ok(OllamaListOption::Model),
+            MODELS => Ok(OllamaListOption::Models),
+            SETTINGS => Ok(OllamaListOption::Settings),
+            _ => Err(format!("Unknown list option {}", s)),
+        }
+    }
+}
+
+#[derive(Parser, Debug, Clone)]
+enum OllamaSetOptions {
+    #[command(name = "model")]
+    Model { model: String },
+    #[command(name = "system_prompt")]
+    SystemPrompt {
+        #[arg(trailing_var_arg = true)]
+        system_prompt: Vec<String>,
+    },
+    #[command(name = "template")]
+    Template { template: String },
+    #[command(name = "output_limit")]
+    OutputLimit { limit: u16 },
+    #[command(name = "temperature")]
+    Temperature { temperature: f32 },
+    #[command(name = "top_k")]
+    TopK { top_k: u32 },
+    #[command(name = "top_p")]
+    TopP { top_p: f32 },
+    #[command(name = "repeat_penalty")]
+    RepeatPenalty { repeat_penalty: f32 },
+}
+
+#[derive(Parser, Debug)]
+enum OllamaAction {
+    List {
+        #[arg(value_parser = clap::value_parser!(OllamaListOption))]
+        option: OllamaListOption,
+    },
+
+    Set {
+        #[command(subcommand)]
+        option: OllamaSetOptions,
+    },
 }
 
 #[derive(Parser, Debug)]
@@ -229,75 +271,6 @@ enum Command {
     Exit,
 }
 
-const MODEL: &str = "model";
-const MODELS: &str = "models";
-const SETTINGS: &str = "settings";
-
-#[derive(Parser, Debug, Copy, Clone)]
-enum OllamaListOption {
-    Model,
-    Models,
-    Settings,
-}
-
-impl FromStr for OllamaListOption {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            MODEL => Ok(OllamaListOption::Model),
-            MODELS => Ok(OllamaListOption::Models),
-            SETTINGS => Ok(OllamaListOption::Settings),
-            _ => Err(format!("Unknown list option {}", s)),
-        }
-    }
-}
-
-#[derive(Parser, Debug, Clone)]
-enum OllamaSetOptions {
-    #[command(name = "model")]
-    Model { model: String },
-    #[command(name = "system_prompt")]
-    SystemPrompt {
-        #[arg(trailing_var_arg = true)]
-        system_prompt: Vec<String>,
-    },
-    #[command(name = "template")]
-    Template { template: String },
-    #[command(name = "output_limit")]
-    OutputLimit { limit: u16 },
-    #[command(name = "temperature")]
-    Temperature { temperature: f32 },
-    #[command(name = "top_k")]
-    TopK { top_k: u32 },
-    #[command(name = "top_p")]
-    TopP { top_p: f32 },
-    #[command(name = "repeat_penalty")]
-    RepeatPenalty { repeat_penalty: f32 },
-}
-/*
-#[derive(Copy, Clone)]
-pub struct OllamaParameters {
-    pub temperature: Option<f32>,
-    pub repeat_penalty: Option<f32>,
-    pub top_k: Option<u32>,
-    pub top_p: Option<f32>,
-}
-*/
-
-#[derive(Parser, Debug)]
-enum OllamaAction {
-    List {
-        #[arg(value_parser = clap::value_parser!(OllamaListOption))]
-        option: OllamaListOption,
-    },
-
-    Set {
-        #[command(subcommand)]
-        option: OllamaSetOptions,
-    },
-}
-
 fn parse_substitutes<'a>(input: &'a str, single: bool) -> Vec<&'a str> {
     if single {
         return vec![input];
@@ -337,6 +310,67 @@ fn parse_substitutes<'a>(input: &'a str, single: bool) -> Vec<&'a str> {
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum Permission {
+    FileAccess,
+    Add,
+    Modify,
+    OllamaUsage,
+}
+
+impl ToString for Permission {
+    fn to_string(&self) -> String {
+        match self {
+            Permission::FileAccess => "file access",
+            Permission::Add => "add",
+            Permission::Modify => "modify",
+            Permission::OllamaUsage => "ollama usage",
+        }
+        .to_string()
+    }
+}
+
+pub struct Permissions(Vec<Permission>);
+
+impl Permissions {
+    pub fn all() -> Self {
+        Permissions(vec![
+            Permission::FileAccess,
+            Permission::Add,
+            Permission::Modify,
+            Permission::OllamaUsage,
+        ])
+    }
+
+    pub fn power_user() -> Self {
+        Permissions(vec![
+            Permission::Add,
+            Permission::Modify,
+            Permission::OllamaUsage,
+        ])
+    }
+
+    pub fn user() -> Self {
+        Permissions(vec![Permission::Add, Permission::OllamaUsage])
+    }
+
+    pub fn can_access_files(&self) -> bool {
+        self.0.contains(&Permission::FileAccess)
+    }
+
+    pub fn can_add(&self) -> bool {
+        self.0.contains(&Permission::Add)
+    }
+
+    pub fn can_modify(&self) -> bool {
+        self.0.contains(&Permission::Modify)
+    }
+
+    pub fn can_use_ollama(&self) -> bool {
+        self.0.contains(&Permission::OllamaUsage)
+    }
+}
+
 pub struct BotData {
     pub funboy: Arc<Funboy>,
     pub interpreter: Arc<Mutex<FslInterpreter>>,
@@ -345,11 +379,12 @@ pub struct BotData {
 
 pub async fn interpret_bot_commands(
     bot_data: &BotData,
+    permissions: &Permissions,
     input: &str,
-) -> Result<CommandResult, Error> {
+) -> Result<CommandResult, CommandError> {
     let input = input.trim();
     if input.is_empty() {
-        return Err(ParseError::EmptyInput.into());
+        return Ok(CommandResult::None);
     };
 
     let args: Vec<&str> = input.split_whitespace().collect();
@@ -358,7 +393,6 @@ pub async fn interpret_bot_commands(
     full_args.extend(&args);
 
     let funboy = &bot_data.funboy;
-    let interpreter = &bot_data.interpreter;
     let ollama_settings = &bot_data.ollama_settings;
 
     match Command::try_parse_from(full_args) {
@@ -368,40 +402,12 @@ pub async fn interpret_bot_commands(
                 file,
                 ollama,
             } => {
-                let input = input.join(" ");
-                let input = if file {
-                    let input = match std::fs::read_to_string(input) {
-                        Ok(input) => input,
-                        Err(e) => {
-                            return Err(Error::CommandError(CommandError::ExecutionFailed(
-                                e.to_string(),
-                            )));
-                        }
-                    };
-                    input
-                } else {
-                    input
-                };
-                let result = if ollama {
-                    let ollama_settings = ollama_settings.lock().await;
-                    funboy
-                        .generate_ollama(
-                            funboy.get_ollama_model().await,
-                            &ollama_settings,
-                            &input,
-                            interpreter.clone(),
-                        )
-                        .await
-                        .map(|o| o.response)
-                } else {
-                    funboy.generate(&input, interpreter.clone()).await
-                };
-                match result {
-                    Ok(output) => return Ok(CommandResult::Text(output)),
-                    Err(e) => {
-                        return Err(CommandError::ExecutionFailed(e.to_string()).into());
-                    }
-                };
+                if file && !permissions.can_access_files() {
+                    return Err(CommandError::LackingPermission(Permission::FileAccess).into());
+                } else if ollama && !permissions.can_use_ollama() {
+                    return Err(CommandError::LackingPermission(Permission::OllamaUsage).into());
+                }
+                generate(bot_data, input, file, ollama).await
             }
             Command::Context { context } => return Ok(CommandResult::ContextSwitch(context)),
             Command::Add {
@@ -409,264 +415,49 @@ pub async fn interpret_bot_commands(
                 substitutes,
                 single,
             } => {
-                let substitutes = substitutes.join(" ");
-                let substitutes: Vec<&str> = parse_substitutes(&substitutes, single);
-                if substitutes.len() > 0 {
-                    let result = funboy.add_substitutes(&template, &substitutes).await;
-                    match result {
-                        Ok(receipt) => {
-                            let output = format!(
-                                "added: {}\nignored: {}",
-                                receipt.updated_to_string(),
-                                receipt.ignored_to_string()
-                            );
-                            return Ok(CommandResult::Text(output));
-                        }
-                        Err(e) => {
-                            return Err(CommandError::ExecutionFailed(e.to_string()).into());
-                        }
-                    }
-                } else {
-                    let result = funboy.add_substitutes(&template, &vec![]).await;
-                    match result {
-                        Ok(_) => {
-                            let output = format!("created {}", template);
-                            return Ok(CommandResult::Text(output));
-                        }
-                        Err(e) => {
-                            return Err(CommandError::ExecutionFailed(e.to_string()).into());
-                        }
-                    }
+                if !permissions.can_add() {
+                    return Err(CommandError::LackingPermission(Permission::Add).into());
                 }
+                add(funboy, template, substitutes, single).await
             }
             Command::Delete {
                 template,
                 substitutes,
                 single,
             } => {
-                let substitutes = substitutes.join(" ");
-                let substitutes: Vec<&str> = parse_substitutes(&substitutes, single);
-
-                if substitutes.len() > 0 {
-                    let result = funboy.delete_substitutes(&template, &substitutes).await;
-                    match result {
-                        Ok(receipt) => {
-                            let output = format!(
-                                "removed: {}\nignored: {}",
-                                receipt.updated_to_string(),
-                                receipt.ignored_to_string()
-                            );
-                            return Ok(CommandResult::Text(output));
-                        }
-                        Err(e) => {
-                            return Err(CommandError::ExecutionFailed(e.to_string()).into());
-                        }
-                    }
-                } else {
-                    let result = funboy.delete_template(&template).await;
-                    match result {
-                        Ok(deleted_template) => {
-                            let output = if deleted_template.is_some() {
-                                format!("deleted {}", template)
-                            } else {
-                                format!("{} was not present in database", template)
-                            };
-                            return Ok(CommandResult::Text(output));
-                        }
-                        Err(e) => {
-                            return Err(CommandError::ExecutionFailed(e.to_string()).into());
-                        }
-                    }
+                if !permissions.can_modify() {
+                    return Err(CommandError::LackingPermission(Permission::Modify).into());
                 }
+                delete(funboy, template, substitutes, single).await
             }
             Command::List {
                 template,
                 search_term,
                 list_style,
-            } => match template {
-                Some(template) => {
-                    let subs = funboy
-                        .get_substitutes(
-                            &template,
-                            search_term.as_deref(),
-                            OrderBy::Default,
-                            Limit::None,
-                        )
-                        .await;
-                    match subs {
-                        Ok(subs) => match list_style {
-                            ListStyle::Default => {
-                                let subs: Vec<String> =
-                                    subs.iter().map(|s| s.name.to_string()).collect();
-                                return Ok(CommandResult::Text(subs.join(" ")));
-                            }
-                            ListStyle::Id => {
-                                let subs: Vec<String> =
-                                    subs.iter().map(|s| s.id.to_string()).collect();
-                                return Ok(CommandResult::Text(subs.join(" ")));
-                            }
-                        },
-                        Err(e) => {
-                            return Err(CommandError::ExecutionFailed(e.to_string()).into());
-                        }
-                    }
+            } => list(funboy, template, search_term, list_style).await,
+            Command::Ollama { action } => {
+                if !permissions.can_use_ollama() {
+                    return Err(CommandError::LackingPermission(Permission::OllamaUsage).into());
                 }
-                None => {
-                    let subs = funboy
-                        .get_templates(search_term.as_deref(), OrderBy::Default, Limit::None)
-                        .await;
-                    match subs {
-                        Ok(subs) => {
-                            let subs: Vec<String> =
-                                subs.iter().map(|s| s.name.to_string()).collect();
-                            return Ok(CommandResult::Text(subs.join(" ")));
-                        }
-                        Err(e) => {
-                            return Err(CommandError::ExecutionFailed(e.to_string()).into());
-                        }
-                    }
-                }
-            },
-            Command::Ollama { action } => match action {
-                OllamaAction::List { option } => match option {
-                    OllamaListOption::Model => {
-                        let model = funboy.get_ollama_model().await;
-                        match model {
-                            Some(model) => return Ok(CommandResult::Text(model)),
-                            None => {
-                                return Ok(CommandResult::Text(
-                                    "No model currently set".to_string(),
-                                ));
-                            }
-                        }
-                    }
-                    OllamaListOption::Models => {
-                        let models = funboy.get_ollama_models().await;
-                        match models {
-                            Ok(models) => return Ok(CommandResult::Text(models.join("\n"))),
-                            Err(e) => {
-                                return Err(CommandError::ExecutionFailed(e.to_string()).into());
-                            }
-                        }
-                    }
-                    OllamaListOption::Settings => {
-                        let ollama_settings = ollama_settings.lock().await;
-                        let settings_string = ollama_settings.to_string();
-                        return Ok(CommandResult::Text(settings_string));
-                    }
-                },
-                OllamaAction::Set { option } => match option {
-                    OllamaSetOptions::SystemPrompt { system_prompt } => {
-                        let mut ollama_settings = ollama_settings.lock().await;
-                        let system_prompt = system_prompt.join(" ");
-                        ollama_settings.set_system_prompt(&system_prompt);
-                        drop(ollama_settings);
-                        Ok(CommandResult::Text(format!(
-                            "Set ollama system prompt to {}",
-                            system_prompt
-                        )))
-                    }
-                    OllamaSetOptions::Model { model } => {
-                        funboy.set_ollama_model(Some(model.to_string())).await;
-                        return Ok(CommandResult::Text(format!("Set model to {}", model)));
-                    }
-                    OllamaSetOptions::Template { template } => {
-                        let mut ollama_settings = ollama_settings.lock().await;
-                        ollama_settings.set_template(&template);
-                        drop(ollama_settings);
-                        Ok(CommandResult::Text(format!(
-                            "Set ollama template to {}",
-                            template
-                        )))
-                    }
-                    OllamaSetOptions::OutputLimit { limit } => {
-                        let mut ollama_settings = ollama_settings.lock().await;
-                        ollama_settings.set_output_limit(limit);
-                        drop(ollama_settings);
-                        Ok(CommandResult::Text(format!(
-                            "Set ollama output limit to {}",
-                            limit
-                        )))
-                    }
-                    OllamaSetOptions::Temperature { temperature } => {
-                        let mut ollama_settings = ollama_settings.lock().await;
-                        ollama_settings.set_temperature(temperature);
-                        drop(ollama_settings);
-                        Ok(CommandResult::Text(format!(
-                            "Set ollama temperature limit to {}",
-                            temperature
-                        )))
-                    }
-                    OllamaSetOptions::TopK { top_k } => {
-                        let mut ollama_settings = ollama_settings.lock().await;
-                        ollama_settings.set_top_k(top_k);
-                        drop(ollama_settings);
-                        Ok(CommandResult::Text(format!(
-                            "Set ollama top_k to {}",
-                            top_k
-                        )))
-                    }
-                    OllamaSetOptions::TopP { top_p } => {
-                        let mut ollama_settings = ollama_settings.lock().await;
-                        ollama_settings.set_top_p(top_p);
-                        drop(ollama_settings);
-                        Ok(CommandResult::Text(format!(
-                            "Set ollama top_p to {}",
-                            top_p
-                        )))
-                    }
-                    OllamaSetOptions::RepeatPenalty { repeat_penalty } => {
-                        let mut ollama_settings = ollama_settings.lock().await;
-                        ollama_settings.set_repeat_penalty(repeat_penalty);
-                        drop(ollama_settings);
-                        Ok(CommandResult::Text(format!(
-                            "Set ollama repeat penalty to {}",
-                            repeat_penalty
-                        )))
-                    }
-                },
-            },
+                ollama(funboy, ollama_settings, action).await
+            }
             Command::Copy {
                 from_template,
                 to_template,
             } => {
-                let result = funboy.copy_substitutes(&from_template, &to_template).await;
-                match result {
-                    Ok(receipt) => {
-                        let output = format!(
-                            "{}\ncopied from template {} to {}",
-                            receipt
-                                .iter()
-                                .map(|s| s.name.clone())
-                                .collect::<Vec<String>>()
-                                .join(" "),
-                            from_template,
-                            to_template,
-                        );
-                        return Ok(CommandResult::Text(output));
-                    }
-                    Err(e) => return Err(CommandError::ExecutionFailed(e.to_string()).into()),
+                if !permissions.can_modify() {
+                    return Err(CommandError::LackingPermission(Permission::Modify).into());
                 }
+                copy(funboy, from_template, to_template).await
             }
             Command::Rename {
                 from_template,
                 to_template,
             } => {
-                let result = funboy.rename_template(&from_template, &to_template).await;
-                match result {
-                    Ok(receipt) => match receipt {
-                        Some(_) => {
-                            let output = format!("renamed {} to {}", from_template, to_template);
-                            return Ok(CommandResult::Text(output));
-                        }
-                        None => {
-                            let output =
-                                format!("no template named {} in database", from_template,);
-                            return Ok(CommandResult::Text(output));
-                        }
-                    },
-                    Err(e) => return Err(CommandError::ExecutionFailed(e.to_string()).into()),
+                if !permissions.can_modify() {
+                    return Err(CommandError::LackingPermission(Permission::Modify).into());
                 }
+                rename(funboy, from_template, to_template).await
             }
             Command::Replace {
                 template,
@@ -674,74 +465,396 @@ pub async fn interpret_bot_commands(
                 with_substitute,
                 id,
             } => {
-                if id {
-                    match substitute.parse::<i64>() {
-                        Ok(id) => {
-                            let result =
-                                funboy.replace_substitute_by_id(id, &with_substitute).await;
-                            match result {
-                                Ok(sub) => match sub {
-                                    Some(_) => {
-                                        let output = format!(
-                                            "replaced substitute with id \n{}\nwith \n{}",
-                                            id, with_substitute
-                                        );
-                                        return Ok(CommandResult::Text(output));
-                                    }
-                                    None => {
-                                        let output =
-                                            format!("no substitute with id {} in database", id);
-                                        return Ok(CommandResult::Text(output));
-                                    }
-                                },
-                                Err(e) => {
-                                    return Err(CommandError::ExecutionFailed(e.to_string()).into());
-                                }
-                            }
-                        }
-                        Err(e) => return Err(CommandError::ExecutionFailed(e.to_string()).into()),
-                    }
-                } else {
-                    if let Some(template) = template {
-                        let result = funboy
-                            .replace_substitute(&template, &substitute, &with_substitute)
-                            .await;
-                        match result {
-                            Ok(sub) => match sub {
-                                Some(_) => {
-                                    let output = format!(
-                                        "replaced substitute \n{}\nwith \n{}",
-                                        substitute, with_substitute
-                                    );
-                                    return Ok(CommandResult::Text(output));
-                                }
-                                None => {
-                                    let output = format!("no substitute \n{}\nin database", id);
-                                    return Ok(CommandResult::Text(output));
-                                }
-                            },
-                            Err(e) => {
-                                return Err(CommandError::ExecutionFailed(e.to_string()).into());
-                            }
-                        }
-                    } else {
-                        return Err(CommandError::ExecutionFailed(format!(
-                            "must include template name when replacing substitute by name"
-                        ))
-                        .into());
-                    }
+                if !permissions.can_modify() {
+                    return Err(CommandError::LackingPermission(Permission::Modify).into());
                 }
+                replace(funboy, template, substitute, with_substitute, id).await
             }
             Command::Exit => Ok(CommandResult::Exit),
         },
-        Err(e) => Err(Error::ParseError(ParseError::UnknownCommand(e.to_string()))),
+        Err(e) => Err(CommandError::UnknownCommand(e.to_string())),
     }
+}
 
-    /*
-    match command {
-        Command::Help => todo!(),
-        Command::ResetOllamaTemplate => todo!(),
-        Command::Unknown => return Err(ParseError::UnknownCommand(command_str.to_string()).into()),
+async fn replace(
+    funboy: &Arc<Funboy>,
+    template: Option<String>,
+    substitute: String,
+    with_substitute: String,
+    id: bool,
+) -> Result<CommandResult, CommandError> {
+    if id {
+        match substitute.parse::<i64>() {
+            Ok(id) => {
+                let result = funboy.replace_substitute_by_id(id, &with_substitute).await;
+                match result {
+                    Ok(sub) => match sub {
+                        Some(_) => {
+                            let output = format!(
+                                "replaced substitute with id \n{}\nwith \n{}",
+                                id, with_substitute
+                            );
+                            return Ok(CommandResult::Text(output));
+                        }
+                        None => {
+                            let output = format!("no substitute with id {} in database", id);
+                            return Ok(CommandResult::Text(output));
+                        }
+                    },
+                    Err(e) => {
+                        return Err(CommandError::ExecutionFailed(e.to_string()).into());
+                    }
+                }
+            }
+            Err(e) => return Err(CommandError::ExecutionFailed(e.to_string()).into()),
+        }
+    } else {
+        if let Some(template) = template {
+            let result = funboy
+                .replace_substitute(&template, &substitute, &with_substitute)
+                .await;
+            match result {
+                Ok(sub) => match sub {
+                    Some(_) => {
+                        let output = format!(
+                            "replaced substitute \n{}\nwith \n{}",
+                            substitute, with_substitute
+                        );
+                        return Ok(CommandResult::Text(output));
+                    }
+                    None => {
+                        let output = format!("no substitute \n{}\nin database", id);
+                        return Ok(CommandResult::Text(output));
+                    }
+                },
+                Err(e) => {
+                    return Err(CommandError::ExecutionFailed(e.to_string()).into());
+                }
+            }
+        } else {
+            return Err(CommandError::ExecutionFailed(format!(
+                "must include template name when replacing substitute by name"
+            ))
+            .into());
+        }
     }
-    */
+}
+
+async fn rename(
+    funboy: &Arc<Funboy>,
+    from_template: String,
+    to_template: String,
+) -> Result<CommandResult, CommandError> {
+    let result = funboy.rename_template(&from_template, &to_template).await;
+    match result {
+        Ok(receipt) => match receipt {
+            Some(_) => {
+                let output = format!("renamed {} to {}", from_template, to_template);
+                return Ok(CommandResult::Text(output));
+            }
+            None => {
+                let output = format!("no template named {} in database", from_template,);
+                return Ok(CommandResult::Text(output));
+            }
+        },
+        Err(e) => return Err(CommandError::ExecutionFailed(e.to_string()).into()),
+    }
+}
+
+async fn copy(
+    funboy: &Arc<Funboy>,
+    from_template: String,
+    to_template: String,
+) -> Result<CommandResult, CommandError> {
+    let result = funboy.copy_substitutes(&from_template, &to_template).await;
+    match result {
+        Ok(receipt) => {
+            let output = format!(
+                "{}\ncopied from template {} to {}",
+                receipt
+                    .iter()
+                    .map(|s| s.name.clone())
+                    .collect::<Vec<String>>()
+                    .join(" "),
+                from_template,
+                to_template,
+            );
+            return Ok(CommandResult::Text(output));
+        }
+        Err(e) => return Err(CommandError::ExecutionFailed(e.to_string()).into()),
+    }
+}
+
+async fn ollama(
+    funboy: &Arc<Funboy>,
+    ollama_settings: &Arc<Mutex<OllamaSettings>>,
+    action: OllamaAction,
+) -> Result<CommandResult, CommandError> {
+    match action {
+        OllamaAction::List { option } => match option {
+            OllamaListOption::Model => {
+                let model = funboy.get_ollama_model().await;
+                match model {
+                    Some(model) => return Ok(CommandResult::Text(model)),
+                    None => {
+                        return Ok(CommandResult::Text("No model currently set".to_string()));
+                    }
+                }
+            }
+            OllamaListOption::Models => {
+                let models = funboy.get_ollama_models().await;
+                match models {
+                    Ok(models) => return Ok(CommandResult::Text(models.join("\n"))),
+                    Err(e) => {
+                        return Err(CommandError::ExecutionFailed(e.to_string()).into());
+                    }
+                }
+            }
+            OllamaListOption::Settings => {
+                let ollama_settings = ollama_settings.lock().await;
+                let settings_string = ollama_settings.to_string();
+                return Ok(CommandResult::Text(settings_string));
+            }
+        },
+        OllamaAction::Set { option } => match option {
+            OllamaSetOptions::SystemPrompt { system_prompt } => {
+                let mut ollama_settings = ollama_settings.lock().await;
+                let system_prompt = system_prompt.join(" ");
+                ollama_settings.set_system_prompt(&system_prompt);
+                drop(ollama_settings);
+                Ok(CommandResult::Text(format!(
+                    "Set ollama system prompt to {}",
+                    system_prompt
+                )))
+            }
+            OllamaSetOptions::Model { model } => {
+                funboy.set_ollama_model(Some(model.to_string())).await;
+                return Ok(CommandResult::Text(format!("Set model to {}", model)));
+            }
+            OllamaSetOptions::Template { template } => {
+                let mut ollama_settings = ollama_settings.lock().await;
+                ollama_settings.set_template(&template);
+                drop(ollama_settings);
+                Ok(CommandResult::Text(format!(
+                    "Set ollama template to {}",
+                    template
+                )))
+            }
+            OllamaSetOptions::OutputLimit { limit } => {
+                let mut ollama_settings = ollama_settings.lock().await;
+                ollama_settings.set_output_limit(limit);
+                drop(ollama_settings);
+                Ok(CommandResult::Text(format!(
+                    "Set ollama output limit to {}",
+                    limit
+                )))
+            }
+            OllamaSetOptions::Temperature { temperature } => {
+                let mut ollama_settings = ollama_settings.lock().await;
+                ollama_settings.set_temperature(temperature);
+                drop(ollama_settings);
+                Ok(CommandResult::Text(format!(
+                    "Set ollama temperature limit to {}",
+                    temperature
+                )))
+            }
+            OllamaSetOptions::TopK { top_k } => {
+                let mut ollama_settings = ollama_settings.lock().await;
+                ollama_settings.set_top_k(top_k);
+                drop(ollama_settings);
+                Ok(CommandResult::Text(format!(
+                    "Set ollama top_k to {}",
+                    top_k
+                )))
+            }
+            OllamaSetOptions::TopP { top_p } => {
+                let mut ollama_settings = ollama_settings.lock().await;
+                ollama_settings.set_top_p(top_p);
+                drop(ollama_settings);
+                Ok(CommandResult::Text(format!(
+                    "Set ollama top_p to {}",
+                    top_p
+                )))
+            }
+            OllamaSetOptions::RepeatPenalty { repeat_penalty } => {
+                let mut ollama_settings = ollama_settings.lock().await;
+                ollama_settings.set_repeat_penalty(repeat_penalty);
+                drop(ollama_settings);
+                Ok(CommandResult::Text(format!(
+                    "Set ollama repeat penalty to {}",
+                    repeat_penalty
+                )))
+            }
+        },
+    }
+}
+
+async fn list(
+    funboy: &Arc<Funboy>,
+    template: Option<String>,
+    search_term: Option<String>,
+    list_style: ListStyle,
+) -> Result<CommandResult, CommandError> {
+    match template {
+        Some(template) => {
+            let subs = funboy
+                .get_substitutes(
+                    &template,
+                    search_term.as_deref(),
+                    OrderBy::Default,
+                    Limit::None,
+                )
+                .await;
+            match subs {
+                Ok(subs) => match list_style {
+                    ListStyle::Default => {
+                        let subs: Vec<String> = subs.iter().map(|s| s.name.to_string()).collect();
+                        return Ok(CommandResult::Text(subs.join(" ")));
+                    }
+                    ListStyle::Id => {
+                        let subs: Vec<String> = subs.iter().map(|s| s.id.to_string()).collect();
+                        return Ok(CommandResult::Text(subs.join(" ")));
+                    }
+                },
+                Err(e) => {
+                    return Err(CommandError::ExecutionFailed(e.to_string()).into());
+                }
+            }
+        }
+        None => {
+            let subs = funboy
+                .get_templates(search_term.as_deref(), OrderBy::Default, Limit::None)
+                .await;
+            match subs {
+                Ok(subs) => {
+                    let subs: Vec<String> = subs.iter().map(|s| s.name.to_string()).collect();
+                    return Ok(CommandResult::Text(subs.join(" ")));
+                }
+                Err(e) => {
+                    return Err(CommandError::ExecutionFailed(e.to_string()).into());
+                }
+            }
+        }
+    }
+}
+
+async fn delete(
+    funboy: &Arc<Funboy>,
+    template: String,
+    substitutes: Vec<String>,
+    single: bool,
+) -> Result<CommandResult, CommandError> {
+    let substitutes = substitutes.join(" ");
+    let substitutes: Vec<&str> = parse_substitutes(&substitutes, single);
+    if substitutes.len() > 0 {
+        let result = funboy.delete_substitutes(&template, &substitutes).await;
+        match result {
+            Ok(receipt) => {
+                let output = format!(
+                    "removed: {}\nignored: {}",
+                    receipt.updated_to_string(),
+                    receipt.ignored_to_string()
+                );
+                return Ok(CommandResult::Text(output));
+            }
+            Err(e) => {
+                return Err(CommandError::ExecutionFailed(e.to_string()).into());
+            }
+        }
+    } else {
+        let result = funboy.delete_template(&template).await;
+        match result {
+            Ok(deleted_template) => {
+                let output = if deleted_template.is_some() {
+                    format!("deleted {}", template)
+                } else {
+                    format!("{} was not present in database", template)
+                };
+                return Ok(CommandResult::Text(output));
+            }
+            Err(e) => {
+                return Err(CommandError::ExecutionFailed(e.to_string()).into());
+            }
+        }
+    }
+}
+
+async fn add(
+    funboy: &Arc<Funboy>,
+    template: String,
+    substitutes: Vec<String>,
+    single: bool,
+) -> Result<CommandResult, CommandError> {
+    let substitutes = substitutes.join(" ");
+    let substitutes: Vec<&str> = parse_substitutes(&substitutes, single);
+    if substitutes.len() > 0 {
+        let result = funboy.add_substitutes(&template, &substitutes).await;
+        match result {
+            Ok(receipt) => {
+                let output = format!(
+                    "added: {}\nignored: {}",
+                    receipt.updated_to_string(),
+                    receipt.ignored_to_string()
+                );
+                return Ok(CommandResult::Text(output));
+            }
+            Err(e) => {
+                return Err(CommandError::ExecutionFailed(e.to_string()).into());
+            }
+        }
+    } else {
+        let result = funboy.add_substitutes(&template, &vec![]).await;
+        match result {
+            Ok(_) => {
+                let output = format!("created {}", template);
+                return Ok(CommandResult::Text(output));
+            }
+            Err(e) => {
+                return Err(CommandError::ExecutionFailed(e.to_string()).into());
+            }
+        }
+    }
+}
+
+async fn generate(
+    bot_data: &BotData,
+    input: Vec<String>,
+    file: bool,
+    ollama: bool,
+) -> Result<CommandResult, CommandError> {
+    let funboy = bot_data.funboy.clone();
+    let interpreter = bot_data.interpreter.clone();
+
+    let input = input.join(" ");
+    let input = if file {
+        let input = match std::fs::read_to_string(input) {
+            Ok(input) => input,
+            Err(e) => {
+                return Err(CommandError::ExecutionFailed(e.to_string()));
+            }
+        };
+        input
+    } else {
+        input
+    };
+    let result = if ollama {
+        let ollama_settings = bot_data.ollama_settings.lock().await;
+        funboy
+            .generate_ollama(
+                funboy.get_ollama_model().await,
+                &ollama_settings,
+                &input,
+                interpreter.clone(),
+            )
+            .await
+            .map(|o| o.response)
+    } else {
+        funboy.generate(&input, interpreter.clone()).await
+    };
+    match result {
+        Ok(output) => return Ok(CommandResult::Text(output)),
+        Err(e) => {
+            return Err(CommandError::ExecutionFailed(e.to_string()).into());
+        }
+    };
 }

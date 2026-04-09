@@ -5,10 +5,8 @@ use fsl_interpreter::{
     types::{command::Executor, value::Value},
 };
 use funboy_cli::{
-    ASK, ASK_RULES, BotData, CommandResult, Context, DEFAULT_TIMEOUT_SECS,
-    Error::{CommandError, ParseError},
-    ParseError::{EmptyInput, UnknownCommand},
-    SAY, SAY_RULES, get_env, get_funboy, interpret_bot_commands,
+    ASK, ASK_RULES, BotData, CommandResult, Context, DEFAULT_TIMEOUT_SECS, Permissions, SAY,
+    SAY_RULES, get_env, get_funboy, interpret_bot_commands,
 };
 use funboy_core::{
     Funboy,
@@ -197,6 +195,8 @@ async fn main() -> rustyline::Result<()> {
         ollama_settings: Arc::new(Mutex::new(OllamaSettings::default())),
     };
 
+    let permissions = Permissions::all();
+
     loop {
         let mut rl_lock = rl.lock().await;
         let readline = rl_lock.readline(">> ");
@@ -204,7 +204,7 @@ async fn main() -> rustyline::Result<()> {
             Ok(line) => {
                 rl_lock.add_history_entry(&line)?;
                 drop(rl_lock);
-                match interpret_bot_commands(&bot_data, &line).await {
+                match interpret_bot_commands(&bot_data, &permissions, &line).await {
                     Ok(output) => match output {
                         CommandResult::Text(text) => println!("{}", text),
                         CommandResult::ContextSwitch(context) => match context {
@@ -215,20 +215,14 @@ async fn main() -> rustyline::Result<()> {
                                 enter_interpreter(funboy.clone(), rl.clone()).await?;
                             }
                         },
+                        CommandResult::None => {
+                            continue;
+                        }
                         CommandResult::Exit => {
                             break;
                         }
                     },
-                    Err(e) => match e {
-                        CommandError(e) => println!("{}", e.to_string()),
-                        ParseError(parse_error) => match parse_error {
-                            EmptyInput => {
-                                continue;
-                            }
-                            UnknownCommand(e) => eprintln!("{}", e),
-                            funboy_cli::ParseError::MissingArg(e) => eprintln!("{}", e),
-                        },
-                    },
+                    Err(e) => println!("{}", e.to_string()),
                 }
             }
             Err(e) => {

@@ -1,260 +1,50 @@
 use std::{env, sync::Arc, time::Duration};
 
-use fsl_interpreter::{
-    FslInterpreter, InterpreterData,
-    types::{command::Executor, value::Value},
-};
-use funboy_cli::{
-    ASK, ASK_RULES, BotData, DEFAULT_TIMEOUT_SECS, SAY, SAY_RULES, get_env, get_funboy,
-    interpret_bot_commands,
-};
-use funboy_core::{Funboy, ollama::OllamaSettings};
+use fsl_interpreter::FslInterpreter;
+use funboy_cli::{BotData, get_env, get_funboy};
+use funboy_core::ollama::OllamaSettings;
+use funboy_matrix::{on_room_message, on_stripped_state_member};
 use matrix_sdk::{
-    Client, Room, RoomState,
+    Client, Room,
     config::SyncSettings,
-    ruma::{
-        OwnedUserId,
-        events::room::{
-            member::StrippedRoomMemberEvent,
-            message::{MessageType, OriginalSyncRoomMessageEvent, RoomMessageEventContent},
-        },
-    },
+    ruma::{OwnedUserId, events::room::message::OriginalSyncRoomMessageEvent},
 };
-use pulldown_cmark::{Options, Parser, html};
-use tokio::{
-    sync::{Mutex, broadcast, mpsc, oneshot},
-    time::sleep,
-};
+use tokio::sync::{Mutex, oneshot};
 
-async fn on_stripped_state_member(
-    room_member: StrippedRoomMemberEvent,
-    client: Client,
-    room: Room,
-) {
-    if room_member.state_key != client.user_id().unwrap() {
-        return;
-    }
-
-    tokio::spawn(async move {
-        println!("Autojoining room {}", room.room_id());
-        let mut delay = 2;
-
-        while let Err(err) = room.join().await {
-            eprintln!(
-                "Failed to join room {} ({err:?}), retrying in {delay}s",
-                room.room_id()
-            );
-
-            sleep(Duration::from_secs(delay)).await;
-            delay *= 2;
-
-            if delay > 3600 {
-                eprintln!("Can't join room {} ({err:?})", room.room_id());
-                break;
-            }
-        }
-        println!("Successfully joined room {}", room.room_id());
-    });
+struct MatrixEnv {
+    homeserver: String,
+    username: String,
+    password: String,
 }
 
-pub fn create_ask_command(
-    funboy: Arc<Funboy>,
-    room: Room,
-    pending_ask: Arc<Mutex<Option<(OwnedUserId, oneshot::Sender<String>)>>>,
-    sender: OwnedUserId,
-) -> Executor {
-    let ask_command = {
-        move |command: fsl_interpreter::types::command::Command, data: Arc<InterpreterData>| {
-            let room = room.clone();
-            let pending_ask = pending_ask.clone();
-            let sender = sender.clone();
-            {
-                let funboy = funboy.clone();
-                async move {
-                    let mut values = command.take_args();
+impl MatrixEnv {
+    pub fn new() -> MatrixEnv {
+        dotenvy::dotenv().expect("parent directory should have .env file");
+        let homeserver = env::var("HOME_SERVER").expect(".env file should contain HOME_SERVER");
+        let username = env::var("USERNAME").expect(".env file should contain USERNAME");
+        let password = env::var("PASSWORD").expect(".env file should contain PASSWORD");
 
-                    let arg_0 = values.pop_front().unwrap().as_text(data.clone()).await?;
-                    let arg_1 = values
-                        .pop_front()
-                        .unwrap_or(Value::Float(DEFAULT_TIMEOUT_SECS));
-
-                    let question = format!("{}", arg_0);
-                    let question = format!("{}\n{}", question, "(enter -STOP- to quit)");
-
-                    let question = funboy
-                        .generate(&question, Arc::new(Mutex::new(FslInterpreter::new())))
-                        .await;
-
-                    let question = match question {
-                        Ok(question) => question,
-                        Err(e) => {
-                            return Err(fsl_interpreter::types::command::CommandError::Custom(
-                                format!("{}", e.to_string()),
-                            ));
-                        }
-                    };
-
-                    let html = markdown_to_html(&question);
-                    let question = RoomMessageEventContent::text_html(&question, html);
-                    room.send(question).await.unwrap();
-
-                    let (tx, rx) = oneshot::channel::<String>();
-                    *pending_ask.lock().await = Some((sender, tx));
-
-                    match rx.await {
-                        Ok(response) => {
-                            if response == "-STOP-" {
-                                return Err(fsl_interpreter::types::command::CommandError::Custom(
-                                    format!("{}", "user quit the program"),
-                                ));
-                            } else {
-                                return Ok(Value::Text(response));
-                            }
-                        }
-                        Err(e) => {
-                            return Err(fsl_interpreter::types::command::CommandError::Custom(
-                                format!("{}", e.to_string()),
-                            ));
-                        }
-                    }
-                }
-            }
-        }
-    };
-    Some(Arc::new(ask_command))
-}
-
-pub fn create_say_command(funboy: Arc<Funboy>, room: Room) -> Executor {
-    let say_command = {
-        move |command: fsl_interpreter::types::command::Command, interpreter_data| {
-            let room = room.clone();
-            {
-                let funboy = funboy.clone();
-                async move {
-                    let mut values = command.take_args();
-                    let message = values
-                        .pop_front()
-                        .unwrap()
-                        .as_text(interpreter_data)
-                        .await?;
-
-                    let message = funboy
-                        .generate(&message, Arc::new(Mutex::new(FslInterpreter::new())))
-                        .await;
-
-                    match message {
-                        Ok(output) => {
-                            if !output.is_empty() {
-                                let html = markdown_to_html(&output);
-                                let content = RoomMessageEventContent::text_html(&output, html);
-                                room.send(content).await.unwrap();
-                            }
-                        }
-                        Err(e) => {
-                            return Err(fsl_interpreter::types::command::CommandError::Custom(
-                                format!("{}", e.to_string()),
-                            ));
-                        }
-                    }
-
-                    Ok(Value::None)
-                }
-            }
-        }
-    };
-    Some(Arc::new(say_command))
-}
-
-fn markdown_to_html(input: &str) -> String {
-    let parser = Parser::new_ext(input, Options::all());
-    let mut html_output = String::new();
-    html::push_html(&mut html_output, parser);
-    html_output.replace('\n', "<br>")
-}
-
-async fn on_room_message(
-    event: OriginalSyncRoomMessageEvent,
-    room: Room,
-    bot_data: Arc<BotData>,
-    pending_ask: Arc<Mutex<Option<(OwnedUserId, oneshot::Sender<String>)>>>,
-) {
-    // First, we need to unpack the message: We only want messages from rooms we are
-    // still in and that are regular text messages - ignoring everything else.
-    if room.state() != RoomState::Joined {
-        return;
-    }
-
-    let MessageType::Text(text_content) = event.content.msgtype else {
-        return;
-    };
-
-    {
-        let mut pending = pending_ask.lock().await;
-        if let Some((expected_sender, tx)) = pending.take() {
-            if expected_sender == event.sender {
-                let _ = tx.send(text_content.body);
-                return;
-            } else {
-                *pending = Some((expected_sender, tx))
-            }
+        Self {
+            homeserver,
+            username,
+            password,
         }
     }
-
-    tokio::spawn(async move {
-        let mut interpreter = bot_data.interpreter.lock().await;
-        let funboy = bot_data.funboy.clone();
-        interpreter.add_command(
-            SAY,
-            SAY_RULES,
-            create_say_command(funboy.clone(), room.clone()),
-        );
-        interpreter.add_command(
-            ASK,
-            ASK_RULES,
-            create_ask_command(funboy, room.clone(), pending_ask, event.sender),
-        );
-        drop(interpreter);
-
-        if text_content.body.starts_with("!") {
-            let result =
-                interpret_bot_commands(&bot_data, text_content.body.trim_start_matches("!")).await;
-
-            match result {
-                Ok(result) => match result {
-                    funboy_cli::CommandResult::Text(message) => {
-                        // send our message to the room we found the command in
-                        if !message.is_empty() {
-                            let html = markdown_to_html(&message);
-                            let content = RoomMessageEventContent::text_html(&message, html);
-                            room.send(content).await.unwrap();
-                        }
-                    }
-                    funboy_cli::CommandResult::ContextSwitch(context) => {}
-                    funboy_cli::CommandResult::Exit => {}
-                },
-                Err(e) => eprintln!("{:?}", e),
-            }
-        }
-    });
 }
 
 #[tokio::main]
 async fn main() {
-    dotenvy::dotenv().expect("parent directory should have .env file");
-
-    let homeserver = env::var("HOME_SERVER").expect(".env file should contain HOME_SERVER");
-    let username = env::var("USERNAME").expect(".env file should contain USERNAME");
-    let password = env::var("PASSWORD").expect(".env file should contain PASSWORD");
+    let env = MatrixEnv::new();
 
     let client = Client::builder()
-        .homeserver_url(&homeserver)
+        .homeserver_url(&env.homeserver)
         .build()
         .await
         .expect("couldn't connect to home server");
 
     client
         .matrix_auth()
-        .login_username(&username, &password)
+        .login_username(&env.username, &env.password)
         .await
         .expect("couldn't login");
 
@@ -267,20 +57,19 @@ async fn main() {
         .next_batch;
 
     let funboy = Arc::new(get_funboy(&get_env()).await);
+
     let bot_data = Arc::new(BotData {
         funboy: funboy.clone(),
         interpreter: Arc::new(Mutex::new(FslInterpreter::new())),
         ollama_settings: Arc::new(Mutex::new(OllamaSettings::default())),
     });
+
     let pending_ask: Arc<Mutex<Option<(OwnedUserId, oneshot::Sender<String>)>>> =
         Arc::new(Mutex::new(None));
-    let (tx, _) = broadcast::channel::<OriginalSyncRoomMessageEvent>(100);
 
     client.add_event_handler(move |event: OriginalSyncRoomMessageEvent, room: Room| {
         on_room_message(event, room, bot_data.clone(), pending_ask)
     });
-
-    println!("{}", client.is_active());
 
     let settings = SyncSettings::default().token(sync_token);
 
