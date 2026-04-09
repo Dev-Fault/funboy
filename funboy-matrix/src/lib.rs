@@ -134,10 +134,21 @@ pub fn create_say_command(funboy: Arc<Funboy>, room: Room) -> Executor {
 }
 
 fn markdown_to_html(input: &str) -> String {
-    let parser = Parser::new_ext(input, Options::all());
-    let mut html_output = String::new();
-    html::push_html(&mut html_output, parser);
-    html_output.replace('\n', "<br>")
+    input
+        .trim()
+        .lines()
+        .map(|line| {
+            let parser = Parser::new_ext(line, Options::all());
+            let mut html_output = String::new();
+            html::push_html(&mut html_output, parser);
+            html_output
+                .replace("<p>", "")
+                .replace("</p>", "")
+                .trim()
+                .to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("<br/>")
 }
 
 pub async fn on_room_message(
