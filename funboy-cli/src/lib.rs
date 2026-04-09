@@ -1,13 +1,79 @@
-use std::{str::FromStr, sync::Arc};
+use std::{str::FromStr, sync::Arc, time::Duration};
 
 use clap::Parser;
-use fsl_interpreter::FslInterpreter;
+use dotenvy::dotenv;
+use fsl_interpreter::{
+    FslInterpreter,
+    commands::{NUMERIC_TYPES, TEXT_TYPES},
+    types::command::{ArgPos, ArgRule},
+};
 use funboy_core::{
     Funboy,
     ollama::OllamaSettings,
-    template_database::{Limit, OrderBy},
+    template_database::{Limit, OrderBy, TemplateDatabase},
 };
+use sqlx::postgres::PgPoolOptions;
 use tokio::sync::Mutex;
+
+pub const SAY: &str = "say";
+pub const SAY_RULES: &'static [ArgRule] = &[ArgRule::new(ArgPos::Index(0), TEXT_TYPES)];
+pub const DEFAULT_TIMEOUT_SECS: f64 = 60.0 * 30.0;
+pub const ASK: &str = "ask";
+pub const ASK_RULES: &'static [ArgRule] = &[
+    ArgRule::new(ArgPos::Index(0), TEXT_TYPES),
+    ArgRule::new(ArgPos::OptionalIndex(1), NUMERIC_TYPES),
+];
+
+pub struct FunboyEnv {
+    pub debug_mode: bool,
+    pub db_url: String,
+    pub default_ollama_model: Option<String>,
+}
+
+pub fn get_env() -> FunboyEnv {
+    dotenv().ok();
+
+    let debug_mode = std::env::var("DEBUG_MODE")
+        .unwrap_or("false".to_string())
+        .parse::<bool>()
+        .expect("DEBUG_MODE must be of type bool");
+
+    let db_url = if debug_mode == false {
+        println!("Launching in release mode.");
+        std::env::var("DATABASE_URL").expect("missing DATABASE_URL")
+    } else {
+        println!("Launching in debug mode.");
+        std::env::var("DEBUG_DATABASE_URL").expect("missing DATABASE_URL")
+    };
+
+    let default_ollama_model = std::env::var("DEFAULT_OLLAMA_MODEL").ok();
+
+    FunboyEnv {
+        debug_mode,
+        db_url,
+        default_ollama_model,
+    }
+}
+
+pub async fn get_funboy(env: &FunboyEnv) -> Funboy {
+    let pool = Arc::new(
+        PgPoolOptions::new()
+            .max_connections(15)
+            .min_connections(2)
+            .acquire_timeout(Duration::from_secs(5))
+            .idle_timeout(Duration::from_secs(60 * 10))
+            .max_lifetime(Duration::from_secs(60 * 30))
+            .connect(&env.db_url)
+            .await
+            .expect("failed to connect to database"),
+    );
+
+    TemplateDatabase::migrate(&pool)
+        .await
+        .expect("sqlx migration failed");
+
+    Funboy::new(TemplateDatabase::new(pool))
+}
 
 #[derive(Debug)]
 pub enum ParseError {

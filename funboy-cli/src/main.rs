@@ -1,37 +1,22 @@
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
-use dotenvy::dotenv;
 use fsl_interpreter::{
     FslInterpreter, InterpreterData,
-    commands::{NUMERIC_TYPES, TEXT_TYPES},
-    types::{
-        command::{ArgPos, ArgRule, Executor},
-        value::Value,
-    },
+    types::{command::Executor, value::Value},
 };
 use funboy_cli::{
-    BotData, CommandResult, Context,
+    ASK, ASK_RULES, BotData, CommandResult, Context, DEFAULT_TIMEOUT_SECS,
     Error::{CommandError, ParseError},
     ParseError::{EmptyInput, UnknownCommand},
-    interpret_bot_commands,
+    SAY, SAY_RULES, get_env, get_funboy, interpret_bot_commands,
 };
 use funboy_core::{
-    self, Funboy,
+    Funboy,
     ollama::{MAX_PREDICT, OllamaSettings},
-    template_database::TemplateDatabase,
 };
 use rustyline::DefaultEditor;
-use sqlx::postgres::PgPoolOptions;
 use tokio::sync::Mutex;
 
-struct Env {
-    debug_mode: bool,
-    db_url: String,
-    default_ollama_model: Option<String>,
-}
-
-const SAY: &str = "say";
-const SAY_RULES: &'static [ArgRule] = &[ArgRule::new(ArgPos::Index(0), TEXT_TYPES)];
 pub fn create_say_command(funboy: Arc<Funboy>) -> Executor {
     let say_command = {
         move |command: fsl_interpreter::types::command::Command, interpreter_data| {
@@ -64,12 +49,6 @@ pub fn create_say_command(funboy: Arc<Funboy>) -> Executor {
     Some(Arc::new(say_command))
 }
 
-const DEFAULT_TIMEOUT_SECS: f64 = 60.0 * 30.0;
-const ASK: &str = "ask";
-const ASK_RULES: &'static [ArgRule] = &[
-    ArgRule::new(ArgPos::Index(0), TEXT_TYPES),
-    ArgRule::new(ArgPos::OptionalIndex(1), NUMERIC_TYPES),
-];
 pub fn create_ask_command(funboy: Arc<Funboy>, rl: Arc<Mutex<DefaultEditor>>) -> Executor {
     let ask_command = {
         move |command: fsl_interpreter::types::command::Command, data: Arc<InterpreterData>| {
@@ -123,51 +102,6 @@ pub fn create_ask_command(funboy: Arc<Funboy>, rl: Arc<Mutex<DefaultEditor>>) ->
         }
     };
     Some(Arc::new(ask_command))
-}
-
-async fn get_env() -> Env {
-    dotenv().ok();
-
-    let debug_mode = std::env::var("DEBUG_MODE")
-        .unwrap_or("false".to_string())
-        .parse::<bool>()
-        .expect("DEBUG_MODE must be of type bool");
-
-    let db_url = if debug_mode == false {
-        println!("Launching in release mode.");
-        std::env::var("DATABASE_URL").expect("missing DATABASE_URL")
-    } else {
-        println!("Launching in debug mode.");
-        std::env::var("DEBUG_DATABASE_URL").expect("missing DATABASE_URL")
-    };
-
-    let default_ollama_model = std::env::var("DEFAULT_OLLAMA_MODEL").ok();
-
-    Env {
-        debug_mode,
-        db_url,
-        default_ollama_model,
-    }
-}
-
-async fn get_funboy(env: &Env) -> Funboy {
-    let pool = Arc::new(
-        PgPoolOptions::new()
-            .max_connections(15)
-            .min_connections(2)
-            .acquire_timeout(Duration::from_secs(5))
-            .idle_timeout(Duration::from_secs(60 * 10))
-            .max_lifetime(Duration::from_secs(60 * 30))
-            .connect(&env.db_url)
-            .await
-            .expect("failed to connect to database"),
-    );
-
-    TemplateDatabase::migrate(&pool)
-        .await
-        .expect("sqlx migration failed");
-
-    Funboy::new(TemplateDatabase::new(pool))
 }
 
 pub async fn enter_interactive_generation(
@@ -250,7 +184,7 @@ async fn create_interpreter(
 
 #[tokio::main]
 async fn main() -> rustyline::Result<()> {
-    let env = get_env().await;
+    let env = get_env();
     let funboy = Arc::new(get_funboy(&env).await);
     funboy.set_ollama_model(env.default_ollama_model).await;
     let rl = Arc::new(Mutex::new(DefaultEditor::new()?));
