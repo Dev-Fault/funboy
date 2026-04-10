@@ -12,7 +12,7 @@ use matrix_sdk::{
 };
 use tokio::sync::{Mutex, oneshot};
 
-use crate::markdown_to_html;
+use crate::{MatrixUserId, markdown_to_html};
 
 #[derive(Clone)]
 pub struct MatrixCtx {
@@ -37,13 +37,13 @@ impl MatrixCtx {
 
 #[derive(Clone)]
 pub struct FslCtx {
-    pub funboy_ctx: FunboyCtx,
+    pub funboy_ctx: FunboyCtx<MatrixUserId>,
     pub matrix_ctx: MatrixCtx,
     pub interpreter: Arc<Mutex<FslInterpreter>>,
 }
 
 impl FslCtx {
-    pub fn new(funboy_ctx: FunboyCtx, matrix_ctx: MatrixCtx) -> Self {
+    pub fn new(funboy_ctx: FunboyCtx<MatrixUserId>, matrix_ctx: MatrixCtx) -> Self {
         Self {
             funboy_ctx: funboy_ctx,
             matrix_ctx,
@@ -72,7 +72,7 @@ impl FslCtx {
 }
 
 pub async fn create_interpreter(
-    funboy_ctx: FunboyCtx,
+    funboy_ctx: FunboyCtx<MatrixUserId>,
     matrix_ctx: MatrixCtx,
 ) -> Arc<Mutex<FslInterpreter>> {
     let mut interpreter = FslInterpreter::new();
