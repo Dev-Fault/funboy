@@ -5,49 +5,15 @@ use fsl_interpreter::{
     types::{command::Executor, value::Value},
 };
 use funboy_cli::{
-    ASK, ASK_RULES, CommandResult, Context, FunboyCtx, FunboyEnv, Permissions, SAY, SAY_RULES,
+    ASK, ASK_RULES, CommandResult, Context, FslContext, FunboyEnv, Permissions, SAY, SAY_RULES,
     get_funboy, interpret_bot_commands,
 };
 use funboy_core::{
-    UserId,
+    Funboy, UserId,
     ollama::{MAX_PREDICT, OllamaSettings},
 };
 use rustyline::DefaultEditor;
 use tokio::sync::Mutex;
-
-#[derive(Clone)]
-pub struct FslContext<U: UserId> {
-    pub funboy_ctx: FunboyCtx<U>,
-    pub interpreter: Arc<Mutex<FslInterpreter>>,
-}
-
-impl<U: UserId> FslContext<U> {
-    pub fn new(funboy_ctx: FunboyCtx<U>) -> Self {
-        Self {
-            funboy_ctx: funboy_ctx,
-            interpreter: Arc::new(Mutex::new(FslInterpreter::new())),
-        }
-    }
-
-    pub async fn generate_message(
-        &self,
-        message: &str,
-    ) -> Result<String, fsl_interpreter::types::command::CommandError> {
-        match self
-            .funboy_ctx
-            .funboy
-            .generate(&message, self.interpreter.clone())
-            .await
-        {
-            Ok(gen_msg) => Ok(gen_msg),
-            Err(e) => {
-                return Err(fsl_interpreter::types::command::CommandError::Custom(
-                    e.to_string(),
-                ));
-            }
-        }
-    }
-}
 
 fn create_say_command<U: UserId>(fsl_ctx: FslContext<U>) -> Executor {
     let say_command = {
@@ -135,10 +101,10 @@ fn create_ask_command<U: UserId>(
 }
 
 pub async fn enter_interactive_generation<U: UserId>(
-    funboy_ctx: FunboyCtx<U>,
+    funboy: Arc<Funboy<U>>,
     rl: Arc<Mutex<DefaultEditor>>,
 ) -> rustyline::Result<()> {
-    let interpreter = create_interpreter(funboy_ctx.clone(), rl.clone()).await;
+    let interpreter = create_interpreter(funboy.clone(), rl.clone()).await;
     loop {
         let mut rl = rl.lock().await;
         let readline = rl.readline("G> ");
@@ -146,11 +112,7 @@ pub async fn enter_interactive_generation<U: UserId>(
             Ok(input) => {
                 rl.add_history_entry(&input)?;
                 drop(rl);
-                match funboy_ctx
-                    .funboy
-                    .generate(&input, interpreter.clone())
-                    .await
-                {
+                match funboy.generate(&input, interpreter.clone()).await {
                     Ok(output) => println!("{}", output),
                     Err(e) => {
                         eprint!("{:?}", e);
@@ -168,10 +130,10 @@ pub async fn enter_interactive_generation<U: UserId>(
 }
 
 pub async fn enter_interpreter<U: UserId>(
-    funboy_ctx: FunboyCtx<U>,
+    funboy: Arc<Funboy<U>>,
     rl: Arc<Mutex<DefaultEditor>>,
 ) -> rustyline::Result<()> {
-    let interpreter = create_interpreter(funboy_ctx, rl.clone()).await;
+    let interpreter = create_interpreter(funboy, rl.clone()).await;
     loop {
         let mut rl = rl.lock().await;
         let readline = rl.readline("I> ");
@@ -201,11 +163,11 @@ pub async fn enter_interpreter<U: UserId>(
 }
 
 async fn create_interpreter<U: UserId>(
-    funboy_ctx: FunboyCtx<U>,
+    funboy: Arc<Funboy<U>>,
     rl: Arc<Mutex<DefaultEditor>>,
 ) -> Arc<Mutex<FslInterpreter>> {
     let mut interpreter = FslInterpreter::new_unbounded();
-    let fsl_context = FslContext::new(funboy_ctx);
+    let fsl_context = FslContext::new(funboy);
     interpreter.add_command(SAY, SAY_RULES, create_say_command(fsl_context.clone()));
     interpreter.add_command(
         ASK,
@@ -228,8 +190,6 @@ async fn main() -> rustyline::Result<()> {
     let mut ollama_settings = OllamaSettings::default();
     ollama_settings.set_output_limit(MAX_PREDICT);
 
-    let funboy_ctx = FunboyCtx::new(funboy);
-
     let permissions = Permissions::all();
 
     loop {
@@ -240,10 +200,11 @@ async fn main() -> rustyline::Result<()> {
                 rl_lock.add_history_entry(&line)?;
                 drop(rl_lock);
                 match interpret_bot_commands(
-                    &funboy_ctx.clone(),
-                    create_interpreter(funboy_ctx.clone(), rl.clone()).await,
+                    &funboy,
+                    create_interpreter(funboy.clone(), rl.clone()).await,
                     &permissions,
                     &line,
+                    Id(0),
                 )
                 .await
                 {
@@ -251,11 +212,10 @@ async fn main() -> rustyline::Result<()> {
                         CommandResult::Text(text) => println!("{}", text),
                         CommandResult::ContextSwitch(context) => match context {
                             Context::Generate => {
-                                enter_interactive_generation(funboy_ctx.clone(), rl.clone())
-                                    .await?;
+                                enter_interactive_generation(funboy.clone(), rl.clone()).await?;
                             }
                             Context::FSL => {
-                                enter_interpreter(funboy_ctx.clone(), rl.clone()).await?;
+                                enter_interpreter(funboy.clone(), rl.clone()).await?;
                             }
                         },
                         CommandResult::None => {

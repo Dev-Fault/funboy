@@ -1,9 +1,7 @@
-use std::{collections::HashMap, env, sync::Arc, time::Duration};
+use std::{env, sync::Arc};
 
-use fsl_interpreter::FslInterpreter;
-use funboy_cli::{FunboyCtx, FunboyEnv, get_funboy};
-use funboy_core::ollama::OllamaSettings;
-use funboy_matrix::{MatrixUserId, on_room_message, on_stripped_state_member};
+use funboy_cli::{FunboyEnv, get_funboy};
+use funboy_matrix::{on_room_message, on_stripped_state_member};
 use matrix_sdk::{
     Client, Room,
     config::SyncSettings,
@@ -69,14 +67,11 @@ async fn main() {
 
     let funboy = Arc::new(get_funboy(&funboy_env).await);
 
-    let user_ctx: Arc<Mutex<HashMap<OwnedUserId, FunboyCtx<MatrixUserId>>>> =
-        Arc::new(Mutex::new(HashMap::new()));
-
     let pending_ask: Arc<Mutex<Option<(OwnedUserId, oneshot::Sender<String>)>>> =
         Arc::new(Mutex::new(None));
 
     client.add_event_handler(move |event: OriginalSyncRoomMessageEvent, room: Room| {
-        on_room_message(event, room, funboy, user_ctx, pending_ask)
+        on_room_message(event, room, funboy, pending_ask)
     });
 
     let settings = SyncSettings::default().token(sync_token);

@@ -378,32 +378,15 @@ impl Permissions {
 }
 
 #[derive(Clone)]
-pub struct FunboyCtx<U: UserId> {
-    pub funboy: Arc<Funboy<U>>,
-    pub ollama_settings: Arc<Mutex<OllamaSettings>>,
-    pub in_use: Arc<AtomicBool>,
-}
-
-impl<U: UserId> FunboyCtx<U> {
-    pub fn new(funboy: Arc<Funboy<U>>) -> Self {
-        FunboyCtx {
-            funboy: funboy,
-            ollama_settings: Arc::new(Mutex::new(OllamaSettings::default())),
-            in_use: Arc::new(AtomicBool::new(false)),
-        }
-    }
-}
-
-#[derive(Clone)]
 pub struct FslContext<U: UserId> {
-    pub funboy_ctx: FunboyCtx<U>,
+    pub funboy: Arc<Funboy<U>>,
     pub interpreter: Arc<Mutex<FslInterpreter>>,
 }
 
 impl<U: UserId> FslContext<U> {
-    pub fn new(funboy_ctx: FunboyCtx<U>) -> Self {
+    pub fn new(funboy: Arc<Funboy<U>>) -> Self {
         Self {
-            funboy_ctx: funboy_ctx,
+            funboy: funboy,
             interpreter: Arc::new(Mutex::new(FslInterpreter::new())),
         }
     }
@@ -413,7 +396,6 @@ impl<U: UserId> FslContext<U> {
         message: &str,
     ) -> Result<String, fsl_interpreter::types::command::CommandError> {
         match self
-            .funboy_ctx
             .funboy
             .generate(&message, self.interpreter.clone())
             .await
@@ -429,10 +411,11 @@ impl<U: UserId> FslContext<U> {
 }
 
 pub async fn interpret_bot_commands<U: UserId>(
-    funboy_ctx: &FunboyCtx<U>,
+    funboy: &Funboy<U>,
     interpreter: Arc<Mutex<FslInterpreter>>,
     permissions: &Permissions,
     input: &str,
+    user_id: U,
 ) -> Result<CommandResult, CommandError> {
     let input = input.trim();
     if input.is_empty() {
@@ -443,9 +426,6 @@ pub async fn interpret_bot_commands<U: UserId>(
 
     let mut full_args = vec!["funboy"];
     full_args.extend(&args);
-
-    let funboy = &funboy_ctx.funboy;
-    let ollama_settings = &funboy_ctx.ollama_settings;
 
     match Command::try_parse_from(full_args) {
         Ok(command) => match command {
@@ -459,7 +439,7 @@ pub async fn interpret_bot_commands<U: UserId>(
                 } else if ollama && !permissions.can_use_ollama() {
                     return Err(CommandError::LackingPermission(Permission::OllamaUsage).into());
                 }
-                generate(funboy_ctx, interpreter, input, file, ollama).await
+                generate(funboy, user_id, interpreter, input, file, ollama).await
             }
             Command::Context { context } => return Ok(CommandResult::ContextSwitch(context)),
             Command::Add {
@@ -491,7 +471,7 @@ pub async fn interpret_bot_commands<U: UserId>(
                 if !permissions.can_use_ollama() {
                     return Err(CommandError::LackingPermission(Permission::OllamaUsage).into());
                 }
-                ollama(funboy, ollama_settings, action).await
+                ollama(funboy, user_id, action).await
             }
             Command::Copy {
                 from_template,
@@ -529,7 +509,7 @@ pub async fn interpret_bot_commands<U: UserId>(
 }
 
 async fn replace<U: UserId>(
-    funboy: &Arc<Funboy<U>>,
+    funboy: &Funboy<U>,
     template: Option<String>,
     substitute: String,
     with_substitute: String,
@@ -593,7 +573,7 @@ async fn replace<U: UserId>(
 }
 
 async fn rename<U: UserId>(
-    funboy: &Arc<Funboy<U>>,
+    funboy: &Funboy<U>,
     from_template: String,
     to_template: String,
 ) -> Result<CommandResult, CommandError> {
@@ -614,7 +594,7 @@ async fn rename<U: UserId>(
 }
 
 async fn copy<U: UserId>(
-    funboy: &Arc<Funboy<U>>,
+    funboy: &Funboy<U>,
     from_template: String,
     to_template: String,
 ) -> Result<CommandResult, CommandError> {
@@ -638,10 +618,11 @@ async fn copy<U: UserId>(
 }
 
 async fn ollama<U: UserId>(
-    funboy: &Arc<Funboy<U>>,
-    ollama_settings: &Arc<Mutex<OllamaSettings>>,
+    funboy: &Funboy<U>,
+    user_id: U,
     action: OllamaAction,
 ) -> Result<CommandResult, CommandError> {
+    let ollama_settings = funboy.get_user_ctx(user_id).await.ollama_settings;
     match action {
         OllamaAction::List { option } => match option {
             OllamaListOption::Model => {
@@ -742,7 +723,7 @@ async fn ollama<U: UserId>(
 }
 
 async fn list<U: UserId>(
-    funboy: &Arc<Funboy<U>>,
+    funboy: &Funboy<U>,
     template: Option<String>,
     search_term: Option<String>,
     list_style: ListStyle,
@@ -791,7 +772,7 @@ async fn list<U: UserId>(
 }
 
 async fn delete<U: UserId>(
-    funboy: &Arc<Funboy<U>>,
+    funboy: &Funboy<U>,
     template: String,
     substitutes: Vec<String>,
     single: bool,
@@ -832,7 +813,7 @@ async fn delete<U: UserId>(
 }
 
 async fn add<U: UserId>(
-    funboy: &Arc<Funboy<U>>,
+    funboy: &Funboy<U>,
     template: String,
     substitutes: Vec<String>,
     single: bool,
@@ -869,14 +850,13 @@ async fn add<U: UserId>(
 }
 
 async fn generate<U: UserId>(
-    funboy_ctx: &FunboyCtx<U>,
+    funboy: &Funboy<U>,
+    user_id: U,
     interpreter: Arc<Mutex<FslInterpreter>>,
     input: Vec<String>,
     file: bool,
     ollama: bool,
 ) -> Result<CommandResult, CommandError> {
-    let funboy = funboy_ctx.funboy.clone();
-
     let input = input.join(" ");
     let input = if file {
         let input = match std::fs::read_to_string(input) {
@@ -890,18 +870,14 @@ async fn generate<U: UserId>(
         input
     };
     let result = if ollama {
-        let ollama_settings = funboy_ctx.ollama_settings.lock().await;
         funboy
-            .generate_ollama(
-                funboy.get_ollama_model().await,
-                &ollama_settings,
-                &input,
-                interpreter.clone(),
-            )
+            .user_generate_ollama(user_id, &input, interpreter.clone())
             .await
             .map(|o| format!("{}{}", o.prompt, o.generated_text))
     } else {
-        funboy.generate(&input, interpreter.clone()).await
+        funboy
+            .user_generate(user_id, &input, interpreter.clone())
+            .await
     };
     match result {
         Ok(output) => return Ok(CommandResult::Text(output)),

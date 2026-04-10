@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use funboy_cli::{FunboyCtx, Permissions, interpret_bot_commands};
+use funboy_cli::{Permissions, interpret_bot_commands};
 use funboy_core::{Funboy, UserId};
 use matrix_sdk::{
     Client, Room, RoomState,
@@ -56,7 +56,6 @@ pub async fn on_room_message(
     event: OriginalSyncRoomMessageEvent,
     room: Room,
     funboy: Arc<Funboy<MatrixUserId>>,
-    user_ctx: Arc<Mutex<HashMap<OwnedUserId, FunboyCtx<MatrixUserId>>>>,
     pending_ask: Arc<Mutex<Option<(OwnedUserId, oneshot::Sender<String>)>>>,
 ) {
     // First, we need to unpack the message: We only want messages from rooms we are
@@ -83,15 +82,8 @@ pub async fn on_room_message(
 
     tokio::spawn(async move {
         if text_content.body.starts_with("!") {
-            let mut user_ctx = user_ctx.lock().await;
-            let funboy_ctx = user_ctx
-                .entry(event.sender.clone())
-                .or_insert(FunboyCtx::new(funboy))
-                .clone();
-            drop(user_ctx);
-
             let user_text = text_content.body.trim_start_matches("!");
-            let result = interpret_matrix_commands(&funboy_ctx, room.clone(), &user_text).await;
+            let result = interpret_matrix_commands(&funboy, room.clone(), &user_text).await;
             if let Err(err) = result {
                 match err {
                     funboy_cli::CommandError::ExecutionFailed(e) => {
@@ -114,27 +106,17 @@ pub async fn on_room_message(
             }
 
             let interpreter = create_interpreter(
-                funboy_ctx.clone(),
-                MatrixCtx::new(room.clone(), pending_ask, event.sender),
+                funboy.clone(),
+                MatrixCtx::new(room.clone(), pending_ask, event.sender.clone()),
             )
             .await;
 
-            if funboy_ctx.in_use.load(Ordering::Relaxed) {
-                room.send(RoomMessageEventContent::text_plain(
-                    "You're already using a command, wait until it's finished.",
-                ))
-                .await
-                .unwrap();
-                return;
-            } else {
-                funboy_ctx.in_use.store(true, Ordering::Relaxed);
-            }
-
             let result = interpret_bot_commands(
-                &funboy_ctx,
+                &funboy,
                 interpreter,
                 &Permissions::power_user(),
                 user_text,
+                MatrixUserId(event.sender),
             )
             .await;
 
@@ -159,8 +141,6 @@ pub async fn on_room_message(
                     room.send(content).await.unwrap();
                 }
             }
-
-            funboy_ctx.in_use.store(false, Ordering::Relaxed);
         }
     });
 }

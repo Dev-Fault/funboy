@@ -1,5 +1,6 @@
 use clap::Parser;
-use funboy_cli::{CommandError, CommandResult, FunboyCtx};
+use funboy_cli::{CommandError, CommandResult};
+use funboy_core::Funboy;
 use matrix_sdk::{Room, attachment::AttachmentConfig};
 
 use crate::MatrixUserId;
@@ -18,7 +19,7 @@ enum MatrixCommand {
 }
 
 pub async fn interpret_matrix_commands(
-    funboy_ctx: &FunboyCtx<MatrixUserId>,
+    funboy: &Funboy<MatrixUserId>,
     room: Room,
     input: &str,
 ) -> Result<CommandResult, CommandError> {
@@ -32,9 +33,6 @@ pub async fn interpret_matrix_commands(
 
     let mut full_args = vec!["funboy"];
     full_args.extend(&args);
-
-    let funboy = &funboy_ctx.funboy;
-    let ollama_settings = &funboy_ctx.ollama_settings;
 
     match MatrixCommand::try_parse_from(full_args) {
         Ok(command) => match command {

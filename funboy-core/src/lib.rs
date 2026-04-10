@@ -3,7 +3,10 @@ use std::{
     fmt::Debug,
     hash::{DefaultHasher, Hash, Hasher},
     str::FromStr,
-    sync::{Arc, atomic::AtomicBool},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 
@@ -41,6 +44,7 @@ pub enum FunboyError {
     Ollama(String),
     Database(String),
     UserInput(String),
+    UsageLimit(String),
 }
 
 impl ToString for FunboyError {
@@ -58,6 +62,7 @@ impl ToString for FunboyError {
             FunboyError::UserInput(e) => {
                 format!("User input error:\n{}", e)
             }
+            FunboyError::UsageLimit(e) => e.clone(),
         }
     }
 }
@@ -142,6 +147,10 @@ impl<U: UserId> Funboy<U> {
                     .build(),
             ),
         }
+    }
+
+    pub async fn get_user_ctx(&self, user_id: U) -> UserCtx {
+        self.user_map.get_or_insert(user_id).await
     }
 
     pub async fn get_ollama_model(&self) -> Option<String> {
@@ -521,6 +530,52 @@ impl<U: UserId> Funboy<U> {
                 generated_text: output.response,
             }),
             Err(e) => Err(FunboyError::Ollama(e.to_string())),
+        }
+    }
+
+    pub async fn user_generate(
+        &self,
+        user_id: U,
+        input: &str,
+        interpreter: Arc<Mutex<FslInterpreter>>,
+    ) -> Result<String, FunboyError> {
+        let user_ctx = self.user_map.get_or_insert(user_id).await;
+        if user_ctx.is_generating.load(Ordering::Relaxed) {
+            return Err(FunboyError::UsageLimit(
+                "You're already generating something, please wait until it's finished.".to_string(),
+            ));
+        } else {
+            user_ctx.is_generating.store(true, Ordering::Relaxed);
+            let output = self.generate(input, interpreter).await;
+            user_ctx.is_generating.store(false, Ordering::Relaxed);
+            output
+        }
+    }
+
+    pub async fn user_generate_ollama(
+        &self,
+        user_id: U,
+        prompt: &str,
+        interpreter: Arc<Mutex<FslInterpreter>>,
+    ) -> Result<OllamaResponse, FunboyError> {
+        let user_ctx = self.user_map.get_or_insert(user_id).await;
+        if user_ctx.is_generating.load(Ordering::Relaxed) {
+            return Err(FunboyError::UsageLimit(
+                "You're already generating something, please wait until it's finished.".to_string(),
+            ));
+        } else {
+            let ollama_settings = user_ctx.ollama_settings.lock().await.clone();
+            user_ctx.is_generating.store(true, Ordering::Relaxed);
+            let output = self
+                .generate_ollama(
+                    self.get_ollama_model().await,
+                    &ollama_settings,
+                    prompt,
+                    interpreter,
+                )
+                .await;
+            user_ctx.is_generating.store(false, Ordering::Relaxed);
+            output
         }
     }
 }

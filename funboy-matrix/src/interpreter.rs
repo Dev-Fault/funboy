@@ -4,7 +4,7 @@ use fsl_interpreter::{
     FslInterpreter, InterpreterData,
     types::{command::Executor, value::Value},
 };
-use funboy_cli::{ASK, ASK_RULES, DEFAULT_TIMEOUT_SECS, FunboyCtx, SAY, SAY_RULES};
+use funboy_cli::{ASK, ASK_RULES, DEFAULT_TIMEOUT_SECS, SAY, SAY_RULES};
 use funboy_core::Funboy;
 use matrix_sdk::{
     Room,
@@ -37,15 +37,15 @@ impl MatrixCtx {
 
 #[derive(Clone)]
 pub struct FslCtx {
-    pub funboy_ctx: FunboyCtx<MatrixUserId>,
+    pub funboy: Arc<Funboy<MatrixUserId>>,
     pub matrix_ctx: MatrixCtx,
     pub interpreter: Arc<Mutex<FslInterpreter>>,
 }
 
 impl FslCtx {
-    pub fn new(funboy_ctx: FunboyCtx<MatrixUserId>, matrix_ctx: MatrixCtx) -> Self {
+    pub fn new(funboy: Arc<Funboy<MatrixUserId>>, matrix_ctx: MatrixCtx) -> Self {
         Self {
-            funboy_ctx: funboy_ctx,
+            funboy,
             matrix_ctx,
             interpreter: Arc::new(Mutex::new(FslInterpreter::new())),
         }
@@ -56,7 +56,6 @@ impl FslCtx {
         message: &str,
     ) -> Result<String, fsl_interpreter::types::command::CommandError> {
         match self
-            .funboy_ctx
             .funboy
             .generate(&message, self.interpreter.clone())
             .await
@@ -72,11 +71,11 @@ impl FslCtx {
 }
 
 pub async fn create_interpreter(
-    funboy_ctx: FunboyCtx<MatrixUserId>,
+    funboy: Arc<Funboy<MatrixUserId>>,
     matrix_ctx: MatrixCtx,
 ) -> Arc<Mutex<FslInterpreter>> {
     let mut interpreter = FslInterpreter::new();
-    let fsl_ctx = FslCtx::new(funboy_ctx, matrix_ctx);
+    let fsl_ctx = FslCtx::new(funboy, matrix_ctx);
     interpreter.add_command(SAY, SAY_RULES, create_say_command(fsl_ctx.clone()));
     interpreter.add_command(ASK, ASK_RULES, create_ask_command(fsl_ctx.clone()));
     Arc::new(Mutex::new(interpreter))
