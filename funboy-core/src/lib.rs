@@ -3,7 +3,7 @@ use std::{
     fmt::Debug,
     hash::{DefaultHasher, Hash, Hasher},
     str::FromStr,
-    sync::Arc,
+    sync::{Arc, atomic::AtomicBool},
     time::Duration,
 };
 
@@ -75,21 +75,67 @@ pub struct OllamaResponse {
 }
 
 #[derive(Debug, Clone)]
-pub struct Funboy {
+pub struct UserCtx {
+    pub is_generating: Arc<AtomicBool>,
+    pub ollama_settings: Arc<Mutex<OllamaSettings>>,
+}
+
+impl Default for UserCtx {
+    fn default() -> Self {
+        Self {
+            is_generating: Default::default(),
+            ollama_settings: Default::default(),
+        }
+    }
+}
+
+impl UserCtx {
+    pub fn new() -> UserCtx {
+        Self {
+            is_generating: Arc::new(AtomicBool::new(false)),
+            ollama_settings: Arc::new(Mutex::new(OllamaSettings::default())),
+        }
+    }
+}
+
+pub trait UserId: Eq + Hash + Send + Sync + Clone + 'static {}
+
+#[derive(Debug, Clone)]
+pub struct UserMap<U: UserId>(Arc<Mutex<HashMap<U, UserCtx>>>);
+
+impl<U: UserId> UserMap<U> {
+    pub fn new() -> Self {
+        UserMap(Arc::new(Mutex::new(HashMap::new())))
+    }
+
+    pub async fn get_or_insert(&self, user_id: U) -> UserCtx {
+        let mut map = self.0.lock().await;
+        let user_ctx = map.entry(user_id).or_insert(UserCtx::default()).clone();
+        drop(map);
+        user_ctx
+    }
+}
+
+pub const MAX_TEMPLATE_LENGTH: usize = 255;
+
+#[derive(Debug, Clone)]
+pub struct Funboy<U: UserId> {
     template_db: TemplateDatabase,
     ollama_model: Arc<Mutex<Option<String>>>,
     ollama_generator: OllamaGenerator,
     valid_template_regex: Regex,
+    user_map: UserMap<U>,
     random_sub_cache: Arc<Cache<String, Vec<Substitute>>>,
 }
 
-impl Funboy {
+impl<U: UserId> Funboy<U> {
     pub fn new(template_db: TemplateDatabase) -> Self {
         Self {
             template_db,
             ollama_generator: OllamaGenerator::default(),
             ollama_model: Arc::new(Mutex::new(None)),
             valid_template_regex: Regex::new(&format!("^[{}]+$", VALID_TEMPLATE_CHARS)).unwrap(),
+            user_map: UserMap::new(),
             random_sub_cache: Arc::new(
                 CacheBuilder::new(20)
                     .time_to_live(Duration::from_secs(60))
@@ -111,65 +157,6 @@ impl Funboy {
         *model = new_model;
     }
 
-    fn gen_rand_num_inclusive<T: SampleUniform + PartialOrd>(min: T, max: T) -> T {
-        let mut rng = rand::rng();
-        rng.random_range(min..=max)
-    }
-
-    fn gen_rand_num_exclusive<T: SampleUniform + PartialOrd>(min: T, max: T) -> T {
-        let mut rng = rand::rng();
-        rng.random_range(min..max)
-    }
-
-    fn gen_rand_num_from_str<T: FromStr + PartialOrd + SampleUniform + ToString>(
-        min: &str,
-        max: &str,
-        inclusive: bool,
-    ) -> Result<String, &'static str> {
-        match (min.parse(), max.parse()) {
-            (Ok(min), Ok(max)) => {
-                if min >= max {
-                    Err("min must be less than max")
-                } else {
-                    if inclusive {
-                        Ok(Self::gen_rand_num_inclusive::<T>(min, max).to_string())
-                    } else {
-                        Ok(Self::gen_rand_num_exclusive::<T>(min, max).to_string())
-                    }
-                }
-            }
-            _ => Err("min and max values must be a number"),
-        }
-    }
-
-    pub fn random_number(min: &str, max: &str, inclusive: bool) -> Result<String, FunboyError> {
-        if min.contains('.') || max.contains('.') {
-            match Self::gen_rand_num_from_str::<f64>(min, max, inclusive) {
-                Ok(result) => Ok(result),
-
-                Err(e) => Err(FunboyError::UserInput(e.to_string())),
-            }
-        } else {
-            match Self::gen_rand_num_from_str::<i64>(min, max, inclusive) {
-                Ok(result) => Ok(result),
-
-                Err(e) => Err(FunboyError::UserInput(e.to_string())),
-            }
-        }
-    }
-
-    pub fn random_entry<'b>(list: &[&'b str]) -> Result<&'b str, FunboyError> {
-        if list.len() < 2 {
-            Err(FunboyError::UserInput(
-                "list must contain at least two entries".to_string(),
-            ))
-        } else {
-            let output = list[Self::gen_rand_num_inclusive(0, list.len() - 1)];
-            Ok(output)
-        }
-    }
-
-    pub const MAX_TEMPLATE_LENGTH: usize = 255;
     fn validate_template_name(&self, template: &str) -> Result<(), FunboyError> {
         if template.is_empty() {
             return Err(FunboyError::UserInput(
@@ -183,7 +170,7 @@ impl Funboy {
             return Err(FunboyError::UserInput(
                 "template must be lowercase containing only characters a-z, 0-9, and _".to_string(),
             ));
-        } else if template.len() > Funboy::MAX_TEMPLATE_LENGTH {
+        } else if template.len() > MAX_TEMPLATE_LENGTH {
             return Err(FunboyError::UserInput(
                 "template must be less than 255 characters long".to_string(),
             ));
@@ -540,7 +527,7 @@ impl Funboy {
 
 const GET_SUB: &str = "get_sub";
 const GET_SUB_RULES: &[ArgRule] = &[ArgRule::new(ArgPos::Index(0), TEXT_TYPES)];
-fn create_get_sub_command(funboy: Arc<Funboy>) -> Executor {
+fn create_get_sub_command<U: UserId>(funboy: Arc<Funboy<U>>) -> Executor {
     let get_sub_command = {
         move |command: Command, data: Arc<InterpreterData>| {
             let funboy = funboy.clone();
@@ -573,7 +560,7 @@ const ASK_AI_RULES: &[ArgRule] = &[
     ArgRule::new(ArgPos::Index(1), WHOLE_NUMBER_TYPES),
 ];
 const MAX_WORD_LIMIT: i64 = 500;
-fn create_ask_ai_command(funboy: Arc<Funboy>) -> Executor {
+fn create_ask_ai_command<U: UserId>(funboy: Arc<Funboy<U>>) -> Executor {
     let get_sub_command = {
         move |command: Command, data: Arc<InterpreterData>| {
             let funboy = funboy.clone();
@@ -614,6 +601,63 @@ fn create_ask_ai_command(funboy: Arc<Funboy>) -> Executor {
     Some(Arc::new(get_sub_command))
 }
 
+fn gen_rand_num_inclusive<T: SampleUniform + PartialOrd>(min: T, max: T) -> T {
+    let mut rng = rand::rng();
+    rng.random_range(min..=max)
+}
+
+fn gen_rand_num_exclusive<T: SampleUniform + PartialOrd>(min: T, max: T) -> T {
+    let mut rng = rand::rng();
+    rng.random_range(min..max)
+}
+
+fn gen_rand_num_from_str<T: FromStr + PartialOrd + SampleUniform + ToString>(
+    min: &str,
+    max: &str,
+    inclusive: bool,
+) -> Result<String, &'static str> {
+    match (min.parse(), max.parse()) {
+        (Ok(min), Ok(max)) => {
+            if min >= max {
+                Err("min must be less than max")
+            } else {
+                if inclusive {
+                    Ok(gen_rand_num_inclusive::<T>(min, max).to_string())
+                } else {
+                    Ok(gen_rand_num_exclusive::<T>(min, max).to_string())
+                }
+            }
+        }
+        _ => Err("min and max values must be a number"),
+    }
+}
+pub fn random_number(min: &str, max: &str, inclusive: bool) -> Result<String, FunboyError> {
+    if min.contains('.') || max.contains('.') {
+        match gen_rand_num_from_str::<f64>(min, max, inclusive) {
+            Ok(result) => Ok(result),
+
+            Err(e) => Err(FunboyError::UserInput(e.to_string())),
+        }
+    } else {
+        match gen_rand_num_from_str::<i64>(min, max, inclusive) {
+            Ok(result) => Ok(result),
+
+            Err(e) => Err(FunboyError::UserInput(e.to_string())),
+        }
+    }
+}
+
+pub fn random_entry<'b>(list: &[&'b str]) -> Result<&'b str, FunboyError> {
+    if list.len() < 2 {
+        Err(FunboyError::UserInput(
+            "list must contain at least two entries".to_string(),
+        ))
+    } else {
+        let output = list[gen_rand_num_inclusive(0, list.len() - 1)];
+        Ok(output)
+    }
+}
+
 #[cfg(test)]
 mod core {
     use super::*;
@@ -624,7 +668,7 @@ mod core {
     #[tokio::test]
     async fn random_number_produces_int_in_range() {
         for _ in 0..100 {
-            let result = Funboy::random_number("1", "6", true)
+            let result = random_number("1", "6", true)
                 .unwrap()
                 .parse::<i64>()
                 .unwrap();
@@ -635,7 +679,7 @@ mod core {
     #[tokio::test]
     async fn random_number_produces_float() {
         for _ in 0..100 {
-            let result = Funboy::random_number("1.0", "6.0", true)
+            let result = random_number("1.0", "6.0", true)
                 .unwrap()
                 .parse::<f64>()
                 .unwrap();
@@ -645,7 +689,7 @@ mod core {
 
     #[tokio::test]
     async fn random_number_fails_when_min_greater_than_max() {
-        match Funboy::random_number("6", "1", true) {
+        match random_number("6", "1", true) {
             Ok(_) => {
                 panic!("Value should not be Ok");
             }
@@ -660,7 +704,7 @@ mod core {
 
     #[tokio::test]
     async fn random_number_fails_when_min_equal_to_max() {
-        match Funboy::random_number("6", "6", true) {
+        match random_number("6", "6", true) {
             Ok(_) => {
                 panic!("Value should not be Ok");
             }
@@ -675,7 +719,7 @@ mod core {
 
     #[tokio::test]
     async fn random_entry_returns_correct_output() {
-        let result = Funboy::random_entry(&["one", "two", "three", "four"]).unwrap();
+        let result = random_entry(&["one", "two", "three", "four"]).unwrap();
 
         if !(&["one", "two", "three", "four"].contains(&result)) {
             panic!("array should contain result");
@@ -684,7 +728,7 @@ mod core {
 
     #[tokio::test]
     async fn random_entry_fails_with_less_than_two_entries() {
-        match Funboy::random_entry(&["one"]) {
+        match random_entry(&["one"]) {
             Ok(_) => {
                 panic!("Value should not be Ok");
             }
@@ -703,7 +747,9 @@ mod core {
             .unwrap()
     }
 
-    async fn get_funboy(pool: PgPool) -> Funboy {
+    impl UserId for u64 {}
+
+    async fn get_funboy(pool: PgPool) -> Funboy<u64> {
         let db = create_debug_db(pool).await.unwrap();
         Funboy::new(db)
     }

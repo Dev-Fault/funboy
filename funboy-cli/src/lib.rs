@@ -1,4 +1,8 @@
-use std::{str::FromStr, sync::Arc, time::Duration};
+use std::{
+    str::FromStr,
+    sync::{Arc, atomic::AtomicBool},
+    time::Duration,
+};
 
 use clap::Parser;
 use dotenvy::dotenv;
@@ -8,7 +12,7 @@ use fsl_interpreter::{
     types::command::{ArgPos, ArgRule},
 };
 use funboy_core::{
-    Funboy,
+    Funboy, UserId,
     ollama::OllamaSettings,
     template_database::{Limit, OrderBy, TemplateDatabase},
 };
@@ -30,32 +34,34 @@ pub struct FunboyEnv {
     pub default_ollama_model: Option<String>,
 }
 
-pub fn get_env() -> FunboyEnv {
-    dotenv().ok();
+impl FunboyEnv {
+    pub fn new() -> FunboyEnv {
+        dotenv().ok();
 
-    let debug_mode = std::env::var("DEBUG_MODE")
-        .unwrap_or("false".to_string())
-        .parse::<bool>()
-        .expect("DEBUG_MODE must be of type bool");
+        let debug_mode = std::env::var("DEBUG_MODE")
+            .unwrap_or("false".to_string())
+            .parse::<bool>()
+            .expect("DEBUG_MODE must be of type bool");
 
-    let db_url = if debug_mode == false {
-        println!("Launching in release mode.");
-        std::env::var("DATABASE_URL").expect("missing DATABASE_URL")
-    } else {
-        println!("Launching in debug mode.");
-        std::env::var("DEBUG_DATABASE_URL").expect("missing DATABASE_URL")
-    };
+        let db_url = if debug_mode == false {
+            println!("Launching in release mode.");
+            std::env::var("DATABASE_URL").expect("missing DATABASE_URL")
+        } else {
+            println!("Launching in debug mode.");
+            std::env::var("DEBUG_DATABASE_URL").expect("missing DATABASE_URL")
+        };
 
-    let default_ollama_model = std::env::var("DEFAULT_OLLAMA_MODEL").ok();
+        let default_ollama_model = std::env::var("DEFAULT_OLLAMA_MODEL").ok();
 
-    FunboyEnv {
-        debug_mode,
-        db_url,
-        default_ollama_model,
+        FunboyEnv {
+            debug_mode,
+            db_url,
+            default_ollama_model,
+        }
     }
 }
 
-pub async fn get_funboy(env: &FunboyEnv) -> Funboy {
+pub async fn get_funboy<U: UserId>(env: &FunboyEnv) -> Funboy<U> {
     let pool = Arc::new(
         PgPoolOptions::new()
             .max_connections(15)
@@ -372,19 +378,30 @@ impl Permissions {
 }
 
 #[derive(Clone)]
-pub struct FunboyCtx {
-    pub funboy: Arc<Funboy>,
+pub struct FunboyCtx<U: UserId> {
+    pub funboy: Arc<Funboy<U>>,
     pub ollama_settings: Arc<Mutex<OllamaSettings>>,
+    pub in_use: Arc<AtomicBool>,
+}
+
+impl<U: UserId> FunboyCtx<U> {
+    pub fn new(funboy: Arc<Funboy<U>>) -> Self {
+        FunboyCtx {
+            funboy: funboy,
+            ollama_settings: Arc::new(Mutex::new(OllamaSettings::default())),
+            in_use: Arc::new(AtomicBool::new(false)),
+        }
+    }
 }
 
 #[derive(Clone)]
-pub struct FslContext {
-    pub funboy_ctx: FunboyCtx,
+pub struct FslContext<U: UserId> {
+    pub funboy_ctx: FunboyCtx<U>,
     pub interpreter: Arc<Mutex<FslInterpreter>>,
 }
 
-impl FslContext {
-    pub fn new(funboy_ctx: FunboyCtx) -> Self {
+impl<U: UserId> FslContext<U> {
+    pub fn new(funboy_ctx: FunboyCtx<U>) -> Self {
         Self {
             funboy_ctx: funboy_ctx,
             interpreter: Arc::new(Mutex::new(FslInterpreter::new())),
@@ -411,8 +428,8 @@ impl FslContext {
     }
 }
 
-pub async fn interpret_bot_commands(
-    funboy_ctx: &FunboyCtx,
+pub async fn interpret_bot_commands<U: UserId>(
+    funboy_ctx: &FunboyCtx<U>,
     interpreter: Arc<Mutex<FslInterpreter>>,
     permissions: &Permissions,
     input: &str,
@@ -511,8 +528,8 @@ pub async fn interpret_bot_commands(
     }
 }
 
-async fn replace(
-    funboy: &Arc<Funboy>,
+async fn replace<U: UserId>(
+    funboy: &Arc<Funboy<U>>,
     template: Option<String>,
     substitute: String,
     with_substitute: String,
@@ -575,8 +592,8 @@ async fn replace(
     }
 }
 
-async fn rename(
-    funboy: &Arc<Funboy>,
+async fn rename<U: UserId>(
+    funboy: &Arc<Funboy<U>>,
     from_template: String,
     to_template: String,
 ) -> Result<CommandResult, CommandError> {
@@ -596,8 +613,8 @@ async fn rename(
     }
 }
 
-async fn copy(
-    funboy: &Arc<Funboy>,
+async fn copy<U: UserId>(
+    funboy: &Arc<Funboy<U>>,
     from_template: String,
     to_template: String,
 ) -> Result<CommandResult, CommandError> {
@@ -620,8 +637,8 @@ async fn copy(
     }
 }
 
-async fn ollama(
-    funboy: &Arc<Funboy>,
+async fn ollama<U: UserId>(
+    funboy: &Arc<Funboy<U>>,
     ollama_settings: &Arc<Mutex<OllamaSettings>>,
     action: OllamaAction,
 ) -> Result<CommandResult, CommandError> {
@@ -724,8 +741,8 @@ async fn ollama(
     }
 }
 
-async fn list(
-    funboy: &Arc<Funboy>,
+async fn list<U: UserId>(
+    funboy: &Arc<Funboy<U>>,
     template: Option<String>,
     search_term: Option<String>,
     list_style: ListStyle,
@@ -773,8 +790,8 @@ async fn list(
     }
 }
 
-async fn delete(
-    funboy: &Arc<Funboy>,
+async fn delete<U: UserId>(
+    funboy: &Arc<Funboy<U>>,
     template: String,
     substitutes: Vec<String>,
     single: bool,
@@ -814,8 +831,8 @@ async fn delete(
     }
 }
 
-async fn add(
-    funboy: &Arc<Funboy>,
+async fn add<U: UserId>(
+    funboy: &Arc<Funboy<U>>,
     template: String,
     substitutes: Vec<String>,
     single: bool,
@@ -851,8 +868,8 @@ async fn add(
     }
 }
 
-async fn generate(
-    funboy_ctx: &FunboyCtx,
+async fn generate<U: UserId>(
+    funboy_ctx: &FunboyCtx<U>,
     interpreter: Arc<Mutex<FslInterpreter>>,
     input: Vec<String>,
     file: bool,

@@ -1,5 +1,3 @@
-use funboy_core::Funboy;
-
 use crate::{
     Context, Error,
     io_format::{
@@ -11,7 +9,7 @@ use crate::{
 /// Generates a random number between or including the min and max provided
 #[poise::command(slash_command, prefix_command, category = "Random")]
 pub async fn random_number(ctx: Context<'_>, min: String, max: String) -> Result<(), Error> {
-    let number = Funboy::random_number(&min, &max, false);
+    let number = funboy_core::random_number(&min, &max, false);
     match number {
         Ok(number) => {
             ctx.say(number).await?;
@@ -29,7 +27,7 @@ pub async fn random_number(ctx: Context<'_>, min: String, max: String) -> Result
 #[poise::command(slash_command, prefix_command, category = "Random")]
 pub async fn random_entry(ctx: Context<'_>, entries: String) -> Result<(), Error> {
     let entries = split_by_whitespace_unless_quoted(&entries);
-    let entry = Funboy::random_entry(&entries);
+    let entry = funboy_core::random_entry(&entries);
     match entry {
         Ok(entry) => {
             ctx.say(entry).await?;

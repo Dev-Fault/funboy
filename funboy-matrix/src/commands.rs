@@ -2,6 +2,8 @@ use clap::Parser;
 use funboy_cli::{CommandError, CommandResult, FunboyCtx};
 use matrix_sdk::{Room, attachment::AttachmentConfig};
 
+use crate::MatrixUserId;
+
 #[derive(Parser, Debug)]
 enum ImageAction {
     Embed { url: String },
@@ -16,7 +18,7 @@ enum MatrixCommand {
 }
 
 pub async fn interpret_matrix_commands(
-    funboy_ctx: &FunboyCtx,
+    funboy_ctx: &FunboyCtx<MatrixUserId>,
     room: Room,
     input: &str,
 ) -> Result<CommandResult, CommandError> {

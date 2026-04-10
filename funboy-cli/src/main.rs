@@ -5,21 +5,24 @@ use fsl_interpreter::{
     types::{command::Executor, value::Value},
 };
 use funboy_cli::{
-    ASK, ASK_RULES, CommandResult, Context, DEFAULT_TIMEOUT_SECS, FunboyCtx, Permissions, SAY,
-    SAY_RULES, get_env, get_funboy, interpret_bot_commands,
+    ASK, ASK_RULES, CommandResult, Context, FunboyCtx, FunboyEnv, Permissions, SAY, SAY_RULES,
+    get_funboy, interpret_bot_commands,
 };
-use funboy_core::ollama::{MAX_PREDICT, OllamaSettings};
+use funboy_core::{
+    UserId,
+    ollama::{MAX_PREDICT, OllamaSettings},
+};
 use rustyline::DefaultEditor;
 use tokio::sync::Mutex;
 
 #[derive(Clone)]
-pub struct FslContext {
-    pub funboy_ctx: FunboyCtx,
+pub struct FslContext<U: UserId> {
+    pub funboy_ctx: FunboyCtx<U>,
     pub interpreter: Arc<Mutex<FslInterpreter>>,
 }
 
-impl FslContext {
-    pub fn new(funboy_ctx: FunboyCtx) -> Self {
+impl<U: UserId> FslContext<U> {
+    pub fn new(funboy_ctx: FunboyCtx<U>) -> Self {
         Self {
             funboy_ctx: funboy_ctx,
             interpreter: Arc::new(Mutex::new(FslInterpreter::new())),
@@ -46,7 +49,7 @@ impl FslContext {
     }
 }
 
-fn create_say_command(fsl_ctx: FslContext) -> Executor {
+fn create_say_command<U: UserId>(fsl_ctx: FslContext<U>) -> Executor {
     let say_command = {
         move |command: fsl_interpreter::types::command::Command, interpreter_data| {
             let fsl_ctx = fsl_ctx.clone();
@@ -78,7 +81,10 @@ fn create_say_command(fsl_ctx: FslContext) -> Executor {
     Some(Arc::new(say_command))
 }
 
-fn create_ask_command(fsl_ctx: FslContext, rl: Arc<Mutex<DefaultEditor>>) -> Executor {
+fn create_ask_command<U: UserId>(
+    fsl_ctx: FslContext<U>,
+    rl: Arc<Mutex<DefaultEditor>>,
+) -> Executor {
     let ask_command = {
         move |command: fsl_interpreter::types::command::Command, data: Arc<InterpreterData>| {
             let fsl_ctx = fsl_ctx.clone();
@@ -128,8 +134,8 @@ fn create_ask_command(fsl_ctx: FslContext, rl: Arc<Mutex<DefaultEditor>>) -> Exe
     Some(Arc::new(ask_command))
 }
 
-pub async fn enter_interactive_generation(
-    funboy_ctx: FunboyCtx,
+pub async fn enter_interactive_generation<U: UserId>(
+    funboy_ctx: FunboyCtx<U>,
     rl: Arc<Mutex<DefaultEditor>>,
 ) -> rustyline::Result<()> {
     let interpreter = create_interpreter(funboy_ctx.clone(), rl.clone()).await;
@@ -161,8 +167,8 @@ pub async fn enter_interactive_generation(
     Ok(())
 }
 
-pub async fn enter_interpreter(
-    funboy_ctx: FunboyCtx,
+pub async fn enter_interpreter<U: UserId>(
+    funboy_ctx: FunboyCtx<U>,
     rl: Arc<Mutex<DefaultEditor>>,
 ) -> rustyline::Result<()> {
     let interpreter = create_interpreter(funboy_ctx, rl.clone()).await;
@@ -194,8 +200,8 @@ pub async fn enter_interpreter(
     Ok(())
 }
 
-async fn create_interpreter(
-    funboy_ctx: FunboyCtx,
+async fn create_interpreter<U: UserId>(
+    funboy_ctx: FunboyCtx<U>,
     rl: Arc<Mutex<DefaultEditor>>,
 ) -> Arc<Mutex<FslInterpreter>> {
     let mut interpreter = FslInterpreter::new_unbounded();
@@ -209,19 +215,20 @@ async fn create_interpreter(
     Arc::new(Mutex::new(interpreter))
 }
 
+#[derive(Clone, Hash, Eq, PartialEq)]
+struct Id(u64);
+impl UserId for Id {}
+
 #[tokio::main]
 async fn main() -> rustyline::Result<()> {
-    let env = get_env();
-    let funboy = Arc::new(get_funboy(&env).await);
+    let env = FunboyEnv::new();
+    let funboy = Arc::new(get_funboy::<Id>(&env).await);
     funboy.set_ollama_model(env.default_ollama_model).await;
     let rl = Arc::new(Mutex::new(DefaultEditor::new()?));
     let mut ollama_settings = OllamaSettings::default();
     ollama_settings.set_output_limit(MAX_PREDICT);
 
-    let funboy_ctx = FunboyCtx {
-        funboy: funboy.clone(),
-        ollama_settings: Arc::new(Mutex::new(OllamaSettings::default())),
-    };
+    let funboy_ctx = FunboyCtx::new(funboy);
 
     let permissions = Permissions::all();
 

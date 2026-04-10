@@ -1,6 +1,11 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    sync::{Arc, atomic::Ordering},
+    time::Duration,
+};
 
 use funboy_cli::{FunboyCtx, Permissions, interpret_bot_commands};
+use funboy_core::{Funboy, UserId};
 use matrix_sdk::{
     Client, Room, RoomState,
     ruma::{
@@ -25,6 +30,10 @@ use crate::{
 mod commands;
 mod interpreter;
 
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct MatrixUserId(OwnedUserId);
+impl UserId for MatrixUserId {}
+
 fn markdown_to_html(input: &str) -> String {
     input
         .trim()
@@ -46,7 +55,8 @@ fn markdown_to_html(input: &str) -> String {
 pub async fn on_room_message(
     event: OriginalSyncRoomMessageEvent,
     room: Room,
-    funboy_ctx: FunboyCtx,
+    funboy: Arc<Funboy<MatrixUserId>>,
+    user_ctx: Arc<Mutex<HashMap<OwnedUserId, FunboyCtx<MatrixUserId>>>>,
     pending_ask: Arc<Mutex<Option<(OwnedUserId, oneshot::Sender<String>)>>>,
 ) {
     // First, we need to unpack the message: We only want messages from rooms we are
@@ -72,17 +82,16 @@ pub async fn on_room_message(
     }
 
     tokio::spawn(async move {
-        let funboy = funboy_ctx.funboy.clone();
-
-        let interpreter = create_interpreter(
-            funboy_ctx.clone(),
-            MatrixCtx::new(room.clone(), pending_ask, event.sender),
-        )
-        .await;
-
         if text_content.body.starts_with("!") {
-            let usr_message = text_content.body.trim_start_matches("!");
-            let result = interpret_matrix_commands(&funboy_ctx, room.clone(), usr_message).await;
+            let mut user_ctx = user_ctx.lock().await;
+            let funboy_ctx = user_ctx
+                .entry(event.sender.clone())
+                .or_insert(FunboyCtx::new(funboy))
+                .clone();
+            drop(user_ctx);
+
+            let user_text = text_content.body.trim_start_matches("!");
+            let result = interpret_matrix_commands(&funboy_ctx, room.clone(), &user_text).await;
             if let Err(err) = result {
                 match err {
                     funboy_cli::CommandError::ExecutionFailed(e) => {
@@ -104,11 +113,28 @@ pub async fn on_room_message(
                 return;
             }
 
+            let interpreter = create_interpreter(
+                funboy_ctx.clone(),
+                MatrixCtx::new(room.clone(), pending_ask, event.sender),
+            )
+            .await;
+
+            if funboy_ctx.in_use.load(Ordering::Relaxed) {
+                room.send(RoomMessageEventContent::text_plain(
+                    "You're already using a command, wait until it's finished.",
+                ))
+                .await
+                .unwrap();
+                return;
+            } else {
+                funboy_ctx.in_use.store(true, Ordering::Relaxed);
+            }
+
             let result = interpret_bot_commands(
                 &funboy_ctx,
                 interpreter,
                 &Permissions::power_user(),
-                text_content.body.trim_start_matches("!"),
+                user_text,
             )
             .await;
 
@@ -133,6 +159,8 @@ pub async fn on_room_message(
                     room.send(content).await.unwrap();
                 }
             }
+
+            funboy_ctx.in_use.store(false, Ordering::Relaxed);
         }
     });
 }

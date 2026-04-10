@@ -16,7 +16,7 @@ use serenity::{
 use tokio::{sync::Mutex, time::sleep};
 
 use crate::{
-    Context,
+    Context, DiscordUserId,
     io_format::{context_extension::BOT_MAX_MESSAGE_SIZE, discord_message_format::split_message},
     rate_limiter::{RateLimit, RateLimitResult},
 };
@@ -30,7 +30,7 @@ pub struct InterpreterContext {
     pub guild_id: Option<GuildId>,
     pub channel_id: ChannelId,
     pub author_id: UserId,
-    pub funboy: Arc<Funboy>,
+    pub funboy: Arc<Funboy<DiscordUserId>>,
     pub rate_limit: Arc<Mutex<RateLimit>>,
     pub command_call_count: Arc<Mutex<u16>>,
     interpreter: Arc<Mutex<FslInterpreter>>,

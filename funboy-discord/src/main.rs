@@ -50,8 +50,12 @@ impl Default for OllamaData {
     }
 }
 
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct DiscordUserId(UserId);
+impl funboy_core::UserId for DiscordUserId {}
+
 struct Data {
-    pub funboy: Arc<Funboy>,
+    pub funboy: Arc<Funboy<DiscordUserId>>,
     pub track_list: Arc<Mutex<TrackList>>,
     pub track_player_lock: Arc<Mutex<()>>,
     pub ollama_data: OllamaData,
