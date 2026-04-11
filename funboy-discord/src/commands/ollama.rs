@@ -3,7 +3,7 @@ use poise::CreateReply;
 use serenity::all::UserId;
 
 use crate::{
-    Context, Error, OllamaUserSettingsMap,
+    Context, DiscordUserId, Error,
     interpreter::create_custom_interpreter,
     io_format::{context_extension::ContextExtension, discord_message_format::ellipsize_if_long},
 };
@@ -13,8 +13,7 @@ const ERROR_OLLAMA_UNAVAILABLE: &str = "Error: Ollama service not available.";
 /// Lists out all the available ollama models
 #[poise::command(slash_command, prefix_command, category = "Ollama")]
 pub async fn list_ollama_models(ctx: Context<'_>) -> Result<(), Error> {
-    let ollama_generator = ctx.data().ollama_data.generator.lock().await;
-    let models = ollama_generator.get_models().await;
+    let models = ctx.data().funboy.get_ollama_models().await;
     match models {
         Err(_) => {
             ctx.say_ephemeral(ERROR_OLLAMA_UNAVAILABLE).await?;
@@ -23,7 +22,7 @@ pub async fn list_ollama_models(ctx: Context<'_>) -> Result<(), Error> {
             ctx.say_ephemeral(
                 &models
                     .iter()
-                    .fold("".to_string(), |names, model| names + &model.name + "\n"),
+                    .fold("".to_string(), |names, model| names + &model + "\n"),
             )
             .await?;
         }
@@ -32,28 +31,12 @@ pub async fn list_ollama_models(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-fn get_ollama_user_settings<'a>(
-    ollama_settings_map: &'a mut OllamaUserSettingsMap,
-    user_id: &UserId,
-) -> &'a OllamaSettings {
-    ollama_settings_map.entry(*user_id).or_default();
-    ollama_settings_map.get(user_id).unwrap()
-}
-
-fn get_ollama_user_settings_mut<'a>(
-    ollama_settings_map: &'a mut OllamaUserSettingsMap,
-    user_id: &UserId,
-) -> &'a mut OllamaSettings {
-    ollama_settings_map.entry(*user_id).or_default();
-    ollama_settings_map.get_mut(user_id).unwrap()
-}
-
 /// Lists out the current ollama settings
 #[poise::command(slash_command, prefix_command, category = "Ollama")]
 pub async fn list_ollama_settings(ctx: Context<'_>) -> Result<(), Error> {
     let user_id = ctx.author().id;
-    let mut ollama_settings_map = ctx.data().ollama_data.user_settings.lock().await;
-    let settings = get_ollama_user_settings(&mut ollama_settings_map, &user_id);
+    let user_ctx = ctx.data().funboy.get_user_ctx(DiscordUserId(user_id)).await;
+    let settings = user_ctx.ollama_settings.lock().await;
 
     let current_model = ctx.data().funboy.get_ollama_model().await;
 
@@ -70,9 +53,7 @@ pub async fn list_ollama_settings(ctx: Context<'_>) -> Result<(), Error> {
 /// Sets the current ollama model
 #[poise::command(slash_command, prefix_command, category = "Ollama")]
 pub async fn set_ollama_model(ctx: Context<'_>, model: String) -> Result<(), Error> {
-    let ollama_generator = ctx.data().ollama_data.generator.lock().await;
-    let models = ollama_generator.get_models().await;
-    drop(ollama_generator);
+    let models = ctx.data().funboy.get_ollama_models().await;
     match models {
         Err(_) => {
             ctx.say_ephemeral(ERROR_OLLAMA_UNAVAILABLE).await?;
@@ -80,8 +61,8 @@ pub async fn set_ollama_model(ctx: Context<'_>, model: String) -> Result<(), Err
         Ok(models) => {
             if models
                 .iter()
-                .map(|model| &model.name)
-                .any(|name| *name == model)
+                .map(|model| model)
+                .any(|name| name.as_str() == model.as_str())
             {
                 ctx.data()
                     .funboy
@@ -111,8 +92,8 @@ pub async fn set_ollama_parameters(
     top_p: Option<f32>,
 ) -> Result<(), Error> {
     let user_id = ctx.author().id;
-    let mut ollama_settings_map = ctx.data().ollama_data.user_settings.lock().await;
-    let settings = get_ollama_user_settings_mut(&mut ollama_settings_map, &user_id);
+    let user_ctx = ctx.data().funboy.get_user_ctx(DiscordUserId(user_id)).await;
+    let mut settings = user_ctx.ollama_settings.lock().await;
 
     if let Some(temperature) = temperature {
         settings.set_temperature(temperature);
@@ -134,8 +115,8 @@ pub async fn set_ollama_parameters(
 #[poise::command(slash_command, prefix_command, category = "Ollama")]
 pub async fn reset_ollama_parameters(ctx: Context<'_>) -> Result<(), Error> {
     let user_id = ctx.author().id;
-    let mut ollama_settings_map = ctx.data().ollama_data.user_settings.lock().await;
-    let settings = get_ollama_user_settings_mut(&mut ollama_settings_map, &user_id);
+    let user_ctx = ctx.data().funboy.get_user_ctx(DiscordUserId(user_id)).await;
+    let mut settings = user_ctx.ollama_settings.lock().await;
 
     settings.reset_parameters();
     ctx.say_ephemeral("Ollama parameters reset.").await?;
@@ -149,8 +130,8 @@ pub async fn set_ollama_system_prompt(
     system_prompt: String,
 ) -> Result<(), Error> {
     let user_id = ctx.author().id;
-    let mut ollama_settings_map = ctx.data().ollama_data.user_settings.lock().await;
-    let settings = get_ollama_user_settings_mut(&mut ollama_settings_map, &user_id);
+    let user_ctx = ctx.data().funboy.get_user_ctx(DiscordUserId(user_id)).await;
+    let mut settings = user_ctx.ollama_settings.lock().await;
 
     settings.set_system_prompt(&system_prompt);
     ctx.say_ephemeral("Ollama system prompt updated.").await?;
@@ -161,8 +142,8 @@ pub async fn set_ollama_system_prompt(
 #[poise::command(slash_command, prefix_command, category = "Ollama")]
 pub async fn reset_ollama_system_prompt(ctx: Context<'_>) -> Result<(), Error> {
     let user_id = ctx.author().id;
-    let mut ollama_settings_map = ctx.data().ollama_data.user_settings.lock().await;
-    let settings = get_ollama_user_settings_mut(&mut ollama_settings_map, &user_id);
+    let user_ctx = ctx.data().funboy.get_user_ctx(DiscordUserId(user_id)).await;
+    let mut settings = user_ctx.ollama_settings.lock().await;
 
     settings.reset_system_prompt();
     ctx.say_ephemeral("Ollama system prompt reset.").await?;
@@ -173,8 +154,8 @@ pub async fn reset_ollama_system_prompt(ctx: Context<'_>) -> Result<(), Error> {
 #[poise::command(slash_command, prefix_command, category = "Ollama")]
 pub async fn set_ollama_template(ctx: Context<'_>, template: String) -> Result<(), Error> {
     let user_id = ctx.author().id;
-    let mut ollama_settings_map = ctx.data().ollama_data.user_settings.lock().await;
-    let settings = get_ollama_user_settings_mut(&mut ollama_settings_map, &user_id);
+    let user_ctx = ctx.data().funboy.get_user_ctx(DiscordUserId(user_id)).await;
+    let mut settings = user_ctx.ollama_settings.lock().await;
 
     settings.set_template(&template);
     ctx.say_ephemeral("Ollama system prompt updated.").await?;
@@ -185,8 +166,8 @@ pub async fn set_ollama_template(ctx: Context<'_>, template: String) -> Result<(
 #[poise::command(slash_command, prefix_command, category = "Ollama")]
 pub async fn reset_ollama_template(ctx: Context<'_>) -> Result<(), Error> {
     let user_id = ctx.author().id;
-    let mut ollama_settings_map = ctx.data().ollama_data.user_settings.lock().await;
-    let settings = get_ollama_user_settings_mut(&mut ollama_settings_map, &user_id);
+    let user_ctx = ctx.data().funboy.get_user_ctx(DiscordUserId(user_id)).await;
+    let mut settings = user_ctx.ollama_settings.lock().await;
 
     settings.reset_template();
     ctx.say_ephemeral("Ollama template reset.").await?;
@@ -197,8 +178,8 @@ pub async fn reset_ollama_template(ctx: Context<'_>) -> Result<(), Error> {
 #[poise::command(slash_command, prefix_command, category = "Ollama")]
 pub async fn set_ollama_word_limit(ctx: Context<'_>, limit: u16) -> Result<(), Error> {
     let user_id = ctx.author().id;
-    let mut ollama_settings_map = ctx.data().ollama_data.user_settings.lock().await;
-    let settings = get_ollama_user_settings_mut(&mut ollama_settings_map, &user_id);
+    let user_ctx = ctx.data().funboy.get_user_ctx(DiscordUserId(user_id)).await;
+    let mut settings = user_ctx.ollama_settings.lock().await;
 
     if settings.set_output_limit(limit) {
         ctx.say_ephemeral("Ollama parameters updated.").await?;
@@ -218,21 +199,15 @@ pub async fn generate_ollama(ctx: Context<'_>, prompt: String) -> Result<(), Err
     let original_message = ctx.say("Generating...").await?;
 
     let user_id = ctx.author().id;
-    let mut users_lock = ctx.data().ollama_data.users.lock().await;
-
-    if users_lock.contains(&user_id) {
-        ctx.say_ephemeral("You are already generating a prompt. Please wait until it is finished.")
-            .await?;
-        return Ok(());
-    } else {
-        users_lock.insert(user_id);
-    }
-    drop(users_lock);
 
     let interpreted_prompt = ctx
         .data()
         .funboy
-        .generate(&prompt, create_custom_interpreter(&ctx))
+        .user_generate(
+            DiscordUserId(user_id),
+            &prompt,
+            create_custom_interpreter(&ctx),
+        )
         .await;
 
     let result: Result<(), Error> = {
@@ -248,21 +223,26 @@ pub async fn generate_ollama(ctx: Context<'_>, prompt: String) -> Result<(), Err
                     )
                     .await?;
 
-                let user_id = ctx.author().id;
-                let mut ollama_settings_map = ctx.data().ollama_data.user_settings.lock().await;
-                let settings =
-                    get_ollama_user_settings_mut(&mut ollama_settings_map, &user_id).clone();
-                drop(ollama_settings_map);
-                let ollama_generator = ctx.data().ollama_data.generator.lock().await;
-                let model = ctx.data().funboy.get_ollama_model().await;
-                let response = ollama_generator.generate(&prompt, &settings, model).await;
+                let response = ctx
+                    .data()
+                    .funboy
+                    .user_generate_ollama(
+                        DiscordUserId(user_id),
+                        &prompt,
+                        create_custom_interpreter(&ctx),
+                    )
+                    .await;
                 match response {
                     Err(e) => {
-                        ctx.say_ephemeral(&format!("Error: {}", e)).await?;
-                    }
-                    Ok(gen_res) => {
-                        ctx.say_long(&format!("{}{}", &prompt, gen_res.response), false)
+                        ctx.say_ephemeral(&format!("Error: {}", e.to_string()))
                             .await?;
+                    }
+                    Ok(response) => {
+                        ctx.say_long(
+                            &format!("{}{}", response.prompt, response.generated_text),
+                            false,
+                        )
+                        .await?;
                     }
                 }
                 Ok(())
@@ -273,9 +253,6 @@ pub async fn generate_ollama(ctx: Context<'_>, prompt: String) -> Result<(), Err
             }
         }
     };
-
-    let mut users = ctx.data().ollama_data.users.lock().await;
-    users.remove(&user_id);
 
     match result {
         Ok(_) => Ok(()),

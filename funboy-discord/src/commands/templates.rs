@@ -6,7 +6,7 @@ use poise::{ChoiceParameter, CreateReply};
 use serenity::all::{Attachment, ComponentInteraction, CreateAttachment};
 
 use crate::{
-    Context, Error,
+    Context, DiscordUserId, Error,
     components::{
         CANCEL_BUTTON_ID, CONFIRM_BUTTON_ID, create_confirmation_interaction, edit_interaction,
     },
@@ -55,6 +55,7 @@ use crate::{
 #[poise::command(slash_command, prefix_command, category = "Templates")]
 pub async fn generate(ctx: Context<'_>, input: String) -> Result<(), Error> {
     let start = std::time::Instant::now();
+    let user_id = ctx.author().id;
     let http = ctx.http();
     let channel_id = ctx.channel_id();
 
@@ -63,7 +64,11 @@ pub async fn generate(ctx: Context<'_>, input: String) -> Result<(), Error> {
     let output = ctx
         .data()
         .funboy
-        .generate(&input, create_custom_interpreter(&ctx))
+        .user_generate(
+            DiscordUserId(user_id),
+            &input,
+            create_custom_interpreter(&ctx),
+        )
         .await;
 
     // Don't use ctx if the webhook token expired or is close to expiring

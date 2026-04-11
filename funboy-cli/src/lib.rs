@@ -13,7 +13,6 @@ use fsl_interpreter::{
 };
 use funboy_core::{
     Funboy, UserId,
-    ollama::OllamaSettings,
     template_database::{Limit, OrderBy, TemplateDatabase},
 };
 use sqlx::postgres::PgPoolOptions;
