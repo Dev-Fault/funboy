@@ -1,8 +1,4 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, atomic::Ordering},
-    time::Duration,
-};
+use std::{sync::Arc, time::Duration};
 
 use funboy_cli::{Permissions, interpret_bot_commands};
 use funboy_core::{Funboy, UserId};
@@ -16,7 +12,6 @@ use matrix_sdk::{
         },
     },
 };
-use pulldown_cmark::{Options, Parser, html};
 use tokio::{
     sync::{Mutex, oneshot},
     time::sleep,
@@ -33,117 +28,6 @@ mod interpreter;
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct MatrixUserId(OwnedUserId);
 impl UserId for MatrixUserId {}
-
-fn markdown_to_html(input: &str) -> String {
-    input
-        .trim()
-        .lines()
-        .map(|line| {
-            let parser = Parser::new_ext(line, Options::all());
-            let mut html_output = String::new();
-            html::push_html(&mut html_output, parser);
-            html_output
-                .replace("<p>", "")
-                .replace("</p>", "")
-                .trim()
-                .to_string()
-        })
-        .collect::<Vec<_>>()
-        .join("<br/>")
-}
-
-pub async fn on_room_message(
-    event: OriginalSyncRoomMessageEvent,
-    room: Room,
-    funboy: Arc<Funboy<MatrixUserId>>,
-    pending_ask: Arc<Mutex<Option<(OwnedUserId, oneshot::Sender<String>)>>>,
-) {
-    // First, we need to unpack the message: We only want messages from rooms we are
-    // still in and that are regular text messages - ignoring everything else.
-    if room.state() != RoomState::Joined {
-        return;
-    }
-
-    let MessageType::Text(text_content) = event.content.msgtype else {
-        return;
-    };
-
-    {
-        let mut pending = pending_ask.lock().await;
-        if let Some((expected_sender, tx)) = pending.take() {
-            if expected_sender == event.sender {
-                let _ = tx.send(text_content.body);
-                return;
-            } else {
-                *pending = Some((expected_sender, tx))
-            }
-        }
-    }
-
-    tokio::spawn(async move {
-        if text_content.body.starts_with("!") {
-            let user_text = text_content.body.trim_start_matches("!");
-            let result = interpret_matrix_commands(&funboy, room.clone(), &user_text).await;
-            if let Err(err) = result {
-                match err {
-                    funboy_cli::CommandError::ExecutionFailed(e) => {
-                        let html = markdown_to_html(&e);
-                        let content = RoomMessageEventContent::text_html(&e, html);
-                        room.send(content).await.unwrap();
-                        return;
-                    }
-                    funboy_cli::CommandError::LackingPermission(_) => {
-                        let e = err.to_string();
-                        let html = markdown_to_html(&e);
-                        let content = RoomMessageEventContent::text_html(&e, html);
-                        room.send(content).await.unwrap();
-                        return;
-                    }
-                    funboy_cli::CommandError::UnknownCommand(_) => {}
-                }
-            } else {
-                return;
-            }
-
-            let interpreter = create_interpreter(
-                funboy.clone(),
-                MatrixCtx::new(room.clone(), pending_ask, event.sender.clone()),
-            )
-            .await;
-
-            let result = interpret_bot_commands(
-                &funboy,
-                interpreter,
-                &Permissions::power_user(),
-                user_text,
-                MatrixUserId(event.sender),
-            )
-            .await;
-
-            match result {
-                Ok(result) => match result {
-                    funboy_cli::CommandResult::Text(message) => {
-                        // send our message to the room we found the command in
-                        if !message.is_empty() {
-                            let html = markdown_to_html(&message);
-                            let content = RoomMessageEventContent::text_html(&message, html);
-                            room.send(content).await.unwrap();
-                        }
-                    }
-                    funboy_cli::CommandResult::ContextSwitch(_) => {}
-                    funboy_cli::CommandResult::Exit => {}
-                    funboy_cli::CommandResult::None => {}
-                },
-                Err(e) => {
-                    let e = e.to_string();
-                    let html = markdown_to_html(&e);
-                    let content = RoomMessageEventContent::text_html(&e, html);
-                    room.send(content).await.unwrap();
-                }
-            }
-        }
-    });
-}
 
 pub async fn on_stripped_state_member(
     room_member: StrippedRoomMemberEvent,
@@ -174,4 +58,109 @@ pub async fn on_stripped_state_member(
         }
         println!("Successfully joined room {}", room.room_id());
     });
+}
+
+pub async fn on_room_message(
+    event: OriginalSyncRoomMessageEvent,
+    room: Room,
+    funboy: Arc<Funboy<MatrixUserId>>,
+    pending_ask: Arc<Mutex<Option<(OwnedUserId, oneshot::Sender<String>)>>>,
+) {
+    // First, we need to unpack the message: We only want messages from rooms we are
+    // still in and that are regular text messages - ignoring everything else.
+    if room.state() != RoomState::Joined {
+        return;
+    }
+
+    let MessageType::Text(text_content) = event.content.msgtype.clone() else {
+        return;
+    };
+
+    {
+        let mut pending = pending_ask.lock().await;
+        if let Some((expected_sender, tx)) = pending.take() {
+            if expected_sender == event.sender {
+                let _ = tx.send(text_content.body);
+                return;
+            } else {
+                *pending = Some((expected_sender, tx))
+            }
+        }
+    }
+
+    tokio::spawn(async move {
+        if text_content.body.starts_with("!") {
+            handle_bot_command(
+                event.clone(),
+                room,
+                funboy,
+                pending_ask,
+                text_content.body.trim_start_matches("!"),
+            )
+            .await;
+        }
+    });
+}
+
+pub async fn handle_bot_command(
+    event: OriginalSyncRoomMessageEvent,
+    room: Room,
+    funboy: Arc<Funboy<MatrixUserId>>,
+    pending_ask: Arc<Mutex<Option<(OwnedUserId, oneshot::Sender<String>)>>>,
+    message: &str,
+) {
+    let result = interpret_matrix_commands(&funboy, room.clone(), message).await;
+    if let Err(err) = result {
+        match err {
+            funboy_cli::CommandError::ExecutionFailed(e) => {
+                let content = RoomMessageEventContent::text_markdown(&e);
+                room.send(content).await.unwrap();
+                return;
+            }
+            funboy_cli::CommandError::LackingPermission(_) => {
+                let e = err.to_string();
+                let content = RoomMessageEventContent::text_markdown(&e);
+                room.send(content).await.unwrap();
+                return;
+            }
+            funboy_cli::CommandError::UnknownCommand(_) => {}
+        }
+    } else {
+        return;
+    }
+
+    let interpreter = create_interpreter(
+        funboy.clone(),
+        MatrixCtx::new(room.clone(), pending_ask, event.sender.clone()),
+    )
+    .await;
+
+    let result = interpret_bot_commands(
+        &funboy,
+        interpreter,
+        &Permissions::power_user(),
+        message,
+        MatrixUserId(event.sender),
+    )
+    .await;
+
+    match result {
+        Ok(result) => match result {
+            funboy_cli::CommandResult::Text(message) => {
+                // send our message to the room we found the command in
+                if !message.is_empty() {
+                    let content = RoomMessageEventContent::text_markdown(&message);
+                    room.send(content).await.unwrap();
+                }
+            }
+            funboy_cli::CommandResult::ContextSwitch(_) => {}
+            funboy_cli::CommandResult::Exit => {}
+            funboy_cli::CommandResult::None => {}
+        },
+        Err(e) => {
+            let e = e.to_string();
+            let content = RoomMessageEventContent::text_markdown(&e);
+            room.send(content).await.unwrap();
+        }
+    }
 }

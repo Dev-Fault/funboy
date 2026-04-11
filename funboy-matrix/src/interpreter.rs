@@ -12,7 +12,7 @@ use matrix_sdk::{
 };
 use tokio::sync::{Mutex, oneshot};
 
-use crate::{MatrixUserId, markdown_to_html};
+use crate::MatrixUserId;
 
 #[derive(Clone)]
 pub struct MatrixCtx {
@@ -111,8 +111,7 @@ pub fn create_ask_command(fsl_ctx: FslCtx) -> Executor {
                         }
                     };
 
-                    let html = markdown_to_html(&question);
-                    let question = RoomMessageEventContent::text_html(&question, html);
+                    let question = RoomMessageEventContent::text_markdown(&question);
                     room.send(question).await.unwrap();
 
                     let (tx, rx) = oneshot::channel::<String>();
@@ -160,8 +159,7 @@ pub fn create_say_command(fsl_ctx: FslCtx) -> Executor {
                     match message {
                         Ok(output) => {
                             if !output.is_empty() {
-                                let html = markdown_to_html(&output);
-                                let content = RoomMessageEventContent::text_html(&output, html);
+                                let content = RoomMessageEventContent::text_markdown(&output);
                                 room.send(content).await.unwrap();
                             }
                         }
