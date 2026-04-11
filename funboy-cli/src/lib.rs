@@ -1,8 +1,4 @@
-use std::{
-    str::FromStr,
-    sync::{Arc, atomic::AtomicBool},
-    time::Duration,
-};
+use std::{str::FromStr, sync::Arc, time::Duration};
 
 use clap::Parser;
 use dotenvy::dotenv;

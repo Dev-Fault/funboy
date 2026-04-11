@@ -1,21 +1,12 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-    time::Duration,
-};
+use std::sync::Arc;
 
 use ::serenity::all::{FullEvent, Interaction, UserId};
 use dotenvy::dotenv;
 use funboy_cli::{FunboyEnv, get_funboy};
-use funboy_core::{
-    Funboy,
-    ollama::{OllamaGenerator, OllamaSettings},
-    template_database::TemplateDatabase,
-};
+use funboy_core::Funboy;
 use poise::serenity_prelude as serenity;
 use reqwest::Client as HttpClient;
 use songbird::{SerenityInit, typemap::TypeMapKey};
-use sqlx::{PgPool, postgres::PgPoolOptions};
 use tokio::sync::Mutex;
 
 use crate::{

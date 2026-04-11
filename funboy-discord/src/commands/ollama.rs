@@ -1,6 +1,5 @@
-use funboy_core::ollama::{MAX_PREDICT, OllamaSettings};
+use funboy_core::ollama::MAX_PREDICT;
 use poise::CreateReply;
-use serenity::all::UserId;
 
 use crate::{
     Context, DiscordUserId, Error,
