@@ -103,6 +103,24 @@ impl UserCtx {
     }
 }
 
+struct FlagGuard {
+    flag: Arc<AtomicBool>,
+}
+
+impl FlagGuard {
+    fn new(flag: Arc<AtomicBool>) -> Option<Self> {
+        flag.compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+            .ok()
+            .map(|_| Self { flag })
+    }
+}
+
+impl Drop for FlagGuard {
+    fn drop(&mut self) {
+        self.flag.store(false, Ordering::Relaxed);
+    }
+}
+
 pub trait UserId: Eq + Hash + Send + Sync + Clone + 'static {}
 
 #[derive(Debug, Clone)]
@@ -540,16 +558,14 @@ impl<U: UserId> Funboy<U> {
         interpreter: Arc<Mutex<FslInterpreter>>,
     ) -> Result<String, FunboyError> {
         let user_ctx = self.user_map.get_or_insert(user_id).await;
-        if user_ctx.is_generating.load(Ordering::Relaxed) {
+        let Some(_guard) = FlagGuard::new(user_ctx.is_generating.clone()) else {
             return Err(FunboyError::UsageLimit(
                 "You're already generating something, please wait until it's finished.".to_string(),
             ));
-        } else {
-            user_ctx.is_generating.store(true, Ordering::Relaxed);
-            let output = self.generate(input, interpreter).await;
-            user_ctx.is_generating.store(false, Ordering::Relaxed);
-            output
-        }
+        };
+
+        let output = self.generate(input, interpreter).await;
+        output
     }
 
     pub async fn user_generate_ollama(
@@ -559,24 +575,21 @@ impl<U: UserId> Funboy<U> {
         interpreter: Arc<Mutex<FslInterpreter>>,
     ) -> Result<OllamaResponse, FunboyError> {
         let user_ctx = self.user_map.get_or_insert(user_id).await;
-        if user_ctx.is_generating.load(Ordering::Relaxed) {
+        let Some(_guard) = FlagGuard::new(user_ctx.is_generating.clone()) else {
             return Err(FunboyError::UsageLimit(
                 "You're already generating something, please wait until it's finished.".to_string(),
             ));
-        } else {
-            let ollama_settings = user_ctx.ollama_settings.lock().await.clone();
-            user_ctx.is_generating.store(true, Ordering::Relaxed);
-            let output = self
-                .generate_ollama(
-                    self.get_ollama_model().await,
-                    &ollama_settings,
-                    prompt,
-                    interpreter,
-                )
-                .await;
-            user_ctx.is_generating.store(false, Ordering::Relaxed);
-            output
-        }
+        };
+        let ollama_settings = user_ctx.ollama_settings.lock().await.clone();
+        let output = self
+            .generate_ollama(
+                self.get_ollama_model().await,
+                &ollama_settings,
+                prompt,
+                interpreter,
+            )
+            .await;
+        output
     }
 }
 
