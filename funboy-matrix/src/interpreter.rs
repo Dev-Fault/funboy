@@ -18,14 +18,14 @@ use crate::MatrixUserId;
 pub struct MatrixCtx {
     pub room: Room,
     pub pending_ask: Arc<Mutex<Option<(OwnedUserId, oneshot::Sender<String>)>>>,
-    pub sender: OwnedUserId,
+    pub sender: MatrixUserId,
 }
 
 impl MatrixCtx {
     pub fn new(
         room: Room,
         pending_ask: Arc<Mutex<Option<(OwnedUserId, oneshot::Sender<String>)>>>,
-        sender: OwnedUserId,
+        sender: MatrixUserId,
     ) -> Self {
         Self {
             room,
@@ -115,7 +115,7 @@ pub fn create_ask_command(fsl_ctx: FslCtx) -> Executor {
                     room.send(question).await.unwrap();
 
                     let (tx, rx) = oneshot::channel::<String>();
-                    *pending_ask.lock().await = Some((sender, tx));
+                    *pending_ask.lock().await = Some((sender.0, tx));
 
                     match rx.await {
                         Ok(response) => {

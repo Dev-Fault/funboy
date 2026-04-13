@@ -70,8 +70,9 @@ async fn main() {
     let pending_ask: Arc<Mutex<Option<(OwnedUserId, oneshot::Sender<String>)>>> =
         Arc::new(Mutex::new(None));
 
+    let client_clone = client.clone();
     client.add_event_handler(move |event: OriginalSyncRoomMessageEvent, room: Room| {
-        on_room_message(event, room, funboy, pending_ask)
+        on_room_message(client_clone, event, room, funboy, pending_ask)
     });
 
     let settings = SyncSettings::default().token(sync_token);

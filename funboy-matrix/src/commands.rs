@@ -1,7 +1,9 @@
 use clap::Parser;
 use funboy_cli::{CommandError, CommandResult};
-use funboy_core::Funboy;
-use matrix_sdk::{Room, attachment::AttachmentConfig};
+use funboy_core::{Funboy, RequestCode};
+use matrix_sdk::{
+    Room, attachment::AttachmentConfig, ruma::events::room::message::RoomMessageEventContent,
+};
 
 use crate::MatrixUserId;
 
@@ -16,10 +18,36 @@ enum MatrixCommand {
         #[command(subcommand)]
         action: ImageAction,
     },
+    Generate {
+        #[arg(short, long)]
+        file: bool,
+    },
+}
+
+pub enum Request {
+    GenerateFile,
+}
+
+impl Into<RequestCode> for Request {
+    fn into(self) -> RequestCode {
+        match self {
+            Request::GenerateFile => 0,
+        }
+    }
+}
+
+impl From<RequestCode> for Request {
+    fn from(value: RequestCode) -> Self {
+        match value {
+            0 => Request::GenerateFile,
+            _ => panic!("invalid request code"),
+        }
+    }
 }
 
 pub async fn interpret_matrix_commands(
     funboy: &Funboy<MatrixUserId>,
+    user_id: MatrixUserId,
     room: Room,
     input: &str,
 ) -> Result<CommandResult, CommandError> {
@@ -74,6 +102,21 @@ pub async fn interpret_matrix_commands(
                     }
                 }
             },
+            MatrixCommand::Generate { file } => {
+                if file {
+                    let user_ctx = funboy.get_user_ctx(user_id).await;
+                    let mut pending_requests = user_ctx.pending_requests.lock().await;
+                    pending_requests.push(Request::GenerateFile.into());
+                    room.send(RoomMessageEventContent::text_plain(
+                        "Attach the file you want to upload.",
+                    ))
+                    .await
+                    .unwrap();
+                    Ok(CommandResult::None)
+                } else {
+                    Err(CommandError::UnknownCommand("".to_string()))
+                }
+            }
         },
         Err(e) => Err(CommandError::UnknownCommand(e.to_string())),
     }

@@ -79,10 +79,13 @@ pub struct OllamaResponse {
     pub generated_text: String,
 }
 
+pub type RequestCode = u16;
+
 #[derive(Debug, Clone)]
 pub struct UserCtx {
     pub is_generating: Arc<AtomicBool>,
     pub ollama_settings: Arc<Mutex<OllamaSettings>>,
+    pub pending_requests: Arc<Mutex<Vec<RequestCode>>>,
 }
 
 impl Default for UserCtx {
@@ -90,6 +93,7 @@ impl Default for UserCtx {
         Self {
             is_generating: Default::default(),
             ollama_settings: Default::default(),
+            pending_requests: Default::default(),
         }
     }
 }
@@ -99,6 +103,7 @@ impl UserCtx {
         Self {
             is_generating: Arc::new(AtomicBool::new(false)),
             ollama_settings: Arc::new(Mutex::new(OllamaSettings::default())),
+            pending_requests: Arc::new(Mutex::new(Vec::new())),
         }
     }
 }
