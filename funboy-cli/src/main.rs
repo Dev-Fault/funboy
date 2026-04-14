@@ -5,8 +5,8 @@ use fsl_interpreter::{
     types::{command::Executor, value::Value},
 };
 use funboy_cli::{
-    ASK, ASK_RULES, CommandResult, Context, FslContext, FunboyEnv, Permissions, SAY, SAY_RULES,
-    get_funboy, interpret_bot_commands,
+    ASK, ASK_RULES, CommandResult, Context, FslContext, FunboyEnv, Mode, Permissions, SAY,
+    SAY_RULES, get_funboy, interpret_bot_commands,
 };
 use funboy_core::{
     Funboy, UserId,
@@ -200,21 +200,22 @@ async fn main() -> rustyline::Result<()> {
                 rl_lock.add_history_entry(&line)?;
                 drop(rl_lock);
                 match interpret_bot_commands(
+                    Id(0),
                     &funboy,
                     create_interpreter(funboy.clone(), rl.clone()).await,
                     &permissions,
+                    Context::Cli,
                     &line,
-                    Id(0),
                 )
                 .await
                 {
                     Ok(output) => match output {
                         CommandResult::Text(text) => println!("{}", text),
-                        CommandResult::ContextSwitch(context) => match context {
-                            Context::Generate => {
+                        CommandResult::Mode(context) => match context {
+                            Mode::Generate => {
                                 enter_interactive_generation(funboy.clone(), rl.clone()).await?;
                             }
-                            Context::FSL => {
+                            Mode::FSL => {
                                 enter_interpreter(funboy.clone(), rl.clone()).await?;
                             }
                         },

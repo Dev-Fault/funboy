@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use fsl_interpreter::FslInterpreter;
-use funboy_cli::{Permissions, interpret_bot_commands};
+use funboy_cli::{CommandError, CommandResult, Context, Permissions, interpret_bot_commands};
 use funboy_core::{Funboy, UserId};
 use matrix_sdk::{
     Client, Room, RoomState,
@@ -171,6 +171,7 @@ pub async fn handle_request(
                 room.send(content).await.unwrap();
             }
         }
+        Request::UploadSub => {}
     }
 }
 
@@ -182,26 +183,6 @@ pub async fn handle_bot_command(
     message: &str,
 ) {
     let user_id = MatrixUserId(event.sender.clone());
-    let result = interpret_matrix_commands(&funboy, user_id.clone(), room.clone(), message).await;
-    if let Err(err) = result {
-        match err {
-            funboy_cli::CommandError::ExecutionFailed(e) => {
-                let content = RoomMessageEventContent::text_markdown(&e);
-                room.send(content).await.unwrap();
-                return;
-            }
-            funboy_cli::CommandError::LackingPermission(_) => {
-                let e = err.to_string();
-                let content = RoomMessageEventContent::text_markdown(&e);
-                room.send(content).await.unwrap();
-                return;
-            }
-            funboy_cli::CommandError::UnknownCommand(_) => {}
-        }
-    } else {
-        return;
-    }
-
     let interpreter = create_interpreter(
         funboy.clone(),
         MatrixCtx::new(room.clone(), pending_ask, user_id.clone()),
@@ -209,31 +190,63 @@ pub async fn handle_bot_command(
     .await;
 
     let result = interpret_bot_commands(
+        MatrixUserId(event.sender),
         &funboy,
         interpreter,
         &Permissions::power_user(),
+        Context::Matrix,
         message,
-        MatrixUserId(event.sender),
     )
     .await;
 
-    match result {
-        Ok(result) => match result {
-            funboy_cli::CommandResult::Text(message) => {
-                // send our message to the room we found the command in
-                if !message.is_empty() {
-                    let content = RoomMessageEventContent::text_markdown(&message);
-                    room.send(content).await.unwrap();
+    if let Ok(result) = result {
+        handle_command_result(result, room).await;
+    } else {
+        let err = result.err().unwrap();
+        match err {
+            CommandError::UnhandledCommand(command) => {
+                let result =
+                    interpret_matrix_commands(&funboy, user_id.clone(), room.clone(), command)
+                        .await;
+                match result {
+                    Ok(result) => {
+                        handle_command_result(result, room).await;
+                    }
+                    Err(err) => {
+                        handle_command_err(err, room).await;
+                    }
                 }
             }
-            funboy_cli::CommandResult::ContextSwitch(_) => {}
-            funboy_cli::CommandResult::Exit => {}
-            funboy_cli::CommandResult::None => {}
-        },
-        Err(e) => {
-            let e = e.to_string();
-            let content = RoomMessageEventContent::text_markdown(&e);
-            room.send(content).await.unwrap();
+            _ => {
+                handle_command_err(err, room).await;
+            }
         }
     }
+}
+
+async fn handle_command_result(result: CommandResult, room: Room) {
+    match result {
+        CommandResult::Text(message) => {
+            if !message.is_empty() {
+                let content = RoomMessageEventContent::text_markdown(&message);
+                room.send(content).await.unwrap();
+            }
+        }
+        CommandResult::Mode(_) => {
+            let content = RoomMessageEventContent::text_plain(
+                "Mode switching not available in matrix client.",
+            );
+            room.send(content).await.unwrap();
+            return;
+        }
+        CommandResult::None => {}
+        CommandResult::Exit => {}
+    }
+}
+
+async fn handle_command_err(err: CommandError, room: Room) {
+    let e = err.to_string();
+    let content = RoomMessageEventContent::text_markdown(&e);
+    room.send(content).await.unwrap();
+    return;
 }

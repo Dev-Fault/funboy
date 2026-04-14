@@ -81,6 +81,7 @@ pub enum CommandError {
     ExecutionFailed(String),
     LackingPermission(Permission),
     UnknownCommand(String),
+    UnhandledCommand(Command),
 }
 
 impl ToString for CommandError {
@@ -91,6 +92,9 @@ impl ToString for CommandError {
                 format!("User lacks {} permission", permission.to_string())
             }
             CommandError::UnknownCommand(e) => e.clone(),
+            CommandError::UnhandledCommand(command) => {
+                format!("{:?} command not available in this context", command)
+            }
         }
     }
 }
@@ -99,18 +103,18 @@ const GENERATE: &str = "generate";
 const FSL: &str = "fsl";
 
 #[derive(Debug, Copy, Clone)]
-pub enum Context {
+pub enum Mode {
     Generate,
     FSL,
 }
 
-impl FromStr for Context {
+impl FromStr for Mode {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            GENERATE => Ok(Context::Generate),
-            FSL => Ok(Context::FSL),
+            GENERATE => Ok(Mode::Generate),
+            FSL => Ok(Mode::FSL),
             _ => Err(format!("Unknown context {}", s)),
         }
     }
@@ -118,7 +122,7 @@ impl FromStr for Context {
 
 pub enum CommandResult {
     Text(String),
-    ContextSwitch(Context),
+    Mode(Mode),
     None,
     Exit,
 }
@@ -149,7 +153,7 @@ const MODELS: &str = "models";
 const SETTINGS: &str = "settings";
 
 #[derive(Parser, Debug, Copy, Clone)]
-enum OllamaListOption {
+pub enum OllamaListOption {
     Model,
     Models,
     Settings,
@@ -169,7 +173,7 @@ impl FromStr for OllamaListOption {
 }
 
 #[derive(Parser, Debug, Clone)]
-enum OllamaSetOptions {
+pub enum OllamaSetOptions {
     #[command(name = "model")]
     Model { model: String },
     #[command(name = "system_prompt")]
@@ -191,8 +195,8 @@ enum OllamaSetOptions {
     RepeatPenalty { repeat_penalty: f32 },
 }
 
-#[derive(Parser, Debug)]
-enum OllamaAction {
+#[derive(Parser, Debug, Clone)]
+pub enum OllamaAction {
     List {
         #[arg(value_parser = clap::value_parser!(OllamaListOption))]
         option: OllamaListOption,
@@ -204,8 +208,13 @@ enum OllamaAction {
     },
 }
 
-#[derive(Parser, Debug)]
-enum Command {
+#[derive(Parser, Debug, Clone)]
+pub enum ImageAction {
+    Embed { url: String },
+}
+
+#[derive(Parser, Debug, Clone)]
+pub enum Command {
     Generate {
         #[arg(trailing_var_arg = true)]
         input: Vec<String>,
@@ -221,6 +230,9 @@ enum Command {
 
         #[arg(short, long)]
         single: bool,
+
+        #[arg(short, long)]
+        file: bool,
 
         #[arg(trailing_var_arg = true)]
         substitutes: Vec<String>,
@@ -266,8 +278,12 @@ enum Command {
         action: OllamaAction,
     },
     Context {
-        #[arg(value_parser = clap::value_parser!(Context))]
-        context: Context,
+        #[arg(value_parser = clap::value_parser!(Mode))]
+        context: Mode,
+    },
+    Image {
+        #[command(subcommand)]
+        action: ImageAction,
     },
     Exit,
 }
@@ -405,12 +421,19 @@ impl<U: UserId> FslContext<U> {
     }
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Context {
+    Cli,
+    Matrix,
+}
+
 pub async fn interpret_bot_commands<U: UserId>(
+    user_id: U,
     funboy: &Funboy<U>,
     interpreter: Arc<Mutex<FslInterpreter>>,
     permissions: &Permissions,
+    context: Context,
     input: &str,
-    user_id: U,
 ) -> Result<CommandResult, CommandError> {
     let input = input.trim();
     if input.is_empty() {
@@ -424,6 +447,9 @@ pub async fn interpret_bot_commands<U: UserId>(
 
     match Command::try_parse_from(full_args) {
         Ok(command) => match command {
+            Command::Generate { file: true, .. } if context == Context::Matrix => {
+                return Err(CommandError::UnhandledCommand(command));
+            }
             Command::Generate {
                 input,
                 file,
@@ -436,11 +462,15 @@ pub async fn interpret_bot_commands<U: UserId>(
                 }
                 generate(funboy, user_id, interpreter, input, file, ollama).await
             }
-            Command::Context { context } => return Ok(CommandResult::ContextSwitch(context)),
+            Command::Context { context } => return Ok(CommandResult::Mode(context)),
+            Command::Add { file: true, .. } if context == Context::Matrix => {
+                return Err(CommandError::UnhandledCommand(command));
+            }
             Command::Add {
                 template,
                 substitutes,
                 single,
+                file,
             } => {
                 if !permissions.can_add() {
                     return Err(CommandError::LackingPermission(Permission::Add).into());
@@ -498,6 +528,7 @@ pub async fn interpret_bot_commands<U: UserId>(
                 replace(funboy, template, substitute, with_substitute, id).await
             }
             Command::Exit => Ok(CommandResult::Exit),
+            Command::Image { .. } => Err(CommandError::UnhandledCommand(command)),
         },
         Err(e) => Err(CommandError::UnknownCommand(e.to_string())),
     }
