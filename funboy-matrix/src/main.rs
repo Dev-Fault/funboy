@@ -1,11 +1,11 @@
-use std::{env, sync::Arc};
+use std::{collections::HashMap, env, sync::Arc};
 
 use funboy_cli::{FunboyEnv, get_funboy};
-use funboy_matrix::{on_room_message, on_stripped_state_member};
+use funboy_matrix::{MatrixUser, on_room_message, on_stripped_state_member};
 use matrix_sdk::{
     Client, Room,
     config::SyncSettings,
-    ruma::{OwnedUserId, events::room::message::OriginalSyncRoomMessageEvent},
+    ruma::{OwnedRoomId, OwnedUserId, RoomId, events::room::message::OriginalSyncRoomMessageEvent},
 };
 use tokio::sync::{Mutex, oneshot};
 
@@ -67,12 +67,12 @@ async fn main() {
 
     let funboy = Arc::new(get_funboy(&funboy_env).await);
 
-    let pending_ask: Arc<Mutex<Option<(OwnedUserId, oneshot::Sender<String>)>>> =
-        Arc::new(Mutex::new(None));
+    let pending_asks: Arc<Mutex<HashMap<MatrixUser, oneshot::Sender<String>>>> =
+        Arc::new(Mutex::new(HashMap::new()));
 
     let client_clone = client.clone();
     client.add_event_handler(move |event: OriginalSyncRoomMessageEvent, room: Room| {
-        on_room_message(client_clone, event, room, funboy, pending_ask)
+        on_room_message(client_clone, event, room, funboy, pending_asks)
     });
 
     let settings = SyncSettings::default().token(sync_token);

@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use fsl_interpreter::{
     FslInterpreter, InterpreterData,
@@ -6,30 +6,27 @@ use fsl_interpreter::{
 };
 use funboy_cli::{ASK, ASK_RULES, DEFAULT_TIMEOUT_SECS, SAY, SAY_RULES};
 use funboy_core::Funboy;
-use matrix_sdk::{
-    Room,
-    ruma::{OwnedUserId, events::room::message::RoomMessageEventContent},
-};
+use matrix_sdk::{Room, ruma::events::room::message::RoomMessageEventContent};
 use tokio::sync::{Mutex, oneshot};
 
-use crate::MatrixUserId;
+use crate::MatrixUser;
 
 #[derive(Clone)]
 pub struct MatrixCtx {
     pub room: Room,
-    pub pending_ask: Arc<Mutex<Option<(OwnedUserId, oneshot::Sender<String>)>>>,
-    pub sender: MatrixUserId,
+    pub pending_asks: Arc<Mutex<HashMap<MatrixUser, oneshot::Sender<String>>>>,
+    pub sender: MatrixUser,
 }
 
 impl MatrixCtx {
     pub fn new(
         room: Room,
-        pending_ask: Arc<Mutex<Option<(OwnedUserId, oneshot::Sender<String>)>>>,
-        sender: MatrixUserId,
+        pending_asks: Arc<Mutex<HashMap<MatrixUser, oneshot::Sender<String>>>>,
+        sender: MatrixUser,
     ) -> Self {
         Self {
             room,
-            pending_ask,
+            pending_asks,
             sender,
         }
     }
@@ -37,13 +34,13 @@ impl MatrixCtx {
 
 #[derive(Clone)]
 pub struct FslCtx {
-    pub funboy: Arc<Funboy<MatrixUserId>>,
+    pub funboy: Arc<Funboy<MatrixUser>>,
     pub matrix_ctx: MatrixCtx,
     pub interpreter: Arc<Mutex<FslInterpreter>>,
 }
 
 impl FslCtx {
-    pub fn new(funboy: Arc<Funboy<MatrixUserId>>, matrix_ctx: MatrixCtx) -> Self {
+    pub fn new(funboy: Arc<Funboy<MatrixUser>>, matrix_ctx: MatrixCtx) -> Self {
         Self {
             funboy,
             matrix_ctx,
@@ -71,7 +68,7 @@ impl FslCtx {
 }
 
 pub async fn create_interpreter(
-    funboy: Arc<Funboy<MatrixUserId>>,
+    funboy: Arc<Funboy<MatrixUser>>,
     matrix_ctx: MatrixCtx,
 ) -> Arc<Mutex<FslInterpreter>> {
     let mut interpreter = FslInterpreter::new();
@@ -87,7 +84,7 @@ pub fn create_ask_command(fsl_ctx: FslCtx) -> Executor {
             let fsl_ctx = fsl_ctx.clone();
             let room = fsl_ctx.matrix_ctx.room.clone();
             let sender = fsl_ctx.matrix_ctx.sender.clone();
-            let pending_ask = fsl_ctx.matrix_ctx.pending_ask.clone();
+            let pending_asks = fsl_ctx.matrix_ctx.pending_asks.clone();
             {
                 async move {
                     let mut values = command.take_args();
@@ -115,7 +112,9 @@ pub fn create_ask_command(fsl_ctx: FslCtx) -> Executor {
                     room.send(question).await.unwrap();
 
                     let (tx, rx) = oneshot::channel::<String>();
-                    *pending_ask.lock().await = Some((sender.0, tx));
+                    let mut asks = pending_asks.lock().await;
+                    asks.insert(sender, tx);
+                    drop(asks);
 
                     match rx.await {
                         Ok(response) => {

@@ -1,12 +1,12 @@
-use std::{sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use fsl_interpreter::FslInterpreter;
 use funboy_cli::{CommandError, CommandResult, Context, Permissions, interpret_bot_commands};
-use funboy_core::{Funboy, UserId};
+use funboy_core::{Funboy, Request, UserId};
 use matrix_sdk::{
     Client, Room, RoomState,
     ruma::{
-        OwnedUserId,
+        OwnedRoomId, OwnedUserId,
         events::room::{
             member::StrippedRoomMemberEvent,
             message::{MessageType, OriginalSyncRoomMessageEvent, RoomMessageEventContent},
@@ -19,7 +19,7 @@ use tokio::{
 };
 
 use crate::{
-    commands::{Request, interpret_matrix_commands},
+    commands::interpret_matrix_commands,
     interpreter::{MatrixCtx, create_interpreter},
 };
 
@@ -27,8 +27,18 @@ mod commands;
 mod interpreter;
 
 #[derive(Clone, PartialEq, Eq, Hash)]
-pub struct MatrixUserId(OwnedUserId);
-impl UserId for MatrixUserId {}
+pub struct MatrixUser {
+    room_id: OwnedRoomId,
+    user_id: OwnedUserId,
+}
+
+impl MatrixUser {
+    pub fn new(room_id: OwnedRoomId, user_id: OwnedUserId) -> Self {
+        Self { room_id, user_id }
+    }
+}
+
+impl UserId for MatrixUser {}
 
 pub async fn on_stripped_state_member(
     room_member: StrippedRoomMemberEvent,
@@ -65,8 +75,8 @@ pub async fn on_room_message(
     client: Client,
     event: OriginalSyncRoomMessageEvent,
     room: Room,
-    funboy: Arc<Funboy<MatrixUserId>>,
-    pending_ask: Arc<Mutex<Option<(OwnedUserId, oneshot::Sender<String>)>>>,
+    funboy: Arc<Funboy<MatrixUser>>,
+    pending_asks: Arc<Mutex<HashMap<MatrixUser, oneshot::Sender<String>>>>,
 ) {
     // First, we need to unpack the message: We only want messages from rooms we are
     // still in and that are regular text messages - ignoring everything else.
@@ -74,26 +84,18 @@ pub async fn on_room_message(
         return;
     }
 
-    let user_id = MatrixUserId(event.sender.clone());
-    let user_ctx = funboy.get_user_ctx(user_id.clone()).await;
+    let matrix_user = MatrixUser::new(room.room_id().to_owned(), event.sender.clone());
+    let user_ctx = funboy.get_user_ctx(matrix_user.clone()).await;
     let mut pending_requests = user_ctx.pending_requests.lock().await;
     let interpreter = create_interpreter(
         funboy.clone(),
-        MatrixCtx::new(room.clone(), pending_ask.clone(), user_id.clone()),
+        MatrixCtx::new(room.clone(), pending_asks.clone(), matrix_user.clone()),
     )
     .await;
 
     if let Some(request) = pending_requests.pop() {
         tokio::spawn(async move {
-            handle_request(
-                Request::from(request),
-                client,
-                event,
-                room,
-                funboy,
-                interpreter,
-            )
-            .await;
+            handle_request(request, client, event, room, funboy, interpreter).await;
         });
     } else {
         let MessageType::Text(text_content) = event.content.msgtype.clone() else {
@@ -101,14 +103,10 @@ pub async fn on_room_message(
         };
 
         {
-            let mut pending = pending_ask.lock().await;
-            if let Some((expected_sender, tx)) = pending.take() {
-                if expected_sender == event.sender {
-                    let _ = tx.send(text_content.body);
-                    return;
-                } else {
-                    *pending = Some((expected_sender, tx))
-                }
+            let mut pending = pending_asks.lock().await;
+            if let Some(tx) = pending.remove(&matrix_user) {
+                let _ = tx.send(text_content.body);
+                return;
             }
         }
 
@@ -118,7 +116,7 @@ pub async fn on_room_message(
                     event,
                     room,
                     funboy,
-                    pending_ask,
+                    pending_asks,
                     text_content.body.trim_start_matches("!"),
                 )
                 .await;
@@ -132,10 +130,10 @@ pub async fn handle_request(
     client: Client,
     event: OriginalSyncRoomMessageEvent,
     room: Room,
-    funboy: Arc<Funboy<MatrixUserId>>,
+    funboy: Arc<Funboy<MatrixUser>>,
     interpreter: Arc<Mutex<FslInterpreter>>,
 ) {
-    let user_id = MatrixUserId(event.sender.clone());
+    let user_id = MatrixUser::new(room.room_id().to_owned(), event.sender.clone());
     match request {
         Request::GenerateFile => {
             if let MessageType::File(file) = &event.content.msgtype {
@@ -171,26 +169,63 @@ pub async fn handle_request(
                 room.send(content).await.unwrap();
             }
         }
-        Request::UploadSub => {}
+        Request::UploadSub(template) => {
+            if let MessageType::File(file) = &event.content.msgtype {
+                match client.media().get_file(file, false).await {
+                    Ok(file_data) => {
+                        let file_data = file_data.unwrap_or_default();
+                        let contents = String::from_utf8(file_data);
+                        if let Ok(contents) = contents {
+                            let result = funboy.add_substitutes(&template, &[&contents]).await;
+                            let msg = match result {
+                                Ok(_) => RoomMessageEventContent::text_markdown(format!(
+                                    "added {} to {}",
+                                    file.filename(),
+                                    template
+                                )),
+                                Err(e) => RoomMessageEventContent::text_markdown(e.to_string()),
+                            };
+                            room.send(msg).await.unwrap();
+                        } else {
+                            let content = RoomMessageEventContent::text_plain(
+                                "Only text files are allowed (must be valid UTF-8).",
+                            );
+                            room.send(content).await.unwrap();
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("{}", e.to_string());
+                        let content =
+                            RoomMessageEventContent::text_plain("Failed to download file.");
+                        room.send(content).await.unwrap();
+                    }
+                }
+            } else {
+                let content = RoomMessageEventContent::text_plain(
+                    "Only text files are allowed (must be valid UTF-8).",
+                );
+                room.send(content).await.unwrap();
+            }
+        }
     }
 }
 
 pub async fn handle_bot_command(
     event: OriginalSyncRoomMessageEvent,
     room: Room,
-    funboy: Arc<Funboy<MatrixUserId>>,
-    pending_ask: Arc<Mutex<Option<(OwnedUserId, oneshot::Sender<String>)>>>,
+    funboy: Arc<Funboy<MatrixUser>>,
+    pending_asks: Arc<Mutex<HashMap<MatrixUser, oneshot::Sender<String>>>>,
     message: &str,
 ) {
-    let user_id = MatrixUserId(event.sender.clone());
+    let user_id = MatrixUser::new(room.room_id().to_owned(), event.sender.clone());
     let interpreter = create_interpreter(
         funboy.clone(),
-        MatrixCtx::new(room.clone(), pending_ask, user_id.clone()),
+        MatrixCtx::new(room.clone(), pending_asks, user_id.clone()),
     )
     .await;
 
     let result = interpret_bot_commands(
-        MatrixUserId(event.sender),
+        MatrixUser::new(room.room_id().to_owned(), event.sender),
         &funboy,
         interpreter,
         &Permissions::power_user(),

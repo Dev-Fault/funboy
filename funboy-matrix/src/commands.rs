@@ -1,36 +1,14 @@
-use clap::Parser;
 use funboy_cli::{Command, CommandError, CommandResult, ImageAction};
-use funboy_core::{Funboy, RequestCode};
+use funboy_core::{Funboy, Request};
 use matrix_sdk::{
     Room, attachment::AttachmentConfig, ruma::events::room::message::RoomMessageEventContent,
 };
 
-use crate::MatrixUserId;
-
-pub enum Request {
-    GenerateFile = 0,
-    UploadSub = 1,
-}
-
-impl Into<RequestCode> for Request {
-    fn into(self) -> RequestCode {
-        self as RequestCode
-    }
-}
-
-impl From<RequestCode> for Request {
-    fn from(value: RequestCode) -> Self {
-        match value {
-            0 => Request::GenerateFile,
-            1 => Request::UploadSub,
-            _ => panic!("invalid request code"),
-        }
-    }
-}
+use crate::MatrixUser;
 
 pub async fn interpret_matrix_commands(
-    funboy: &Funboy<MatrixUserId>,
-    user_id: MatrixUserId,
+    funboy: &Funboy<MatrixUser>,
+    matrix_user: MatrixUser,
     room: Room,
     command: Command,
 ) -> Result<CommandResult, CommandError> {
@@ -73,22 +51,34 @@ pub async fn interpret_matrix_commands(
                 }
             }
         },
-        Command::Generate { file, .. } => {
-            if file {
-                let user_ctx = funboy.get_user_ctx(user_id).await;
-                let mut pending_requests = user_ctx.pending_requests.lock().await;
-                pending_requests.push(Request::GenerateFile.into());
-                room.send(RoomMessageEventContent::text_plain(
-                    "Attach the file you want to upload.",
-                ))
-                .await
-                .unwrap();
-                Ok(CommandResult::None)
-            } else {
-                Err(CommandError::UnknownCommand("".to_string()))
-            }
+        Command::Generate { file: false, .. } => Err(CommandError::UnhandledCommand(command)),
+        Command::Generate { file: true, .. } => {
+            let user_ctx = funboy.get_user_ctx(matrix_user).await;
+            let mut pending_requests = user_ctx.pending_requests.lock().await;
+            pending_requests.push(Request::GenerateFile);
+            room.send(RoomMessageEventContent::text_plain(
+                "Attach the file you want to upload.",
+            ))
+            .await
+            .unwrap();
+            Ok(CommandResult::None)
         }
-        Command::Add { file, .. } => todo!(),
+        Command::Add { file: false, .. } => Err(CommandError::UnhandledCommand(command)),
+        Command::Add {
+            template,
+            file: true,
+            ..
+        } => {
+            let user_ctx = funboy.get_user_ctx(matrix_user).await;
+            let mut pending_requests = user_ctx.pending_requests.lock().await;
+            pending_requests.push(Request::UploadSub(template));
+            room.send(RoomMessageEventContent::text_plain(
+                "Attach the file you want to add as a substitute.",
+            ))
+            .await
+            .unwrap();
+            Ok(CommandResult::None)
+        }
         Command::Delete { .. } => Err(CommandError::UnhandledCommand(command)),
         Command::List { .. } => Err(CommandError::UnhandledCommand(command)),
         Command::Copy { .. } => Err(CommandError::UnhandledCommand(command)),

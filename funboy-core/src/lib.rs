@@ -79,13 +79,17 @@ pub struct OllamaResponse {
     pub generated_text: String,
 }
 
-pub type RequestCode = u16;
+#[derive(Debug, Clone)]
+pub enum Request {
+    GenerateFile,
+    UploadSub(String),
+}
 
 #[derive(Debug, Clone)]
 pub struct UserCtx {
     pub is_generating: Arc<AtomicBool>,
     pub ollama_settings: Arc<Mutex<OllamaSettings>>,
-    pub pending_requests: Arc<Mutex<Vec<RequestCode>>>,
+    pub pending_requests: Arc<Mutex<Vec<Request>>>,
 }
 
 impl Default for UserCtx {
