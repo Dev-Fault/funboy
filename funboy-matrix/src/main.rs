@@ -3,9 +3,7 @@ use std::{collections::HashMap, env, sync::Arc};
 use funboy_cli::{FunboyEnv, get_funboy};
 use funboy_matrix::{MatrixUser, on_room_message, on_stripped_state_member};
 use matrix_sdk::{
-    Client, Room,
-    config::SyncSettings,
-    ruma::{OwnedRoomId, OwnedUserId, RoomId, events::room::message::OriginalSyncRoomMessageEvent},
+    Client, Room, config::SyncSettings, ruma::events::room::message::OriginalSyncRoomMessageEvent,
 };
 use tokio::sync::{Mutex, oneshot};
 
