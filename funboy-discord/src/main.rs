@@ -3,7 +3,7 @@ use std::sync::Arc;
 use ::serenity::all::{FullEvent, Interaction, UserId};
 use dotenvy::dotenv;
 use funboy_cli::{FunboyEnv, get_funboy};
-use funboy_core::Funboy;
+use funboy_core::{Funboy, rate_limiter::RateLimit};
 use poise::serenity_prelude as serenity;
 use reqwest::Client as HttpClient;
 use songbird::{SerenityInit, typemap::TypeMapKey};
@@ -12,14 +12,12 @@ use tokio::sync::Mutex;
 use crate::{
     commands::sound::TrackList,
     components::{CustomComponent, TrackComponent},
-    rate_limiter::RateLimit,
 };
 
 mod commands;
 mod components;
 mod interpreter;
 mod io_format;
-mod rate_limiter;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type Context<'a> = poise::Context<'a, Data, Error>;
@@ -32,7 +30,7 @@ struct Data {
     pub funboy: Arc<Funboy<DiscordUserId>>,
     pub track_list: Arc<Mutex<TrackList>>,
     pub track_player_lock: Arc<Mutex<()>>,
-    pub interpreter_rate_limit: Arc<Mutex<RateLimit>>,
+    pub interpreter_rate_limit: Arc<Mutex<RateLimit<DiscordUserId>>>,
     yt_dlp_cookies_path: Option<String>,
 } // User data, which is stored and accessible in all command invocations
 

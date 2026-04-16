@@ -2,13 +2,19 @@ use std::{sync::Arc, time::Duration};
 
 use fsl_interpreter::{
     FslInterpreter, InterpreterData,
-    commands::{NUMERIC_TYPES, TEXT_TYPES},
     types::{
-        command::{ArgPos, ArgRule, Command, CommandError, Executor},
+        command::{Command, CommandError, Executor},
         value::Value,
     },
 };
-use funboy_core::Funboy;
+use funboy_core::{
+    Funboy,
+    interpreter::{
+        ASK, ASK_RULES, ASK_TO, ASK_TO_RULES, DEFAULT_TIMEOUT_SECS, SAY, SAY_RULES, SAY_TO,
+        SAY_TO_RULES,
+    },
+    rate_limiter::{RateLimit, RateLimitResult},
+};
 use serenity::{
     all::{Cache, ChannelId, GuildId, Http, Member, Mentionable, ShardMessenger, UserId},
     futures::StreamExt,
@@ -18,7 +24,6 @@ use tokio::{sync::Mutex, time::sleep};
 use crate::{
     Context, DiscordUserId,
     io_format::{context_extension::BOT_MAX_MESSAGE_SIZE, discord_message_format::split_message},
-    rate_limiter::{RateLimit, RateLimitResult},
 };
 
 #[derive(Clone)]
@@ -31,7 +36,7 @@ pub struct InterpreterContext {
     pub channel_id: ChannelId,
     pub author_id: UserId,
     pub funboy: Arc<Funboy<DiscordUserId>>,
-    pub rate_limit: Arc<Mutex<RateLimit>>,
+    pub rate_limit: Arc<Mutex<RateLimit<DiscordUserId>>>,
     pub command_call_count: Arc<Mutex<u16>>,
     interpreter: Arc<Mutex<FslInterpreter>>,
 }
@@ -164,7 +169,7 @@ async fn check_limits(ictx: InterpreterContext) -> Result<(), CommandError> {
     }
     *call_count = call_count.saturating_add(1);
 
-    match rate_limit.check(ictx.author_id) {
+    match rate_limit.check(DiscordUserId(ictx.author_id)) {
         RateLimitResult::MaxLimitsReached => {
             return Err(CommandError::Custom(format!(
                 "exceeded rate limit too many times, please wait a bit before trying again",
@@ -175,8 +180,6 @@ async fn check_limits(ictx: InterpreterContext) -> Result<(), CommandError> {
     }
 }
 
-const SAY: &str = "say";
-const SAY_RULES: &'static [ArgRule] = &[ArgRule::new(ArgPos::Index(0), TEXT_TYPES)];
 pub fn create_say_command(ictx: InterpreterContext) -> Executor {
     let say_command = {
         let ictx = ictx.clone();
@@ -213,11 +216,6 @@ pub fn create_say_command(ictx: InterpreterContext) -> Executor {
     Some(Arc::new(say_command))
 }
 
-const SAY_TO: &str = "say_to";
-const SAY_TO_RULES: &'static [ArgRule] = &[
-    ArgRule::new(ArgPos::Index(0), TEXT_TYPES),
-    ArgRule::new(ArgPos::Index(1), TEXT_TYPES),
-];
 pub fn create_say_to_command(ictx: InterpreterContext) -> Executor {
     let say_command = {
         let ictx = ictx.clone();
@@ -250,13 +248,7 @@ pub fn create_say_to_command(ictx: InterpreterContext) -> Executor {
     Some(Arc::new(say_command))
 }
 
-const DEFAULT_TIMEOUT_SECS: f64 = 60.0 * 30.0;
 const MAX_TIMEOUT_SECS: f64 = 60.0 * 60.0;
-const ASK: &str = "ask";
-const ASK_RULES: &'static [ArgRule] = &[
-    ArgRule::new(ArgPos::Index(0), TEXT_TYPES),
-    ArgRule::new(ArgPos::OptionalIndex(1), NUMERIC_TYPES),
-];
 pub fn create_ask_command(ictx: InterpreterContext) -> Executor {
     let ask_command = {
         move |command: Command, data: Arc<InterpreterData>| {
@@ -317,12 +309,6 @@ pub fn create_ask_command(ictx: InterpreterContext) -> Executor {
     Some(Arc::new(ask_command))
 }
 
-const ASK_TO: &str = "ask_to";
-const ASK_TO_RULES: &'static [ArgRule] = &[
-    ArgRule::new(ArgPos::Index(0), TEXT_TYPES),
-    ArgRule::new(ArgPos::Index(1), TEXT_TYPES),
-    ArgRule::new(ArgPos::OptionalIndex(2), NUMERIC_TYPES),
-];
 pub fn create_ask_to_command(ictx: InterpreterContext) -> Executor {
     let ask_command = {
         move |command: Command, data: Arc<InterpreterData>| {

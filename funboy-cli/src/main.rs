@@ -5,11 +5,12 @@ use fsl_interpreter::{
     types::{command::Executor, value::Value},
 };
 use funboy_cli::{
-    ASK, ASK_RULES, CommandResult, Context, FslContext, FunboyEnv, Mode, Permissions, SAY,
-    SAY_RULES, get_funboy, interpret_bot_commands,
+    CommandResult, Context, FslContext, FunboyEnv, Mode, Permissions, get_funboy,
+    interpret_bot_commands,
 };
 use funboy_core::{
     Funboy, UserId,
+    interpreter::{ASK, ASK_RULES, SAY, SAY_RULES},
     ollama::{MAX_PREDICT, OllamaSettings},
 };
 use rustyline::DefaultEditor;

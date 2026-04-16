@@ -1,21 +1,21 @@
-use std::{
-    collections::HashMap,
-    sync::Arc,
-    time::{Duration, SystemTime},
-};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use fsl_interpreter::{
     FslInterpreter, InterpreterData,
-    commands::{NUMERIC_TYPES, TEXT_TYPES},
     types::{
-        command::{ArgPos, ArgRule, CommandError, Executor},
+        command::{CommandError, Executor},
         value::Value,
     },
 };
-use funboy_cli::{ASK, ASK_RULES, DEFAULT_TIMEOUT_SECS, SAY, SAY_RULES};
-use funboy_core::Funboy;
+use funboy_core::{
+    Funboy,
+    interpreter::{
+        ASK, ASK_RULES, ASK_TO, ASK_TO_RULES, DEFAULT_TIMEOUT_SECS, SAY, SAY_RULES, SAY_TO,
+        SAY_TO_RULES,
+    },
+};
 use matrix_sdk::{
-    Room, RoomMemberships,
+    Room,
     ruma::{
         OwnedUserId,
         events::{Mentions, room::message::RoomMessageEventContent},
@@ -149,11 +149,6 @@ async fn user_name_to_id(user_name: &str, room: Room) -> Result<OwnedUserId, Com
     Ok((*user).clone())
 }
 
-const SAY_TO: &str = "say_to";
-const SAY_TO_RULES: &'static [ArgRule] = &[
-    ArgRule::new(ArgPos::Index(0), TEXT_TYPES),
-    ArgRule::new(ArgPos::Index(1), TEXT_TYPES),
-];
 pub fn create_say_to_command(fsl_ctx: FslCtx) -> Executor {
     let say_command = {
         move |command: fsl_interpreter::types::command::Command,
@@ -262,12 +257,6 @@ pub fn create_ask_command(fsl_ctx: FslCtx) -> Executor {
     Some(Arc::new(ask_command))
 }
 
-const ASK_TO: &str = "ask_to";
-const ASK_TO_RULES: &'static [ArgRule] = &[
-    ArgRule::new(ArgPos::Index(0), TEXT_TYPES),
-    ArgRule::new(ArgPos::Index(1), TEXT_TYPES),
-    ArgRule::new(ArgPos::OptionalIndex(2), NUMERIC_TYPES),
-];
 pub fn create_ask_to_command(fsl_ctx: FslCtx) -> Executor {
     let ask_command = {
         move |command: fsl_interpreter::types::command::Command, data: Arc<InterpreterData>| {

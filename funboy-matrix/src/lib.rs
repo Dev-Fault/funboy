@@ -4,7 +4,7 @@ use fsl_interpreter::FslInterpreter;
 use funboy_cli::{CommandError, CommandResult, Context, Permissions, interpret_bot_commands};
 use funboy_core::{Funboy, Request, UserId};
 use matrix_sdk::{
-    Client, Room, RoomMemberships, RoomState,
+    Client, Room, RoomState,
     ruma::{
         OwnedRoomId, OwnedUserId,
         events::room::{

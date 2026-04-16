@@ -2,26 +2,13 @@ use std::{str::FromStr, sync::Arc, time::Duration};
 
 use clap::Parser;
 use dotenvy::dotenv;
-use fsl_interpreter::{
-    FslInterpreter,
-    commands::{NUMERIC_TYPES, TEXT_TYPES},
-    types::command::{ArgPos, ArgRule},
-};
+use fsl_interpreter::FslInterpreter;
 use funboy_core::{
     Funboy, UserId,
     template_database::{Limit, OrderBy, TemplateDatabase},
 };
 use sqlx::postgres::PgPoolOptions;
 use tokio::sync::Mutex;
-
-pub const SAY: &str = "say";
-pub const SAY_RULES: &'static [ArgRule] = &[ArgRule::new(ArgPos::Index(0), TEXT_TYPES)];
-pub const DEFAULT_TIMEOUT_SECS: f64 = 60.0 * 30.0;
-pub const ASK: &str = "ask";
-pub const ASK_RULES: &'static [ArgRule] = &[
-    ArgRule::new(ArgPos::Index(0), TEXT_TYPES),
-    ArgRule::new(ArgPos::OptionalIndex(1), NUMERIC_TYPES),
-];
 
 pub struct FunboyEnv {
     pub debug_mode: bool,

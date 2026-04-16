@@ -3,7 +3,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use serenity::all::UserId;
+use crate::UserId;
 
 #[derive(Debug, Clone)]
 pub struct Uses {
@@ -23,8 +23,8 @@ impl Uses {
 }
 
 #[derive(Debug, Clone)]
-pub struct RateLimit {
-    users: HashMap<UserId, Uses>,
+pub struct RateLimit<U: UserId> {
+    users: HashMap<U, Uses>,
     uses_per_interval: usize,
     interval: u64,
     limits_before_timeout: u16,
@@ -37,7 +37,7 @@ pub enum RateLimitResult {
     Ok,
 }
 
-impl RateLimit {
+impl<U: UserId> RateLimit<U> {
     pub fn new(uses_per_interval: usize, interval: u64) -> Self {
         Self {
             users: HashMap::new(),
@@ -54,7 +54,7 @@ impl RateLimit {
         self
     }
 
-    pub fn check(&mut self, user_id: UserId) -> RateLimitResult {
+    pub fn check(&mut self, user_id: U) -> RateLimitResult {
         let now = SystemTime::now();
         let usage_window = now - Duration::from_secs(self.interval);
 
