@@ -30,6 +30,7 @@ use crate::{
     template_substitutor::{TemplateDelimiter, TemplateSubstitutor, VALID_TEMPLATE_CHARS},
 };
 
+pub mod format;
 pub mod interpreter;
 pub mod ollama;
 pub mod rate_limiter;

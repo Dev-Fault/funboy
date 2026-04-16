@@ -2,10 +2,9 @@ use std::time::Duration;
 
 use crate::{Context, Error};
 
+use funboy_core::format::{DISCORD_CHARACTER_LIMIT, split_message, split_messages};
 use poise::{CreateReply, ReplyHandle};
 use tokio::time::sleep;
-
-use super::discord_message_format::{DISCORD_CHARACTER_LIMIT, split_message, split_messages};
 
 pub const BOT_MAX_MESSAGE_SIZE: usize = DISCORD_CHARACTER_LIMIT * 4;
 pub const WARN_MESSAGE_SIZE_EXCEEDED: &str = "Message was too large to send.";

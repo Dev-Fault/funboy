@@ -1,13 +1,8 @@
 use std::collections::HashMap;
 
-use crate::{
-    Context, Error,
-    io_format::{
-        context_extension::ContextExtension,
-        discord_message_format::{DISCORD_CHARACTER_LIMIT, extract_image_urls},
-    },
-};
+use crate::{Context, Error, context_extension::ContextExtension};
 
+use funboy_core::format::{DISCORD_CHARACTER_LIMIT, extract_image_urls};
 use poise::{
     CreateReply,
     serenity_prelude::{self as serenity, ChannelId, CreateEmbed, CreateMessage},

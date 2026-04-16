@@ -1,10 +1,7 @@
-use crate::{
-    Context, Error,
-    io_format::{
-        context_extension::ContextExtension,
-        discord_message_format::split_by_whitespace_unless_quoted,
-    },
-};
+use funboy_core::format::split_by_whitespace_unless_quoted;
+
+use crate::context_extension::ContextExtension;
+use crate::{Context, Error};
 
 /// Generates a random number between or including the min and max provided
 #[poise::command(slash_command, prefix_command, category = "Random")]

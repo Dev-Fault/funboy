@@ -1,5 +1,10 @@
 use funboy_core::{
     FunboyError,
+    format::{
+        DISCORD_PRETTY_WIDTH, SeperatedListOptions, StringVecToRef, ellipsize_if_long,
+        format_as_item_seperated_list, format_as_numeric_list, split_by_whitespace_unless_quoted,
+        split_message,
+    },
     template_database::{KeySize, Limit, OrderBy, SortOrder},
 };
 use poise::{ChoiceParameter, CreateReply};
@@ -10,15 +15,8 @@ use crate::{
     components::{
         CANCEL_BUTTON_ID, CONFIRM_BUTTON_ID, create_confirmation_interaction, edit_interaction,
     },
+    context_extension::ContextExtension,
     interpreter::create_custom_interpreter,
-    io_format::{
-        context_extension::ContextExtension,
-        discord_message_format::{
-            DISCORD_PRETTY_WIDTH, SeperatedListOptions, StringVecToRef, ellipsize_if_long,
-            format_as_item_seperated_list, format_as_numeric_list,
-            split_by_whitespace_unless_quoted, split_message,
-        },
-    },
 };
 
 /// Generates text by preforming template substitution and interpreting fsl code

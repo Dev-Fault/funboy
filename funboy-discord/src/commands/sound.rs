@@ -3,7 +3,7 @@ use std::{sync::Arc, time::Duration};
 use crate::{
     Data, HttpClient,
     components::{TrackComponent, create_track_button},
-    io_format::context_extension::ContextExtension,
+    context_extension::ContextExtension,
 };
 use poise::{CreateReply, serenity_prelude::async_trait};
 use serenity::all::{

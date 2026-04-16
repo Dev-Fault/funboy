@@ -9,6 +9,7 @@ use fsl_interpreter::{
 };
 use funboy_core::{
     Funboy,
+    format::split_message,
     interpreter::{
         ASK, ASK_RULES, ASK_TO, ASK_TO_RULES, DEFAULT_TIMEOUT_SECS, SAY, SAY_RULES, SAY_TO,
         SAY_TO_RULES,
@@ -21,10 +22,7 @@ use serenity::{
 };
 use tokio::{sync::Mutex, time::sleep};
 
-use crate::{
-    Context, DiscordUserId,
-    io_format::{context_extension::BOT_MAX_MESSAGE_SIZE, discord_message_format::split_message},
-};
+use crate::{Context, DiscordUserId, context_extension::BOT_MAX_MESSAGE_SIZE};
 
 #[derive(Clone)]
 pub struct InterpreterContext {

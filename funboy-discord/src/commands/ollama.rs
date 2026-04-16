@@ -1,10 +1,9 @@
-use funboy_core::ollama::MAX_PREDICT;
+use funboy_core::{format::ellipsize_if_long, ollama::MAX_PREDICT};
 use poise::CreateReply;
 
 use crate::{
-    Context, DiscordUserId, Error,
+    Context, DiscordUserId, Error, context_extension::ContextExtension,
     interpreter::create_custom_interpreter,
-    io_format::{context_extension::ContextExtension, discord_message_format::ellipsize_if_long},
 };
 
 const ERROR_OLLAMA_UNAVAILABLE: &str = "Error: Ollama service not available.";

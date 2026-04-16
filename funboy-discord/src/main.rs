@@ -16,8 +16,8 @@ use crate::{
 
 mod commands;
 mod components;
+mod context_extension;
 mod interpreter;
-mod io_format;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type Context<'a> = poise::Context<'a, Data, Error>;
