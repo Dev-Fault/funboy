@@ -1,75 +1,62 @@
 use std::borrow::Cow;
 
+use crate::FunboyError;
+
 pub const DISCORD_CHARACTER_LIMIT: usize = 2000;
 pub const DISCORD_PRETTY_WIDTH: usize = 100;
 
-#[derive(Debug)]
-pub struct QuoteFilter<'a> {
-    pub quoted: Vec<&'a str>,
-    pub unquoted: Vec<&'a str>,
-}
+pub fn parse_bot_args(input: &str) -> Result<Vec<&str>, FunboyError> {
+    let input = input.trim();
 
-impl<'a> QuoteFilter<'a> {
-    pub fn from(input: &'a str) -> Self {
-        const EMPTY: (&str, &str) = ("", "");
+    let mut output: Vec<&str> = vec![];
+    let mut inside_quotes = false;
+    let mut prev_ch_space = false;
+    let mut prev_ch_quote = false;
+    let mut word_start: usize = 0;
 
-        let mut quoted: Vec<&str> = Vec::new();
-        let mut unquoted: Vec<&str> = Vec::new();
-
-        let mut first_split = input.split_once("\"");
-        let mut second_split = first_split.unwrap_or(EMPTY).1.split_once("\"");
-        let mut left_overs = "";
-
-        if first_split == None {
-            left_overs = input;
+    for (i, ch) in input.char_indices() {
+        if ch == '"' {
+            if !inside_quotes {
+                if !prev_ch_space && !prev_ch_quote && i > 0 {
+                    output.push(&input[word_start..i]);
+                }
+                word_start = i + ch.len_utf8();
+            } else {
+                output.push(&input[word_start..i]);
+                word_start = i + 1;
+            }
+            inside_quotes = !inside_quotes;
+        } else if !ch.is_whitespace() && prev_ch_space && !inside_quotes {
+            word_start = i;
+        } else if ch.is_whitespace() && !prev_ch_space && !inside_quotes && !prev_ch_quote {
+            output.push(&input[word_start..i]);
+            word_start = i + 1;
         }
 
-        while first_split != None && second_split != None {
-            Self::push_if_not_empty(&mut unquoted, first_split.unwrap_or(EMPTY).0.trim());
-            Self::push_if_not_empty(&mut quoted, second_split.unwrap_or(EMPTY).0.trim());
-            first_split = (second_split).unwrap_or(EMPTY).1.split_once("\"");
-            left_overs = second_split.unwrap_or(EMPTY).1;
-            second_split = (first_split).unwrap_or(EMPTY).1.split_once("\"");
-        }
-
-        Self::push_if_not_empty(&mut unquoted, left_overs.trim());
-
-        QuoteFilter { quoted, unquoted }
+        prev_ch_quote = ch == '"';
+        prev_ch_space = ch.is_whitespace();
     }
 
-    fn push_if_not_empty<'b>(input: &mut Vec<&'b str>, value: &'b str) {
-        if !value.is_empty() {
-            input.push(value);
-        }
+    if inside_quotes {
+        return Err(FunboyError::UserInput(
+            "unclosed quote in substitutes".into(),
+        ));
     }
+
+    if word_start < input.len() {
+        output.push(&input[word_start..]);
+    }
+
+    Ok(output)
 }
 
-/// Split input by whitespace unless surrounded by quotes
-pub fn split_by_whitespace_unless_quoted(input: &str) -> Vec<&str> {
-    let quote_filter = &QuoteFilter::from(input);
-
-    let mut output: Vec<&str> = Vec::new();
-
-    for quoted in &quote_filter.quoted {
-        output.push(quoted);
-    }
-
-    for unquoted in &quote_filter.unquoted {
-        for word in unquoted.split_whitespace() {
-            output.push(word);
-        }
-    }
-
-    output
+pub trait AsStrs {
+    fn as_strs(&self) -> Vec<&str>;
 }
 
-pub trait StringVecToRef {
-    fn to_ref(&self) -> Vec<&str>;
-}
-
-impl StringVecToRef for Vec<String> {
-    fn to_ref(&self) -> Vec<&str> {
-        self.iter().map(|i| i.as_str()).collect()
+impl AsStrs for Vec<String> {
+    fn as_strs(&self) -> Vec<&str> {
+        self.iter().map(String::as_ref).collect()
     }
 }
 
@@ -160,7 +147,7 @@ pub fn ellipsize_if_long<'a>(item: &'_ str, limit: usize) -> Cow<'_, str> {
 pub struct SeperatedListOptions<'a> {
     pub item_seperator: &'a str,
     pub markdown: &'a str,
-    pub quote_on_whitespace: bool,
+    pub quote_multi_word_items: bool,
 }
 
 impl SeperatedListOptions<'_> {
@@ -168,7 +155,7 @@ impl SeperatedListOptions<'_> {
         Self {
             item_seperator: "",
             markdown: "",
-            quote_on_whitespace: false,
+            quote_multi_word_items: false,
         }
     }
 }
@@ -178,7 +165,7 @@ impl Default for SeperatedListOptions<'_> {
         Self {
             item_seperator: ", ",
             markdown: "```",
-            quote_on_whitespace: true,
+            quote_multi_word_items: true,
         }
     }
 }
@@ -194,7 +181,7 @@ pub fn format_as_item_seperated_list(
 
     messages[current_msg].push_str(options.markdown);
     for (i, item) in items.iter().enumerate() {
-        let item = if options.quote_on_whitespace && item.contains(char::is_whitespace) {
+        let item = if options.quote_multi_word_items && item.contains(char::is_whitespace) {
             format!("\"{}\"", item)
         } else {
             format!("{}", item)
@@ -281,6 +268,139 @@ mod tests {
     const ITEM_SEPERATOR: &str = ", ";
 
     #[test]
+    fn split_sub_args() {
+        let input = "sub1 sub2 s3 s sub_five";
+        let result = parse_bot_args(input).unwrap();
+        assert_eq!(result, vec!["sub1", "sub2", "s3", "s", "sub_five"]);
+    }
+
+    #[test]
+    fn split_sub_args_with_quotes() {
+        let input = "sub1 \"sub 2\"       \"sub       three\"";
+        let result = parse_bot_args(input).unwrap();
+        assert_eq!(result, vec!["sub1", "sub 2", "sub       three"]);
+    }
+
+    #[test]
+    fn split_sub_args_single() {
+        let input = "sub1";
+        let result = parse_bot_args(input).unwrap();
+        assert_eq!(result, vec!["sub1"]);
+    }
+
+    #[test]
+    fn split_sub_args_empty_string() {
+        let input = "";
+        let result = parse_bot_args(input).unwrap();
+        assert_eq!(result, Vec::<&str>::new());
+    }
+
+    #[test]
+    fn split_sub_args_only_spaces() {
+        let input = "     ";
+        let result = parse_bot_args(input).unwrap();
+        assert_eq!(result, Vec::<&str>::new());
+    }
+
+    #[test]
+    fn split_sub_args_leading_spaces() {
+        let input = "   sub1 sub2";
+        let result = parse_bot_args(input).unwrap();
+        assert_eq!(result, vec!["sub1", "sub2"]);
+    }
+
+    #[test]
+    fn split_sub_args_trailing_spaces() {
+        let input = "sub1 sub2   ";
+        let result = parse_bot_args(input).unwrap();
+        assert_eq!(result, vec!["sub1", "sub2"]);
+    }
+
+    #[test]
+    fn split_sub_args_quoted_only() {
+        let input = "\"hello world\"";
+        let result = parse_bot_args(input).unwrap();
+        assert_eq!(result, vec!["hello world"]);
+    }
+
+    #[test]
+    fn split_sub_args_empty_quotes() {
+        let input = "sub1 \"\" sub2";
+        let result = parse_bot_args(input).unwrap();
+        assert_eq!(result, vec!["sub1", "", "sub2"]);
+    }
+
+    #[test]
+    fn split_sub_args_adjacent_quotes() {
+        let input = "\"foo\"\"bar\"";
+        let result = parse_bot_args(input).unwrap();
+        assert_eq!(result, vec!["foo", "bar"]);
+    }
+
+    #[test]
+    fn split_sub_args_unclosed_quote() {
+        let input = "sub1 \"unclosed";
+        let result = parse_bot_args(input);
+        assert!(matches!(result, Err(FunboyError::UserInput(_))));
+    }
+
+    #[test]
+    fn split_sub_args_quote_at_end() {
+        let input = "sub1 \"sub2\"";
+        let result = parse_bot_args(input).unwrap();
+        assert_eq!(result, vec!["sub1", "sub2"]);
+    }
+
+    #[test]
+    fn split_sub_args_unicode() {
+        let input = "héllo wörld";
+        let result = parse_bot_args(input).unwrap();
+        assert_eq!(result, vec!["héllo", "wörld"]);
+    }
+
+    #[test]
+    fn split_sub_args_unicode_in_quotes() {
+        let input = "\"héllo wörld\" foo";
+        let result = parse_bot_args(input).unwrap();
+        assert_eq!(result, vec!["héllo wörld", "foo"]);
+    }
+
+    #[test]
+    fn split_sub_args_multiple_consecutive_spaces() {
+        let input = "sub1   sub2   sub3";
+        let result = parse_bot_args(input).unwrap();
+        assert_eq!(result, vec!["sub1", "sub2", "sub3"]);
+    }
+
+    #[test]
+    fn split_sub_args_quote_adjacent_to_word() {
+        let input = "sub1\"sub 2\"sub3";
+        let result = parse_bot_args(input).unwrap();
+        assert_eq!(result, vec!["sub1", "sub 2", "sub3"]);
+    }
+
+    #[test]
+    fn split_sub_args_quote_at_start_no_space() {
+        let input = "\"quoted\" unquoted";
+        let result = parse_bot_args(input).unwrap();
+        assert_eq!(result, vec!["quoted", "unquoted"]);
+    }
+
+    #[test]
+    fn split_sub_args_tab_separated() {
+        let input = "sub1\tsub2\tsub3";
+        let result = parse_bot_args(input).unwrap();
+        assert_eq!(result, vec!["sub1", "sub2", "sub3"]);
+    }
+
+    #[test]
+    fn split_sub_args_single_quote() {
+        let input = "\"";
+        let result = parse_bot_args(input);
+        assert!(matches!(result, Err(FunboyError::UserInput(_))));
+    }
+
+    #[test]
     fn test_no_words_cut_in_middle() {
         let input = "hello world this isss aaaa test message ".repeat(1000);
         let result = split_message(&input);
@@ -346,24 +466,6 @@ mod tests {
         let result = split_message(&input);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0], "hello\nworld\ttest");
-    }
-
-    #[test]
-    fn mixed_quote_input() {
-        let input = String::from(
-            "cat \"\" \"United States of America\" bear snake lion \"my mom\"  \"ten bulls\" dog goat",
-        );
-
-        // dbg!(&vectorize_input(&input));
-
-        assert_eq!(split_by_whitespace_unless_quoted(&input).len(), 9);
-    }
-
-    #[test]
-    fn no_quote_input() {
-        let input = String::from("This is some input");
-
-        assert_eq!(split_by_whitespace_unless_quoted(&input).len(), 4);
     }
 
     #[test]

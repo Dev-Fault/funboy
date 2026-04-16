@@ -1,4 +1,4 @@
-use funboy_core::format::split_by_whitespace_unless_quoted;
+use funboy_core::format::parse_bot_args;
 
 use crate::context_extension::ContextExtension;
 use crate::{Context, Error};
@@ -23,11 +23,18 @@ pub async fn random_number(ctx: Context<'_>, min: String, max: String) -> Result
 /// Entries are seperated by spaces and multi-word entries can be enclosed in quotes like "hot dog"
 #[poise::command(slash_command, prefix_command, category = "Random")]
 pub async fn random_entry(ctx: Context<'_>, entries: String) -> Result<(), Error> {
-    let entries = split_by_whitespace_unless_quoted(&entries);
-    let entry = funboy_core::random_entry(&entries);
-    match entry {
-        Ok(entry) => {
-            ctx.say(entry).await?;
+    let entries = parse_bot_args(&entries);
+    match entries {
+        Ok(entries) => {
+            let entry = funboy_core::random_entry(&entries);
+            match entry {
+                Ok(entry) => {
+                    ctx.say(entry).await?;
+                }
+                Err(e) => {
+                    ctx.say_ephemeral(&e.to_string()).await?;
+                }
+            }
         }
         Err(e) => {
             ctx.say_ephemeral(&e.to_string()).await?;

@@ -1,9 +1,8 @@
 use funboy_core::{
     FunboyError,
     format::{
-        DISCORD_PRETTY_WIDTH, SeperatedListOptions, StringVecToRef, ellipsize_if_long,
-        format_as_item_seperated_list, format_as_numeric_list, split_by_whitespace_unless_quoted,
-        split_message,
+        AsStrs, DISCORD_PRETTY_WIDTH, SeperatedListOptions, ellipsize_if_long,
+        format_as_item_seperated_list, format_as_numeric_list, parse_bot_args, split_message,
     },
     template_database::{KeySize, Limit, OrderBy, SortOrder},
 };
@@ -173,7 +172,15 @@ pub async fn add_subs(
     let result = if add_as_single_sub {
         ctx.data().funboy.add_substitutes(&template, &[&subs]).await
     } else {
-        let subs: Vec<&str> = split_by_whitespace_unless_quoted(&subs);
+        let subs = parse_bot_args(&subs);
+        let subs = match subs {
+            Ok(subs) => subs,
+            Err(e) => {
+                ctx.say_ephemeral(&e.to_string()).await?;
+                return Ok(());
+            }
+        };
+
         ctx.data().funboy.add_substitutes(&template, &subs).await
     };
 
@@ -201,7 +208,7 @@ pub async fn add_subs(
                 let appended_text = format!("\nalready in `{}`", template);
 
                 ctx.say_list(
-                    &sub_record.ignored.to_ref(),
+                    &sub_record.ignored.as_strs(),
                     true,
                     Some(Box::new(move |items| {
                         format_as_item_seperated_list(
@@ -267,7 +274,14 @@ pub async fn delete_subs(
                 .await
         }
     } else {
-        let subs: Vec<&str> = split_by_whitespace_unless_quoted(&subs);
+        let subs = parse_bot_args(&subs);
+        let subs = match subs {
+            Ok(subs) => subs,
+            Err(e) => {
+                ctx.say_ephemeral(&e.to_string()).await?;
+                return Ok(());
+            }
+        };
 
         if delete_by_id {
             let ids: Result<Vec<KeySize>, _> = subs.iter().map(|s| s.parse::<KeySize>()).collect();
@@ -306,7 +320,7 @@ pub async fn delete_subs(
                 let appended_text = format!("\nnot present in `{}`", template);
 
                 ctx.say_list(
-                    &sub_record.ignored.to_ref(),
+                    &sub_record.ignored.as_strs(),
                     true,
                     Some(Box::new(move |items| {
                         format_as_item_seperated_list(
@@ -555,7 +569,14 @@ async fn delete_single_template(
 /// This action cannot be undone.
 #[poise::command(slash_command, prefix_command, category = "Templates")]
 pub async fn delete_templates(ctx: Context<'_>, names: String) -> Result<(), Error> {
-    let templates = split_by_whitespace_unless_quoted(&names);
+    let templates = parse_bot_args(&names);
+    let templates = match templates {
+        Ok(templates) => templates,
+        Err(e) => {
+            ctx.say_ephemeral(&e.to_string()).await?;
+            return Ok(());
+        }
+    };
 
     let interaction_text = format!(
         "Are you sure you want to delete `{}`? All of {} substitutes will be deleted as well.",
@@ -705,7 +726,7 @@ pub async fn list_subs(
                     subs.iter().map(|sub| sub.name.clone()).collect()
                 };
 
-            let subs = subs.to_ref();
+            let subs = subs.as_strs();
 
             let list_style = list_style.unwrap_or(ListStyle::Default);
 
@@ -809,7 +830,7 @@ pub async fn list_templates(
                         .collect()
                 };
 
-            let templates = templates.to_ref();
+            let templates = templates.as_strs();
 
             let list_style = list_style.unwrap_or(ListStyle::Default);
 
