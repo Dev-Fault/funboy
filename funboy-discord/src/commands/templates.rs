@@ -1,8 +1,9 @@
 use funboy_core::{
     FunboyError,
     format::{
-        AsStrs, DISCORD_PRETTY_WIDTH, SeperatedListOptions, ellipsize_if_long,
-        format_as_item_seperated_list, format_as_numeric_list, parse_bot_args, split_message,
+        self, AsStrs, ListStyle, ONE_HUNDRED, SeperatedListOptions, TWO_THOUSAND,
+        TruncateEllipsize, format_as_item_seperated_list, format_item_as_id_item, format_item_list,
+        parse_bot_args, split_message,
     },
     template_database::{KeySize, Limit, OrderBy, SortOrder},
 };
@@ -75,7 +76,7 @@ pub async fn generate(ctx: Context<'_>, input: String) -> Result<(), Error> {
         Ok(output) => {
             if !output.trim().is_empty() {
                 if ctx_window_over {
-                    for m in split_message(&output) {
+                    for m in split_message(&output, TWO_THOUSAND) {
                         channel_id.say(&http, m).await?;
                     }
                 } else {
@@ -187,36 +188,31 @@ pub async fn add_subs(
     match result {
         Ok(sub_record) => {
             if sub_record.updated.len() > 0 {
-                let subs: Vec<&str> = sub_record.updated.iter().map(|s| s.name.as_str()).collect();
-                let appended_text = format!("\nadded to `{}`", template);
+                let caption = format!("\nadded to `{}`", template);
 
                 ctx.say_list(
-                    &subs,
+                    &format_item_list(
+                        sub_record.updated,
+                        format::ListStyle::CommaSeparatedBlocks,
+                        Some(&caption),
+                    )
+                    .as_strs(),
                     false,
-                    Some(Box::new(move |subs| {
-                        format_as_item_seperated_list(
-                            subs,
-                            &appended_text,
-                            SeperatedListOptions::default(),
-                        )
-                    })),
                 )
                 .await?;
             }
 
             if sub_record.ignored.len() > 0 {
-                let appended_text = format!("\nalready in `{}`", template);
+                let caption = format!("\nalready in `{}`", template);
 
                 ctx.say_list(
-                    &sub_record.ignored.as_strs(),
+                    &format_as_item_seperated_list(
+                        &sub_record.ignored.as_strs(),
+                        &caption,
+                        SeperatedListOptions::default(),
+                    )
+                    .as_strs(),
                     true,
-                    Some(Box::new(move |items| {
-                        format_as_item_seperated_list(
-                            items,
-                            &appended_text,
-                            SeperatedListOptions::default(),
-                        )
-                    })),
                 )
                 .await?;
             }
@@ -299,36 +295,31 @@ pub async fn delete_subs(
     match result {
         Ok(sub_record) => {
             if sub_record.updated.len() > 0 {
-                let subs: Vec<&str> = sub_record.updated.iter().map(|s| s.name.as_str()).collect();
-                let appended_text = format!("\ndeleted from `{}`", template);
+                let caption = format!("\ndeleted from `{}`", template);
 
                 ctx.say_list(
-                    &subs,
+                    &format_item_list(
+                        sub_record.updated,
+                        format::ListStyle::CommaSeparatedBlocks,
+                        Some(&caption),
+                    )
+                    .as_strs(),
                     false,
-                    Some(Box::new(move |subs| {
-                        format_as_item_seperated_list(
-                            subs,
-                            &appended_text,
-                            SeperatedListOptions::default(),
-                        )
-                    })),
                 )
                 .await?;
             }
 
             if sub_record.ignored.len() > 0 {
-                let appended_text = format!("\nnot present in `{}`", template);
+                let caption = format!("\nnot present in `{}`", template);
 
                 ctx.say_list(
-                    &sub_record.ignored.as_strs(),
+                    &format_as_item_seperated_list(
+                        &sub_record.ignored.as_strs(),
+                        &caption,
+                        SeperatedListOptions::default(),
+                    )
+                    .as_strs(),
                     true,
-                    Some(Box::new(move |items| {
-                        format_as_item_seperated_list(
-                            items,
-                            &appended_text,
-                            SeperatedListOptions::default(),
-                        )
-                    })),
                 )
                 .await?;
             }
@@ -366,7 +357,7 @@ pub async fn upload_sub(
         Ok(_) => {
             ctx.say(&format!(
                 "Added substitute from file {} to `{}`",
-                ellipsize_if_long(&sub_file.filename, DISCORD_PRETTY_WIDTH),
+                &sub_file.filename.truncate_with_ellipse(ONE_HUNDRED),
                 template
             ))
             .await?;
@@ -452,8 +443,8 @@ pub async fn replace_sub(
                 ctx.say_long(
                     &format!(
                         "Renamed substitute `{}` to `{}`",
-                        ellipsize_if_long(&from, 255),
-                        ellipsize_if_long(&to, 255)
+                        &from.truncate_with_ellipse(255),
+                        &to.truncate_with_ellipse(255)
                     ),
                     false,
                 )
@@ -463,7 +454,7 @@ pub async fn replace_sub(
                 ctx.say_long(
                     &format!(
                         "Failed to rename substitute `{}`",
-                        ellipsize_if_long(&from, 255)
+                        &from.truncate_with_ellipse(255)
                     ),
                     true,
                 )
@@ -495,7 +486,7 @@ async fn delete_multiple_templates(
                     &interaction,
                     &format!(
                         "Deleted templates `{}`",
-                        ellipsize_if_long(&result.updated_to_string(), 1000)
+                        &result.updated_to_string().truncate_with_ellipse(1000)
                     ),
                     true,
                 )
@@ -507,7 +498,7 @@ async fn delete_multiple_templates(
                     &interaction,
                     &format!(
                         "Templates `{}` do not exist.",
-                        ellipsize_if_long(&result.ignored_to_string(), 1000)
+                        &result.ignored_to_string().truncate_with_ellipse(1000)
                     ),
                     true,
                 )
@@ -533,7 +524,10 @@ async fn delete_single_template(
                 edit_interaction(
                     ctx,
                     &interaction,
-                    &format!("Deleted template `{}`", ellipsize_if_long(template, 1000)),
+                    &format!(
+                        "Deleted template `{}`",
+                        template.truncate_with_ellipse(1000)
+                    ),
                     true,
                 )
                 .await?;
@@ -545,7 +539,7 @@ async fn delete_single_template(
                     &interaction,
                     &format!(
                         "Template `{}` does not exist.",
-                        ellipsize_if_long(template, 1000)
+                        template.truncate_with_ellipse(1000)
                     ),
                     true,
                 )
@@ -580,7 +574,7 @@ pub async fn delete_templates(ctx: Context<'_>, names: String) -> Result<(), Err
 
     let interaction_text = format!(
         "Are you sure you want to delete `{}`? All of {} substitutes will be deleted as well.",
-        ellipsize_if_long(&names, 1000),
+        &names.truncate_with_ellipse(1000),
         if templates.len() > 1 { "their" } else { "it's" }
     );
 
@@ -657,11 +651,22 @@ pub async fn rename_template(ctx: Context<'_>, from: String, to: String) -> Resu
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ChoiceParameter)]
-pub enum ListStyle {
+pub enum DiscordListStyle {
     Default,
     Numeric,
-    ID,
+    Id,
     File,
+}
+
+impl Into<ListStyle> for DiscordListStyle {
+    fn into(self) -> ListStyle {
+        match self {
+            DiscordListStyle::Default => ListStyle::CommaSeparatedBlocks,
+            DiscordListStyle::Numeric => ListStyle::Numeric,
+            DiscordListStyle::Id => ListStyle::Id,
+            DiscordListStyle::File => ListStyle::None,
+        }
+    }
 }
 
 /// Lists all substitutes in a template
@@ -685,7 +690,7 @@ pub async fn list_subs(
     ctx: Context<'_>,
     template: String,
     search_term: Option<String>,
-    list_style: Option<ListStyle>,
+    list_style: Option<DiscordListStyle>,
 ) -> Result<(), Error> {
     let result = ctx
         .data()
@@ -699,77 +704,28 @@ pub async fn list_subs(
         .await;
 
     match result {
-        Ok(subs) => {
+        Ok(mut subs) => {
             if subs.len() == 0 {
                 ctx.say_ephemeral(&format!("No substitutes found in `{}`", template))
                     .await?;
                 return Ok(());
             }
 
-            let subs: Vec<String> =
-                if matches!(list_style, Some(ListStyle::ID) | Some(ListStyle::File)) {
-                    subs.iter()
-                        .map(|sub| {
-                            format!(
-                                "\nID: {}\n{}{}\n",
-                                sub.id,
-                                if sub.name.len() > DISCORD_PRETTY_WIDTH {
-                                    "\n"
-                                } else {
-                                    ""
-                                },
-                                sub.name,
-                            )
-                        })
-                        .collect()
-                } else {
-                    subs.iter().map(|sub| sub.name.clone()).collect()
-                };
+            let list_style = list_style.unwrap_or(DiscordListStyle::Default);
 
-            let subs = subs.as_strs();
-
-            let list_style = list_style.unwrap_or(ListStyle::Default);
-
-            match list_style {
-                ListStyle::Default => {
-                    ctx.say_list(
-                        &subs,
-                        true,
-                        Some(Box::new(|items| {
-                            format_as_item_seperated_list(
-                                items,
-                                "",
-                                SeperatedListOptions::default(),
-                            )
-                        })),
-                    )
-                    .await?;
-                }
-                ListStyle::Numeric => {
-                    ctx.say_list(&subs, true, Some(Box::new(format_as_numeric_list)))
-                        .await?;
-                }
-                ListStyle::ID => {
-                    ctx.say_list(
-                        &subs,
-                        true,
-                        Some(Box::new(|items| {
-                            format_as_item_seperated_list(
-                                items,
-                                "",
-                                SeperatedListOptions::as_id_list(),
-                            )
-                        })),
-                    )
-                    .await?;
-                }
-                ListStyle::File => {
-                    ctx.send(CreateReply::default().attachment(CreateAttachment::bytes(
-                        subs.iter().map(|s| s.to_string()).collect::<String>(),
-                        "message.txt",
-                    )))
-                    .await?;
-                }
+            if matches!(list_style, DiscordListStyle::File) {
+                let subs: Vec<String> = subs.iter_mut().map(format_item_as_id_item).collect();
+                ctx.send(CreateReply::default().attachment(CreateAttachment::bytes(
+                    subs.iter().map(|s| s.to_string()).collect::<String>(),
+                    "message.txt",
+                )))
+                .await?;
+            } else {
+                ctx.say_list(
+                    &format_item_list(subs, list_style.into(), None).as_strs(),
+                    false,
+                )
+                .await?;
             }
         }
         Err(e) => {
@@ -799,7 +755,7 @@ pub async fn list_subs(
 pub async fn list_templates(
     ctx: Context<'_>,
     search_term: Option<String>,
-    list_style: Option<ListStyle>,
+    list_style: Option<DiscordListStyle>,
 ) -> Result<(), Error> {
     let result = ctx
         .data()
@@ -811,69 +767,28 @@ pub async fn list_templates(
         )
         .await;
     match result {
-        Ok(templates) => {
+        Ok(mut templates) => {
             if templates.len() == 0 {
                 ctx.say_ephemeral(&format!("No templates found.")).await?;
                 return Ok(());
             }
 
-            let templates: Vec<String> =
-                if matches!(list_style, Some(ListStyle::ID) | Some(ListStyle::File)) {
-                    templates
-                        .iter()
-                        .map(|template| format!("\nID: {}\n{}\n", template.id, template.name,))
-                        .collect()
-                } else {
-                    templates
-                        .iter()
-                        .map(|template| template.name.clone())
-                        .collect()
-                };
+            let list_style = list_style.unwrap_or(DiscordListStyle::Default);
 
-            let templates = templates.as_strs();
-
-            let list_style = list_style.unwrap_or(ListStyle::Default);
-
-            match list_style {
-                ListStyle::Default => {
-                    ctx.say_list(
-                        &templates,
-                        true,
-                        Some(Box::new(|templates| {
-                            format_as_item_seperated_list(
-                                templates,
-                                "",
-                                SeperatedListOptions::default(),
-                            )
-                        })),
-                    )
-                    .await?;
-                }
-                ListStyle::Numeric => {
-                    ctx.say_list(&templates, true, Some(Box::new(format_as_numeric_list)))
-                        .await?;
-                }
-                ListStyle::ID => {
-                    ctx.say_list(
-                        &templates,
-                        true,
-                        Some(Box::new(|items| {
-                            format_as_item_seperated_list(
-                                items,
-                                "",
-                                SeperatedListOptions::as_id_list(),
-                            )
-                        })),
-                    )
-                    .await?;
-                }
-                ListStyle::File => {
-                    ctx.send(CreateReply::default().attachment(CreateAttachment::bytes(
-                        templates.iter().map(|s| s.to_string()).collect::<String>(),
-                        "message.txt",
-                    )))
-                    .await?;
-                }
+            if matches!(list_style, DiscordListStyle::File) {
+                let templates: Vec<String> =
+                    templates.iter_mut().map(format_item_as_id_item).collect();
+                ctx.send(CreateReply::default().attachment(CreateAttachment::bytes(
+                    templates.iter().map(|s| s.to_string()).collect::<String>(),
+                    "message.txt",
+                )))
+                .await?;
+            } else {
+                ctx.say_list(
+                    &format_item_list(templates, list_style.into(), None).as_strs(),
+                    false,
+                )
+                .await?;
             }
         }
         Err(e) => {

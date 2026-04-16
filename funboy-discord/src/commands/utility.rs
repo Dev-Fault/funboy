@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{Context, Error, context_extension::ContextExtension};
 
-use funboy_core::format::{DISCORD_CHARACTER_LIMIT, extract_image_urls};
+use funboy_core::format::{TWO_THOUSAND, extract_image_urls};
 use poise::{
     CreateReply,
     serenity_prelude::{self as serenity, ChannelId, CreateEmbed, CreateMessage},
@@ -59,12 +59,12 @@ async fn generate_help_messages<'a>(ctx: Context<'_>, show_descriptions: bool) -
             }
         }
 
-        if help_message.len() > DISCORD_CHARACTER_LIMIT {
+        if help_message.len() > TWO_THOUSAND {
             let mut messages: Vec<String> = Vec::new();
             messages.push(String::new());
             let mut i = 0;
             for line in help_message.split_inclusive('\n') {
-                if line.len() + messages[i].len() < DISCORD_CHARACTER_LIMIT {
+                if line.len() + messages[i].len() < TWO_THOUSAND {
                     let msg = messages.get_mut(i).unwrap();
                     msg.push_str(line);
                 } else {
@@ -76,7 +76,7 @@ async fn generate_help_messages<'a>(ctx: Context<'_>, show_descriptions: bool) -
             for msg in messages {
                 help_messages.push(msg);
             }
-        } else if help_messages[msg_i].len() + help_message.len() > DISCORD_CHARACTER_LIMIT {
+        } else if help_messages[msg_i].len() + help_message.len() > TWO_THOUSAND {
             help_messages.push(help_message);
             msg_i += 1;
         } else {

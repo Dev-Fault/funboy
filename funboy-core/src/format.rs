@@ -1,9 +1,14 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, mem, str::FromStr};
 
-use crate::FunboyError;
+use sqlx::Execute;
 
-pub const DISCORD_CHARACTER_LIMIT: usize = 2000;
-pub const DISCORD_PRETTY_WIDTH: usize = 100;
+use crate::{
+    FunboyError,
+    template_database::{Identifiable, Substitute, Template},
+};
+
+pub const TWO_THOUSAND: usize = 2000;
+pub const ONE_HUNDRED: usize = 100;
 
 pub fn parse_bot_args(input: &str) -> Result<Vec<&str>, FunboyError> {
     let input = input.trim();
@@ -60,22 +65,65 @@ impl AsStrs for Vec<String> {
     }
 }
 
-pub fn split_messages(message: &[&str]) -> Vec<String> {
+pub fn split_block<'a>(str: &'a str, max_message_size: usize) -> Vec<&'a str> {
+    let mut output = Vec::new();
+    let blocks: usize = str.len() / max_message_size;
+
+    for i in 0..blocks {
+        output.push(&str[i * max_message_size..(i + 1) * max_message_size]);
+    }
+
+    if blocks * max_message_size < str.len() {
+        output.push(&str[blocks * max_message_size..str.len()]);
+    }
+
+    output
+}
+
+pub fn split_message(input: &str, max_message_size: usize) -> Vec<&str> {
+    let mut messages: Vec<&str> = vec![];
+    let mut end_of_last_word: usize = 0;
+    let mut end_of_last_word_prev: usize = 0;
+    let mut prev_char_was_whitespace = false;
+    let mut start: usize = 0;
+
+    for (i, ch) in input.char_indices() {
+        if i > 0 && ch.is_whitespace() && !prev_char_was_whitespace {
+            end_of_last_word = i;
+        }
+
+        if end_of_last_word - start >= max_message_size {
+            messages.push(&input[start..end_of_last_word_prev]);
+            start = end_of_last_word_prev;
+        }
+
+        end_of_last_word_prev = end_of_last_word;
+        prev_char_was_whitespace = ch.is_whitespace();
+    }
+
+    for block in split_block(&input[start..input.len()], max_message_size) {
+        messages.push(block);
+    }
+
+    messages
+}
+
+pub fn split_messages(message: &[&str], max_message_size: usize) -> Vec<String> {
     let mut message_split: Vec<String> = Vec::new();
 
     let iter = message.iter();
     let mut message_part: String = String::default();
 
     for value in iter {
-        if message_part.len() + value.len() <= DISCORD_CHARACTER_LIMIT {
+        if message_part.len() + value.len() <= max_message_size {
             message_part.push_str(value);
         } else {
             message_split.push(message_part);
             message_part = String::default();
-            if value.len() <= DISCORD_CHARACTER_LIMIT {
+            if value.len() <= max_message_size {
                 message_part.push_str(value);
             } else {
-                for sub_str in split_message(value) {
+                for sub_str in split_message(value, max_message_size) {
                     message_split.push(sub_str.to_string());
                 }
             }
@@ -89,56 +137,22 @@ pub fn split_messages(message: &[&str]) -> Vec<String> {
     message_split
 }
 
-pub fn split_block<'a>(str: &'a str) -> Vec<&'a str> {
-    let mut output = Vec::new();
-    let blocks: usize = str.len() / DISCORD_CHARACTER_LIMIT;
-
-    for i in 0..blocks {
-        output.push(&str[i * DISCORD_CHARACTER_LIMIT..(i + 1) * DISCORD_CHARACTER_LIMIT]);
-    }
-
-    if blocks * DISCORD_CHARACTER_LIMIT < str.len() {
-        output.push(&str[blocks * DISCORD_CHARACTER_LIMIT..str.len()]);
-    }
-
-    output
+pub trait TruncateEllipsize {
+    fn truncate_with_ellipse<'a>(&'_ self, new_len: usize) -> Cow<'_, str>;
 }
 
-pub fn split_message(input: &str) -> Vec<&str> {
-    let mut messages: Vec<&str> = vec![];
-    let mut end_of_last_word: usize = 0;
-    let mut end_of_last_word_prev: usize = 0;
-    let mut prev_char_was_whitespace = false;
-    let mut start: usize = 0;
+impl TruncateEllipsize for str {
+    fn truncate_with_ellipse<'a>(&'_ self, new_len: usize) -> Cow<'_, str> {
+        let marcation = "...";
+        let limit = new_len - marcation.len();
 
-    for (i, ch) in input.char_indices() {
-        if i > 0 && ch.is_whitespace() && !prev_char_was_whitespace {
-            end_of_last_word = i;
-        }
-
-        if end_of_last_word - start >= DISCORD_CHARACTER_LIMIT {
-            messages.push(&input[start..end_of_last_word_prev]);
-            start = end_of_last_word_prev;
-        }
-
-        end_of_last_word_prev = end_of_last_word;
-        prev_char_was_whitespace = ch.is_whitespace();
-    }
-
-    for block in split_block(&input[start..input.len()]) {
-        messages.push(block);
-    }
-
-    messages
-}
-
-pub fn ellipsize_if_long<'a>(item: &'_ str, limit: usize) -> Cow<'_, str> {
-    if limit > item.len() {
-        Cow::Borrowed(item)
-    } else {
-        match item.get(0..limit) {
-            Some(substr) => Cow::Owned(substr.to_owned() + "..."),
-            None => Cow::Borrowed(""),
+        if limit > self.len() {
+            Cow::Borrowed(self)
+        } else {
+            match self.get(0..limit) {
+                Some(substr) => Cow::Owned(substr.to_owned() + "..."),
+                None => Cow::Borrowed(""),
+            }
         }
     }
 }
@@ -146,16 +160,32 @@ pub fn ellipsize_if_long<'a>(item: &'_ str, limit: usize) -> Cow<'_, str> {
 #[derive(Copy, Clone)]
 pub struct SeperatedListOptions<'a> {
     pub item_seperator: &'a str,
-    pub markdown: &'a str,
+    pub block_marker: &'a str,
     pub quote_multi_word_items: bool,
 }
 
 impl SeperatedListOptions<'_> {
-    pub fn as_id_list() -> Self {
+    pub fn none() -> Self {
         Self {
             item_seperator: "",
-            markdown: "",
+            block_marker: "",
             quote_multi_word_items: false,
+        }
+    }
+
+    pub fn space_seperated() -> Self {
+        Self {
+            item_seperator: " ",
+            block_marker: "",
+            quote_multi_word_items: true,
+        }
+    }
+
+    pub fn comma_seperated() -> Self {
+        Self {
+            item_seperator: ", ",
+            block_marker: "",
+            quote_multi_word_items: true,
         }
     }
 }
@@ -164,22 +194,24 @@ impl Default for SeperatedListOptions<'_> {
     fn default() -> Self {
         Self {
             item_seperator: ", ",
-            markdown: "```",
+            block_marker: "```",
             quote_multi_word_items: true,
         }
     }
 }
 
+pub type ListFormatter = Box<dyn Fn(&[&str]) -> Vec<String> + Send + Sync>;
+
 pub fn format_as_item_seperated_list(
     items: &[&str],
-    appended_text: &str,
+    caption: &str,
     options: SeperatedListOptions,
 ) -> Vec<String> {
     let mut messages: Vec<String> = Vec::new();
-    messages.push(String::with_capacity(DISCORD_CHARACTER_LIMIT));
+    messages.push(String::with_capacity(TWO_THOUSAND));
     let mut current_msg = 0;
 
-    messages[current_msg].push_str(options.markdown);
+    messages[current_msg].push_str(options.block_marker);
     for (i, item) in items.iter().enumerate() {
         let item = if options.quote_multi_word_items && item.contains(char::is_whitespace) {
             format!("\"{}\"", item)
@@ -188,17 +220,17 @@ pub fn format_as_item_seperated_list(
         };
 
         let item = if item.len()
-            > DISCORD_CHARACTER_LIMIT
-                - (options.markdown.len() * 2)
-                - appended_text.len()
+            > TWO_THOUSAND
+                - (options.block_marker.len() * 2)
+                - caption.len()
                 - options.item_seperator.len()
         {
-            format!("{}", ellipsize_if_long(&item, DISCORD_PRETTY_WIDTH))
+            format!("{}", &item.truncate_with_ellipse(ONE_HUNDRED))
         } else {
             item
         };
 
-        let addition_len = messages[current_msg].len() + item.len() + options.markdown.len();
+        let addition_len = messages[current_msg].len() + item.len() + options.block_marker.len();
 
         let seperator = if i == items.len() - 1 {
             ""
@@ -206,23 +238,24 @@ pub fn format_as_item_seperated_list(
             options.item_seperator
         };
 
-        if addition_len + seperator.len() <= DISCORD_CHARACTER_LIMIT {
+        if addition_len + seperator.len() <= TWO_THOUSAND {
             messages[current_msg].push_str(&format!("{}{}", item, seperator));
         } else {
-            messages[current_msg].push_str(options.markdown);
-            messages.push(String::with_capacity(DISCORD_CHARACTER_LIMIT));
+            messages[current_msg].push_str(options.block_marker);
+            messages.push(String::with_capacity(TWO_THOUSAND));
             current_msg += 1;
-            messages[current_msg].push_str(&format!("{}{}{}", options.markdown, &item, seperator));
+            messages[current_msg]
+                .push_str(&format!("{}{}{}", options.block_marker, &item, seperator));
         }
     }
 
-    if messages[current_msg].len() + options.markdown.len() + " ".len() + appended_text.len()
-        != DISCORD_CHARACTER_LIMIT
+    if messages[current_msg].len() + options.block_marker.len() + " ".len() + caption.len()
+        != TWO_THOUSAND
     {
-        messages[current_msg].push_str(options.markdown);
-        messages[current_msg].push_str(&format!(" {}", appended_text));
+        messages[current_msg].push_str(options.block_marker);
+        messages[current_msg].push_str(&format!(" {}", caption));
     } else {
-        messages.push(appended_text.to_string());
+        messages.push(caption.to_string());
     }
 
     messages
@@ -235,12 +268,8 @@ pub fn format_as_numeric_list(items: &[&str]) -> Vec<String> {
         .map(|s| {
             let numbered = i.to_string()
                 + ": "
-                + if s.len() > DISCORD_PRETTY_WIDTH {
-                    "\n"
-                } else {
-                    ""
-                }
-                + &ellipsize_if_long(s, DISCORD_PRETTY_WIDTH)
+                + if s.len() > ONE_HUNDRED { "\n" } else { "" }
+                + &s.truncate_with_ellipse(ONE_HUNDRED)
                 + "\n";
             i += 1;
             numbered
@@ -259,6 +288,79 @@ pub fn extract_image_urls(input: &str) -> Vec<&str> {
         }
     }
     urls
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum ListStyle {
+    CommaSeparatedBlocks,
+    Numeric,
+    Id,
+    None,
+}
+
+pub const LIST_STYLE_COMMA_SEPARATED: &str = "comma";
+pub const LIST_STYLE_NUMERIC: &str = "numeric";
+pub const LIST_STYLE_ID: &str = "id";
+pub const LIST_STYLE_NONE: &str = "none";
+
+impl FromStr for ListStyle {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            LIST_STYLE_COMMA_SEPARATED => Ok(ListStyle::CommaSeparatedBlocks),
+            LIST_STYLE_NUMERIC => Ok(ListStyle::Numeric),
+            LIST_STYLE_ID => Ok(ListStyle::Id),
+            LIST_STYLE_NONE => Ok(ListStyle::None),
+            _ => Err(format!("Unknown context {}", s)),
+        }
+    }
+}
+
+pub fn format_item_as_id_item<T: Identifiable>(item: &mut T) -> String {
+    format!(
+        "\nID: {}\n{}{}\n",
+        item.id(),
+        if item.name().len() > ONE_HUNDRED {
+            "\n"
+        } else {
+            ""
+        },
+        item.take_name(),
+    )
+}
+
+pub fn format_item_list<T: Identifiable>(
+    items: Vec<T>,
+    list_style: ListStyle,
+    caption: Option<&str>,
+) -> Vec<String> {
+    let mut items = items;
+    let caption = caption.unwrap_or("");
+    let items: Vec<String> = if matches!(list_style, ListStyle::Id) {
+        items.iter_mut().map(format_item_as_id_item).collect()
+    } else {
+        items.iter_mut().map(|item| item.take_name()).collect()
+    };
+
+    match list_style {
+        ListStyle::CommaSeparatedBlocks => {
+            let items = items.as_strs();
+            format_as_item_seperated_list(&items, caption, SeperatedListOptions::default())
+        }
+        ListStyle::Numeric => {
+            let items = items.as_strs();
+            format_as_numeric_list(&items)
+        }
+        ListStyle::Id => {
+            let items = items.as_strs();
+            format_as_item_seperated_list(&items, caption, SeperatedListOptions::none())
+        }
+        ListStyle::None => {
+            let items = items.as_strs();
+            format_as_item_seperated_list(&items, caption, SeperatedListOptions::space_seperated())
+        }
+    }
 }
 
 #[cfg(test)]
@@ -403,10 +505,10 @@ mod tests {
     #[test]
     fn test_no_words_cut_in_middle() {
         let input = "hello world this isss aaaa test message ".repeat(1000);
-        let result = split_message(&input);
+        let result = split_message(&input, TWO_THOUSAND);
         for msg in &result {
             dbg!(&msg);
-            assert!(!(msg.len() > DISCORD_CHARACTER_LIMIT));
+            assert!(!(msg.len() > TWO_THOUSAND));
             assert!(
                 msg.ends_with("hello")
                     || msg.ends_with("world")
@@ -423,7 +525,7 @@ mod tests {
     #[test]
     fn test_messages_reconstruct_original() {
         let input = "The quick brown fox jumps over the lazy dog. ".repeat(100);
-        let result = split_message(&input);
+        let result = split_message(&input, TWO_THOUSAND);
         let reconstructed = result.join("");
         assert_eq!(reconstructed, input);
     }
@@ -431,23 +533,23 @@ mod tests {
     #[test]
     fn test_empty_string() {
         let input = "";
-        let result = split_message(input);
+        let result = split_message(input, TWO_THOUSAND);
         assert!(result.is_empty() || (result.len() == 1 && result[0].is_empty()));
     }
 
     #[test]
     fn test_long_block() {
-        let input = "=".repeat(DISCORD_CHARACTER_LIMIT * 2);
-        let result = split_message(&input);
+        let input = "=".repeat(TWO_THOUSAND * 2);
+        let result = split_message(&input, TWO_THOUSAND);
         dbg!(&result);
-        assert!(result[0].len() == DISCORD_CHARACTER_LIMIT);
-        assert!(result[1].len() == DISCORD_CHARACTER_LIMIT);
+        assert!(result[0].len() == TWO_THOUSAND);
+        assert!(result[1].len() == TWO_THOUSAND);
     }
 
     #[test]
     fn test_single_word() {
         let input = "verylongword";
-        let result = split_message(input);
+        let result = split_message(input, TWO_THOUSAND);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0], "verylongword");
     }
@@ -455,7 +557,7 @@ mod tests {
     #[test]
     fn test_multiple_spaces() {
         let input = "hello    world    test";
-        let result = split_message(&input);
+        let result = split_message(&input, TWO_THOUSAND);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0], "hello    world    test");
     }
@@ -463,7 +565,7 @@ mod tests {
     #[test]
     fn test_newlines_and_tabs() {
         let input = "hello\nworld\ttest";
-        let result = split_message(&input);
+        let result = split_message(&input, TWO_THOUSAND);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0], "hello\nworld\ttest");
     }
@@ -501,9 +603,12 @@ mod tests {
         message.push(regular_string_3);
         message.push(regular_string_4);
 
-        for split in split_messages(&message.iter().map(|s| &s[..]).collect::<Vec<&str>>()[..]) {
+        for split in split_messages(
+            &message.iter().map(|s| &s[..]).collect::<Vec<&str>>()[..],
+            TWO_THOUSAND,
+        ) {
             dbg!(split.len());
-            assert!(split.len() <= super::DISCORD_CHARACTER_LIMIT);
+            assert!(split.len() <= super::TWO_THOUSAND);
         }
     }
 
@@ -528,7 +633,7 @@ mod tests {
 
         for message in messages {
             dbg!(&message);
-            assert!(message.len() <= DISCORD_CHARACTER_LIMIT);
+            assert!(message.len() <= TWO_THOUSAND);
         }
     }
 
@@ -556,7 +661,7 @@ mod tests {
         assert!(messages[1].ends_with(&format!("x{} {}", MARKDOWN, NOTIFY_TEXT)));
 
         for message in messages {
-            assert!(message.len() <= DISCORD_CHARACTER_LIMIT);
+            assert!(message.len() <= TWO_THOUSAND);
         }
     }
 
@@ -585,7 +690,7 @@ mod tests {
 
         for message in messages {
             dbg!(&message);
-            assert!(message.len() <= DISCORD_CHARACTER_LIMIT);
+            assert!(message.len() <= TWO_THOUSAND);
         }
 
         let mut test_sub = String::with_capacity(LIMIT);
@@ -601,7 +706,7 @@ mod tests {
 
         for message in messages {
             dbg!(&message);
-            assert!(message.len() <= DISCORD_CHARACTER_LIMIT);
+            assert!(message.len() <= TWO_THOUSAND);
         }
 
         let edge_case = LIMIT - 1;
@@ -618,7 +723,7 @@ mod tests {
 
         for message in messages {
             dbg!(&message);
-            assert!(message.len() <= DISCORD_CHARACTER_LIMIT);
+            assert!(message.len() <= TWO_THOUSAND);
         }
     }
 }

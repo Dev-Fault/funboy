@@ -1,4 +1,5 @@
-use funboy_core::{format::ellipsize_if_long, ollama::MAX_PREDICT};
+use funboy_core::format::TruncateEllipsize;
+use funboy_core::ollama::MAX_PREDICT;
 use poise::CreateReply;
 
 use crate::{
@@ -216,7 +217,7 @@ pub async fn generate_ollama(ctx: Context<'_>, prompt: String) -> Result<(), Err
                         ctx,
                         CreateReply::default().content(&format!(
                             "Generating prompt: **\"{}\"**",
-                            ellipsize_if_long(&prompt, 200)
+                            &prompt.truncate_with_ellipse(200)
                         )),
                     )
                     .await?;

@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::Arc};
+use std::{collections::HashSet, mem, sync::Arc};
 
 use sqlx::{Error, FromRow, PgPool, Pool, Postgres, Transaction};
 
@@ -7,10 +7,30 @@ pub const DEBUG_DB_URL: &str = "postgres://funboy:funboy@localhost/funboy_db";
 
 pub type KeySize = i64;
 
+pub trait Identifiable {
+    fn id(&self) -> String;
+    fn name(&self) -> &str;
+    fn take_name(&mut self) -> String;
+}
+
 #[derive(Debug, FromRow, Clone)]
 pub struct Template {
     pub id: KeySize,
     pub name: String,
+}
+
+impl Identifiable for Template {
+    fn id(&self) -> String {
+        self.id.to_string()
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn take_name(&mut self) -> String {
+        mem::take(&mut self.name)
+    }
 }
 
 #[derive(Debug, FromRow, Clone)]
@@ -19,6 +39,20 @@ pub struct Substitute {
     pub name_hash: String,
     pub name: String,
     pub template_id: KeySize,
+}
+
+impl Identifiable for Substitute {
+    fn id(&self) -> String {
+        self.id.to_string()
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn take_name(&mut self) -> String {
+        mem::take(&mut self.name)
+    }
 }
 
 #[derive(Debug, Copy, Clone)]

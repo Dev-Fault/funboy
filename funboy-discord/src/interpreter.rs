@@ -9,7 +9,7 @@ use fsl_interpreter::{
 };
 use funboy_core::{
     Funboy,
-    format::split_message,
+    format::{TWO_THOUSAND, split_message},
     interpreter::{
         ASK, ASK_RULES, ASK_TO, ASK_TO_RULES, DEFAULT_TIMEOUT_SECS, SAY, SAY_RULES, SAY_TO,
         SAY_TO_RULES,
@@ -75,7 +75,7 @@ impl InterpreterContext {
         let say_message = async |mention: &str| {
             if message.len() < BOT_MAX_MESSAGE_SIZE {
                 let mention_message = &format!("{} {}", mention, message);
-                for m in split_message(mention_message) {
+                for m in split_message(mention_message, TWO_THOUSAND) {
                     if let Err(e) = self.channel_id.say(&self.http, m).await {
                         return Err(CommandError::Custom(e.to_string()));
                     };
@@ -198,7 +198,7 @@ pub fn create_say_command(ictx: InterpreterContext) -> Executor {
                 let message = ictx.generate_message(&message).await?;
 
                 if message.len() < BOT_MAX_MESSAGE_SIZE {
-                    for m in split_message(&message) {
+                    for m in split_message(&message, TWO_THOUSAND) {
                         ictx.channel_id.say(&ictx.http, m).await.ok();
                     }
                     Ok(Value::None)
@@ -272,7 +272,7 @@ pub fn create_ask_command(ictx: InterpreterContext) -> Executor {
                 let question = ictx.generate_message(&question).await?;
 
                 if question.len() < BOT_MAX_MESSAGE_SIZE {
-                    for m in split_message(&question) {
+                    for m in split_message(&question, TWO_THOUSAND) {
                         ictx.channel_id.say(&ictx.http, m).await.ok();
                     }
                 } else {
