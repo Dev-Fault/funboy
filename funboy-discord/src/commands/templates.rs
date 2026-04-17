@@ -1,11 +1,6 @@
-use funboy_core::{
-    FunboyError,
-    format::{
-        self, AsStrs, ListStyle, ONE_HUNDRED, SeperatedListOptions, TWO_THOUSAND,
-        TruncateEllipsize, format_as_item_seperated_list, format_item_as_id_item, format_item_list,
-        parse_bot_args, split_message,
-    },
-    template_database::{KeySize, Limit, OrderBy, SortOrder},
+use funboy_cli::{CommandResult, copy, rename, replace};
+use funboy_core::format::{
+    ListStyle, ONE_HUNDRED, TWO_THOUSAND, TruncateEllipsize, parse_bot_args, split_message,
 };
 use poise::{ChoiceParameter, CreateReply};
 use serenity::all::{Attachment, ComponentInteraction, CreateAttachment};
@@ -156,71 +151,39 @@ pub async fn generate_file(ctx: Context<'_>, file: Attachment) -> Result<(), Err
 /// - `/add_subs noun "hot dog" "cold pizza"` — adds two multi-word substitutes
 ///
 /// ## Single substitute mode
-/// Use `add_as_single_sub: true` for large or complex substitutes, especially those containing quotes.
+/// Use `single: true` for large or complex substitutes, especially those containing quotes.
 ///
-/// **Example:** `/add_subs quote this substitute contains "a quote" in it add_as_single_sub: true` - adds a single substitute with quotes inside
+/// **Example:** `/add_subs | template: quote | subs: this substitute contains "a quote" in it | single: true` - adds a single substitute with quotes inside
 ///
 /// This treats the entire input as a single substitute allowing spaces and quotes inside the substitute.
 #[poise::command(slash_command, prefix_command, category = "Templates")]
 pub async fn add_subs(
     ctx: Context<'_>,
     template: String,
-    subs: String,
-    add_as_single_sub: Option<bool>,
+    substitutes: String,
+    single: Option<bool>,
 ) -> Result<(), Error> {
-    let add_as_single_sub = add_as_single_sub.unwrap_or(false);
-
-    let result = if add_as_single_sub {
-        ctx.data().funboy.add_substitutes(&template, &[&subs]).await
-    } else {
-        let subs = parse_bot_args(&subs);
-        let subs = match subs {
-            Ok(subs) => subs,
-            Err(e) => {
-                ctx.say_ephemeral(&e.to_string()).await?;
-                return Ok(());
-            }
-        };
-
-        ctx.data().funboy.add_substitutes(&template, &subs).await
-    };
+    let single = single.unwrap_or(false);
+    let funboy = ctx.data().funboy.clone();
+    let result = funboy_cli::add(
+        &funboy,
+        funboy_cli::Context::Discord,
+        template,
+        substitutes,
+        single,
+    )
+    .await;
 
     match result {
-        Ok(sub_record) => {
-            if sub_record.updated.len() > 0 {
-                let caption = format!("\nadded to `{}`", template);
-
-                ctx.say_list(
-                    &format_item_list(
-                        sub_record.updated,
-                        format::ListStyle::CommaSeparatedBlocks,
-                        Some(&caption),
-                    )
-                    .as_strs(),
-                    false,
-                )
-                .await?;
-            }
-
-            if sub_record.ignored.len() > 0 {
-                let caption = format!("\nalready in `{}`", template);
-
-                ctx.say_list(
-                    &format_as_item_seperated_list(
-                        &sub_record.ignored.as_strs(),
-                        &caption,
-                        SeperatedListOptions::default(),
-                    )
-                    .as_strs(),
-                    true,
-                )
-                .await?;
+        Ok(result) => {
+            if let CommandResult::Text(output) = result {
+                ctx.say_long(&output, false).await?;
             }
         }
         Err(e) => {
             ctx.say_ephemeral(&e.to_string()).await?;
         }
-    };
+    }
     Ok(())
 }
 
@@ -234,100 +197,48 @@ pub async fn add_subs(
 /// - **Example:** `/delete_subs name "hot dog"` — removes the "hot dog" substitute
 ///
 /// ## Delete by ID
-/// - **Example:** `/delete_subs noun 0 2 5 delete_by_id: true` — removes substitutes with IDs: 0, 2, and 5
+/// - **Example:** `/delete_subs template: noun | subs: 0 2 5 | id: true` — removes substitutes with IDs: 0, 2, and 5
 ///
 /// This is useful when substitutes are large and difficult to write out fully inside the command.
 /// Note: IDs of substitutes can be obtained by using the `/list_subs` command with the ID list style.
 ///
 /// ## Single substitute mode
-/// Use `delete_as_single_sub: true` to treat the entire input as a single substitute name or ID.
+/// Use `single: true` to treat the entire input as a single substitute name or ID.
 /// Useful for complex substitute names containing spaces or quotes.
 ///
-/// **Example:** `/delete_subs template: sentence subs: This is one substitute containing "spaces and quotes inside it" delete_as_single_sub: true`
+/// **Example:** `/delete_subs template: sentence | subs: This is one substitute containing "spaces and quotes inside it" | single: true`
 #[poise::command(slash_command, prefix_command, category = "Templates")]
 pub async fn delete_subs(
     ctx: Context<'_>,
     template: String,
-    subs: String,
-    delete_as_single_sub: Option<bool>,
-    delete_by_id: Option<bool>,
+    substitutes: String,
+    single: Option<bool>,
+    id: Option<bool>,
 ) -> Result<(), Error> {
-    let delete_as_single_sub = delete_as_single_sub.unwrap_or(false);
-    let delete_by_id = delete_by_id.unwrap_or(false);
+    let single = single.unwrap_or(false);
+    let id = id.unwrap_or(false);
+    let funboy = ctx.data().funboy.clone();
 
-    let result = if delete_as_single_sub {
-        if delete_by_id {
-            match subs.parse::<KeySize>() {
-                Ok(id) => ctx.data().funboy.delete_substitutes_by_id(&[id]).await,
-                Err(_) => Err(FunboyError::UserInput(
-                    "ID must be a valid number.".to_string(),
-                )),
-            }
-        } else {
-            ctx.data()
-                .funboy
-                .delete_substitutes(&template, &[&subs])
-                .await
-        }
-    } else {
-        let subs = parse_bot_args(&subs);
-        let subs = match subs {
-            Ok(subs) => subs,
-            Err(e) => {
-                ctx.say_ephemeral(&e.to_string()).await?;
-                return Ok(());
-            }
-        };
-
-        if delete_by_id {
-            let ids: Result<Vec<KeySize>, _> = subs.iter().map(|s| s.parse::<KeySize>()).collect();
-            match ids {
-                Ok(ids) => ctx.data().funboy.delete_substitutes_by_id(&ids).await,
-                Err(_) => Err(FunboyError::UserInput(
-                    "Id must be a valid number.".to_string(),
-                )),
-            }
-        } else {
-            ctx.data().funboy.delete_substitutes(&template, &subs).await
-        }
-    };
+    let result = funboy_cli::delete(
+        &funboy,
+        funboy_cli::Context::Discord,
+        template,
+        substitutes,
+        single,
+        id,
+    )
+    .await;
 
     match result {
-        Ok(sub_record) => {
-            if sub_record.updated.len() > 0 {
-                let caption = format!("\ndeleted from `{}`", template);
-
-                ctx.say_list(
-                    &format_item_list(
-                        sub_record.updated,
-                        format::ListStyle::CommaSeparatedBlocks,
-                        Some(&caption),
-                    )
-                    .as_strs(),
-                    false,
-                )
-                .await?;
-            }
-
-            if sub_record.ignored.len() > 0 {
-                let caption = format!("\nnot present in `{}`", template);
-
-                ctx.say_list(
-                    &format_as_item_seperated_list(
-                        &sub_record.ignored.as_strs(),
-                        &caption,
-                        SeperatedListOptions::default(),
-                    )
-                    .as_strs(),
-                    true,
-                )
-                .await?;
+        Ok(result) => {
+            if let CommandResult::Text(output) = result {
+                ctx.say_long(&output, false).await?;
             }
         }
         Err(e) => {
             ctx.say_ephemeral(&e.to_string()).await?;
         }
-    };
+    }
     Ok(())
 }
 
@@ -379,24 +290,18 @@ pub async fn copy_subs(
     from_template: String,
     to_template: String,
 ) -> Result<(), Error> {
-    let result = ctx
-        .data()
-        .funboy
-        .copy_substitutes(&from_template, &to_template)
-        .await;
-
+    let funboy = ctx.data().funboy.clone();
+    let result = copy(&funboy, from_template, to_template).await;
     match result {
-        Ok(_) => {
-            ctx.say(&format!(
-                "Copied substitutes from `{}` to `{}`",
-                from_template, to_template
-            ))
-            .await?;
+        Ok(result) => {
+            if let CommandResult::Text(output) = result {
+                ctx.say(&output).await?;
+            }
         }
         Err(e) => {
             ctx.say_ephemeral(&e.to_string()).await?;
         }
-    };
+    }
     Ok(())
 }
 
@@ -409,62 +314,28 @@ pub async fn copy_subs(
 /// - **Example:** `/replace_sub name "hot dog" "cold pizza"` — replaces "hot dog" with "cold pizza"
 ///
 /// ## Replace by ID
-/// - **Example:** `/replace_sub noun 0 "new substitute" replace_by_id: true` — replaces the substitute with id 0
+/// - **Example:** `/replace_sub noun 0 "new substitute" id: true` — replaces the substitute with id 0
 /// Note: ID's of substitutes can be obtained by using the `/list_subs` command with the ID list style.
 #[poise::command(slash_command, prefix_command, category = "Templates")]
 pub async fn replace_sub(
     ctx: Context<'_>,
-    template: String,
+    template: Option<String>,
     from: String,
     to: String,
-    replace_by_id: Option<bool>,
+    id: Option<bool>,
 ) -> Result<(), Error> {
-    let replace_by_id = replace_by_id.unwrap_or(false);
-
-    let result = if replace_by_id {
-        let id = from.parse::<KeySize>();
-        match id {
-            Ok(id) => ctx.data().funboy.replace_substitute_by_id(id, &to).await,
-            Err(_) => {
-                ctx.say_ephemeral("Id must be a valid number.").await?;
-                return Ok(());
+    let funboy = ctx.data().funboy.clone();
+    let result = replace(&funboy, template, from, to, id.unwrap_or(false)).await;
+    match result {
+        Ok(result) => {
+            if let CommandResult::Text(output) = result {
+                ctx.say_long(&output, false).await?;
             }
         }
-    } else {
-        ctx.data()
-            .funboy
-            .replace_substitute(&template, &from, &to)
-            .await
-    };
-
-    match result {
-        Ok(template) => match template {
-            Some(_) => {
-                ctx.say_long(
-                    &format!(
-                        "Renamed substitute `{}` to `{}`",
-                        &from.truncate_with_ellipse(255),
-                        &to.truncate_with_ellipse(255)
-                    ),
-                    false,
-                )
-                .await?;
-            }
-            None => {
-                ctx.say_long(
-                    &format!(
-                        "Failed to rename substitute `{}`",
-                        &from.truncate_with_ellipse(255)
-                    ),
-                    true,
-                )
-                .await?;
-            }
-        },
         Err(e) => {
             ctx.say_ephemeral(&e.to_string()).await?;
         }
-    };
+    }
     Ok(())
 }
 
@@ -632,21 +503,18 @@ pub async fn delete_templates(ctx: Context<'_>, names: String) -> Result<(), Err
 /// All substitutes under the previous name will now be under the new name
 #[poise::command(slash_command, prefix_command, category = "Templates")]
 pub async fn rename_template(ctx: Context<'_>, from: String, to: String) -> Result<(), Error> {
-    match ctx.data().funboy.rename_template(&from, &to).await {
-        Ok(template) => match template {
-            Some(_) => {
-                ctx.say(&format!("Renamed template `{}` to `{}`", from, to))
-                    .await?;
+    let funboy = ctx.data().funboy.clone();
+    let result = rename(&funboy, from, to).await;
+    match result {
+        Ok(result) => {
+            if let CommandResult::Text(output) = result {
+                ctx.say(&output).await?;
             }
-            None => {
-                ctx.say(&format!("Failed to rename template `{}`", from,))
-                    .await?;
-            }
-        },
+        }
         Err(e) => {
             ctx.say_ephemeral(&e.to_string()).await?;
         }
-    };
+    }
     Ok(())
 }
 
@@ -664,7 +532,7 @@ impl Into<ListStyle> for DiscordListStyle {
             DiscordListStyle::Default => ListStyle::CommaSeparatedBlocks,
             DiscordListStyle::Numeric => ListStyle::Numeric,
             DiscordListStyle::Id => ListStyle::Id,
-            DiscordListStyle::File => ListStyle::None,
+            DiscordListStyle::File => ListStyle::Id,
         }
     }
 }
@@ -692,46 +560,27 @@ pub async fn list_subs(
     search_term: Option<String>,
     list_style: Option<DiscordListStyle>,
 ) -> Result<(), Error> {
-    let result = ctx
-        .data()
-        .funboy
-        .get_substitutes(
-            &template,
-            search_term.as_deref(),
-            OrderBy::NameIgnoreCase(SortOrder::Ascending),
-            Limit::Count(1000),
-        )
-        .await;
-
+    let funboy = ctx.data().funboy.clone();
+    let list_style = list_style.unwrap_or(DiscordListStyle::Default);
+    let result = funboy_cli::list(&funboy, Some(template), search_term, list_style.into()).await;
     match result {
-        Ok(mut subs) => {
-            if subs.len() == 0 {
-                ctx.say_ephemeral(&format!("No substitutes found in `{}`", template))
+        Ok(result) => {
+            if let CommandResult::Text(output) = result {
+                if matches!(list_style, DiscordListStyle::File) {
+                    ctx.send(
+                        CreateReply::default()
+                            .attachment(CreateAttachment::bytes(output, "message.txt")),
+                    )
                     .await?;
-                return Ok(());
-            }
-
-            let list_style = list_style.unwrap_or(DiscordListStyle::Default);
-
-            if matches!(list_style, DiscordListStyle::File) {
-                let subs: Vec<String> = subs.iter_mut().map(format_item_as_id_item).collect();
-                ctx.send(CreateReply::default().attachment(CreateAttachment::bytes(
-                    subs.iter().map(|s| s.to_string()).collect::<String>(),
-                    "message.txt",
-                )))
-                .await?;
-            } else {
-                ctx.say_list(
-                    &format_item_list(subs, list_style.into(), None).as_strs(),
-                    false,
-                )
-                .await?;
+                } else {
+                    ctx.say_long(&output, false).await?;
+                }
             }
         }
         Err(e) => {
             ctx.say_ephemeral(&e.to_string()).await?;
         }
-    };
+    }
     Ok(())
 }
 
@@ -757,43 +606,26 @@ pub async fn list_templates(
     search_term: Option<String>,
     list_style: Option<DiscordListStyle>,
 ) -> Result<(), Error> {
-    let result = ctx
-        .data()
-        .funboy
-        .get_templates(
-            search_term.as_deref(),
-            OrderBy::NameIgnoreCase(SortOrder::Ascending),
-            Limit::Count(1000),
-        )
-        .await;
+    let funboy = ctx.data().funboy.clone();
+    let list_style = list_style.unwrap_or(DiscordListStyle::Default);
+    let result = funboy_cli::list(&funboy, None, search_term, list_style.into()).await;
     match result {
-        Ok(mut templates) => {
-            if templates.len() == 0 {
-                ctx.say_ephemeral(&format!("No templates found.")).await?;
-                return Ok(());
-            }
-
-            let list_style = list_style.unwrap_or(DiscordListStyle::Default);
-
-            if matches!(list_style, DiscordListStyle::File) {
-                let templates: Vec<String> =
-                    templates.iter_mut().map(format_item_as_id_item).collect();
-                ctx.send(CreateReply::default().attachment(CreateAttachment::bytes(
-                    templates.iter().map(|s| s.to_string()).collect::<String>(),
-                    "message.txt",
-                )))
-                .await?;
-            } else {
-                ctx.say_list(
-                    &format_item_list(templates, list_style.into(), None).as_strs(),
-                    false,
-                )
-                .await?;
+        Ok(result) => {
+            if let CommandResult::Text(output) = result {
+                if matches!(list_style, DiscordListStyle::File) {
+                    ctx.send(
+                        CreateReply::default()
+                            .attachment(CreateAttachment::bytes(output, "message.txt")),
+                    )
+                    .await?;
+                } else {
+                    ctx.say_long(&output, false).await?;
+                }
             }
         }
         Err(e) => {
             ctx.say_ephemeral(&e.to_string()).await?;
         }
-    };
+    }
     Ok(())
 }

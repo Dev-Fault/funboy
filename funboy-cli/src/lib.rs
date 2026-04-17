@@ -1,15 +1,15 @@
-use std::{str::FromStr, sync::Arc, time::Duration};
+use std::{num::ParseIntError, str::FromStr, sync::Arc, time::Duration};
 
 use clap::Parser;
 use dotenvy::dotenv;
 use fsl_interpreter::FslInterpreter;
 use funboy_core::{
-    Funboy, FunboyError, UserId,
+    Funboy, UserId,
     format::{
         AsStrs, LIST_STYLE_NONE, ListStyle, ONE_HUNDRED, SeperatedListOptions, TruncateEllipsize,
         format_as_item_seperated_list, format_item_list, parse_bot_args,
     },
-    template_database::{Limit, OrderBy, SortOrder, SubstituteReceipt, TemplateDatabase},
+    template_database::{KeySize, Limit, OrderBy, SortOrder, SubstituteReceipt, TemplateDatabase},
 };
 use sqlx::postgres::PgPoolOptions;
 use tokio::sync::Mutex;
@@ -213,6 +213,9 @@ pub enum Command {
         #[arg(short, long)]
         single: bool,
 
+        #[arg(short, long)]
+        id: bool,
+
         #[arg(trailing_var_arg = true)]
         substitutes: Vec<String>,
     },
@@ -364,6 +367,7 @@ impl<U: UserId> FslContext<U> {
 pub enum Context {
     Cli,
     Matrix,
+    Discord,
 }
 
 pub async fn interpret_bot_commands<U: UserId>(
@@ -414,17 +418,20 @@ pub async fn interpret_bot_commands<U: UserId>(
                 if !permissions.can_add() {
                     return Err(CommandError::LackingPermission(Permission::Add).into());
                 }
-                add(funboy, template, substitutes, single).await
+                let substitutes = substitutes.join(" ");
+                add(funboy, context, template, substitutes, single).await
             }
             Command::Delete {
                 template,
                 substitutes,
                 single,
+                id,
             } => {
                 if !permissions.can_modify() {
                     return Err(CommandError::LackingPermission(Permission::Modify).into());
                 }
-                delete(funboy, template, substitutes, single).await
+                let substitutes = substitutes.join(" ");
+                delete(funboy, context, template, substitutes, single, id).await
             }
             Command::List {
                 template,
@@ -473,7 +480,7 @@ pub async fn interpret_bot_commands<U: UserId>(
     }
 }
 
-async fn replace<U: UserId>(
+pub async fn replace<U: UserId>(
     funboy: &Funboy<U>,
     template: Option<String>,
     substitute: String,
@@ -488,14 +495,14 @@ async fn replace<U: UserId>(
                     Ok(sub) => match sub {
                         Some(_) => {
                             let output = format!(
-                                "Replaced substitute with id \n{}\nwith \n{}",
+                                "Replaced substitute with id `{}` with `{}`",
                                 id,
                                 with_substitute.truncate_with_ellipse(ONE_HUNDRED)
                             );
                             return Ok(CommandResult::Text(output));
                         }
                         None => {
-                            let output = format!("No substitute with id {}", id);
+                            let output = format!("No substitute with id `{}`", id);
                             return Ok(CommandResult::Text(output));
                         }
                     },
@@ -515,7 +522,7 @@ async fn replace<U: UserId>(
                 Ok(sub) => match sub {
                     Some(_) => {
                         let output = format!(
-                            "Replaced substitute \n{}\nwith \n{}",
+                            "Replaced substitute `{}` with `{}`",
                             substitute.truncate_with_ellipse(ONE_HUNDRED),
                             with_substitute.truncate_with_ellipse(ONE_HUNDRED)
                         );
@@ -523,7 +530,7 @@ async fn replace<U: UserId>(
                     }
                     None => {
                         let output = format!(
-                            "No substitute \n{}",
+                            "No substitute `{}`",
                             substitute.truncate_with_ellipse(ONE_HUNDRED)
                         );
                         return Ok(CommandResult::Text(output));
@@ -535,14 +542,14 @@ async fn replace<U: UserId>(
             }
         } else {
             return Err(CommandError::ExecutionFailed(format!(
-                "must include template name when replacing substitute by name"
+                "Must include template name when replacing substitute by name"
             ))
             .into());
         }
     }
 }
 
-async fn rename<U: UserId>(
+pub async fn rename<U: UserId>(
     funboy: &Funboy<U>,
     from_template: String,
     to_template: String,
@@ -560,7 +567,7 @@ async fn rename<U: UserId>(
             }
             None => {
                 let output = format!(
-                    "No template named `{}` in database",
+                    "No template named `{}`",
                     from_template.truncate_with_ellipse(ONE_HUNDRED)
                 );
                 return Ok(CommandResult::Text(output));
@@ -570,21 +577,16 @@ async fn rename<U: UserId>(
     }
 }
 
-async fn copy<U: UserId>(
+pub async fn copy<U: UserId>(
     funboy: &Funboy<U>,
     from_template: String,
     to_template: String,
 ) -> Result<CommandResult, CommandError> {
     let result = funboy.copy_substitutes(&from_template, &to_template).await;
     match result {
-        Ok(receipt) => {
+        Ok(_) => {
             let output = format!(
-                "`{}\nCopied substitutes from template `{}` to template `{}`",
-                receipt
-                    .iter()
-                    .map(|s| s.name.clone())
-                    .collect::<Vec<String>>()
-                    .join(" "),
+                "Copied substitutes from template `{}` to template `{}`",
                 from_template.truncate_with_ellipse(ONE_HUNDRED),
                 to_template.truncate_with_ellipse(ONE_HUNDRED),
             );
@@ -699,7 +701,7 @@ async fn ollama<U: UserId>(
     }
 }
 
-async fn list<U: UserId>(
+pub async fn list<U: UserId>(
     funboy: &Funboy<U>,
     template: Option<String>,
     search_term: Option<String>,
@@ -747,43 +749,69 @@ async fn list<U: UserId>(
 }
 
 fn sub_receipt_to_string(
+    context: Context,
     receipt: SubstituteReceipt,
     updated_caption: &str,
     ignored_caption: &str,
 ) -> String {
+    let (list_options, list_style) = match context {
+        Context::Cli => (SeperatedListOptions::space_seperated(), ListStyle::None),
+        Context::Matrix => (
+            SeperatedListOptions::default(),
+            ListStyle::CommaSeparatedBlocks,
+        ),
+        Context::Discord => (
+            SeperatedListOptions::default(),
+            ListStyle::CommaSeparatedBlocks,
+        ),
+    };
+
     let added: Vec<String> = if receipt.updated.len() == 0 {
         vec![format!("")]
     } else {
         let caption = format!("\n{}", updated_caption,);
-        format_item_list(receipt.updated, ListStyle::None, Some(&caption))
+        format_item_list(receipt.updated, list_style, Some(&caption))
     };
+
     let ignored: Vec<String> = if receipt.ignored.len() == 0 {
         vec![format!("")]
     } else {
         let caption = format!("\n{}", ignored_caption,);
-        format_as_item_seperated_list(
-            &receipt.ignored.as_strs(),
-            &caption,
-            SeperatedListOptions::space_seperated(),
-        )
+        format_as_item_seperated_list(&receipt.ignored.as_strs(), &caption, list_options)
     };
 
     format!("{}\n{}", added.join("\n"), ignored.join("\n"))
 }
 
-async fn delete<U: UserId>(
+pub async fn delete<U: UserId>(
     funboy: &Funboy<U>,
+    context: Context,
     template: String,
-    substitutes: Vec<String>,
+    substitutes: String,
     single: bool,
+    id: bool,
 ) -> Result<CommandResult, CommandError> {
-    let substitutes = substitutes.join(" ");
     let substitutes: Vec<&str> = parse_substitutes(&substitutes, single)?;
     if substitutes.len() > 0 {
-        let result = funboy.delete_substitutes(&template, &substitutes).await;
+        let result = if id {
+            let ids: Result<Vec<KeySize>, ParseIntError> =
+                substitutes.iter().map(|s| s.parse::<KeySize>()).collect();
+            match ids {
+                Ok(ids) => funboy.delete_substitutes_by_id(&ids).await,
+                Err(_) => {
+                    return Err(CommandError::ExecutionFailed(
+                        "Substitute ids must be a valid number".to_string(),
+                    ));
+                }
+            }
+        } else {
+            funboy.delete_substitutes(&template, &substitutes).await
+        };
+
         match result {
             Ok(receipt) => {
                 return Ok(CommandResult::Text(sub_receipt_to_string(
+                    context,
                     receipt,
                     &format!(
                         "deleted from `{}`",
@@ -820,19 +848,20 @@ async fn delete<U: UserId>(
     }
 }
 
-async fn add<U: UserId>(
+pub async fn add<U: UserId>(
     funboy: &Funboy<U>,
+    context: Context,
     template: String,
-    substitutes: Vec<String>,
+    substitutes: String,
     single: bool,
 ) -> Result<CommandResult, CommandError> {
-    let substitutes = substitutes.join(" ");
     let substitutes: Vec<&str> = parse_substitutes(&substitutes, single)?;
     if substitutes.len() > 0 {
         let result = funboy.add_substitutes(&template, &substitutes).await;
         match result {
             Ok(receipt) => {
                 return Ok(CommandResult::Text(sub_receipt_to_string(
+                    context,
                     receipt,
                     &format!(
                         "added to `{}`",

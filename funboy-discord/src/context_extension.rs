@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use crate::{Context, Error};
 
-use funboy_core::format::{ListFormatter, TWO_THOUSAND, split_message, split_messages};
+use funboy_core::format::{TWO_THOUSAND, split_message, split_messages};
 use poise::{CreateReply, ReplyHandle};
 use tokio::time::sleep;
 
