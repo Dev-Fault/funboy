@@ -1,18 +1,13 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
-use fsl_interpreter::{
-    FslInterpreter, InterpreterData,
-    types::{
-        command::{CommandError, Executor},
-        value::Value,
-    },
-};
+use fsl_interpreter::{FslInterpreter, types::command::CommandError};
 use funboy_core::{
     Funboy,
     interpreter::{
-        ASK, ASK_RULES, ASK_TO, ASK_TO_RULES, DEFAULT_TIMEOUT_SECS, SAY, SAY_RULES, SAY_TO,
-        SAY_TO_RULES,
+        ASK, ASK_RULES, ASK_TO, ASK_TO_RULES, CommunicationChannel, InterpreterContext, SAY,
+        SAY_RULES, SAY_TO, SAY_TO_RULES,
     },
+    rate_limiter::RateLimit,
 };
 use matrix_sdk::{
     Room,
@@ -24,7 +19,7 @@ use matrix_sdk::{
 use tokio::{
     sync::{
         Mutex,
-        oneshot::{self, Sender},
+        oneshot::{self},
     },
     time::{Instant, timeout_at},
 };
@@ -50,83 +45,97 @@ impl MatrixCtx {
             sender,
         }
     }
-}
 
-#[derive(Clone)]
-pub struct FslCtx {
-    pub funboy: Arc<Funboy<MatrixUser>>,
-    pub matrix_ctx: MatrixCtx,
-    pub interpreter: Arc<Mutex<FslInterpreter>>,
-}
-
-impl FslCtx {
-    pub fn new(funboy: Arc<Funboy<MatrixUser>>, matrix_ctx: MatrixCtx) -> Self {
-        Self {
-            funboy,
-            matrix_ctx,
-            interpreter: Arc::new(Mutex::new(FslInterpreter::new())),
-        }
-    }
-
-    pub async fn generate_message(
+    pub async fn await_response_from_user(
         &self,
-        message: &str,
-    ) -> Result<String, fsl_interpreter::types::command::CommandError> {
-        match self
-            .funboy
-            .generate(&message, self.interpreter.clone())
-            .await
-        {
-            Ok(gen_msg) => Ok(gen_msg),
-            Err(e) => {
+        user: MatrixUser,
+        timeout: f64,
+    ) -> Result<String, CommandError> {
+        let (tx, rx) = oneshot::channel::<String>();
+        let mut asks = self.pending_asks.lock().await;
+        asks.insert(user, tx);
+        drop(asks);
+
+        match timeout_at(Instant::now() + Duration::from_secs_f64(timeout), rx).await {
+            Ok(Ok(response)) => {
+                if response == "-STOP-" {
+                    return Err(fsl_interpreter::types::command::CommandError::Custom(
+                        format!("{}", "user quit the program"),
+                    ));
+                } else {
+                    return Ok(response);
+                }
+            }
+            Ok(Err(e)) => {
                 return Err(fsl_interpreter::types::command::CommandError::Custom(
-                    e.to_string(),
+                    format!("{}", e.to_string()),
+                ));
+            }
+            Err(_) => {
+                return Err(fsl_interpreter::types::command::CommandError::Custom(
+                    format!("{}", "didn't receive message before timeout"),
                 ));
             }
         }
     }
 }
 
-pub async fn create_interpreter(
-    funboy: Arc<Funboy<MatrixUser>>,
-    matrix_ctx: MatrixCtx,
-) -> Arc<Mutex<FslInterpreter>> {
-    let mut interpreter = FslInterpreter::new();
-    let fsl_ctx = FslCtx::new(funboy, matrix_ctx);
-    interpreter.add_command(SAY, SAY_RULES, create_say_command(fsl_ctx.clone()));
-    interpreter.add_command(SAY_TO, SAY_TO_RULES, create_say_to_command(fsl_ctx.clone()));
-    interpreter.add_command(ASK, ASK_RULES, create_ask_command(fsl_ctx.clone()));
-    interpreter.add_command(ASK_TO, ASK_TO_RULES, create_ask_to_command(fsl_ctx.clone()));
-    Arc::new(Mutex::new(interpreter))
-}
+impl CommunicationChannel for MatrixCtx {
+    fn say(&self, message: &str) {
+        let room = self.room.clone();
+        let message = message.to_owned();
+        tokio::spawn(async move {
+            let content = RoomMessageEventContent::text_markdown(message);
+            room.send(content).await.unwrap();
+        });
+    }
 
-pub fn create_say_command(fsl_ctx: FslCtx) -> Executor {
-    let say_command = {
-        move |command: fsl_interpreter::types::command::Command, interpreter_data| {
-            let fsl_ctx = fsl_ctx.clone();
-            let room = fsl_ctx.matrix_ctx.room.clone();
-            {
-                async move {
-                    let mut values = command.take_args();
-                    let message = values
-                        .pop_front()
-                        .unwrap()
-                        .as_text(interpreter_data)
-                        .await?;
+    fn say_to_user(
+        &self,
+        user_name: &str,
+        message: &str,
+    ) -> impl std::future::Future<Output = Result<(), CommandError>> + Send {
+        let room = self.room.clone();
+        let message = message.to_owned();
+        async move {
+            let user = user_name_to_id(&user_name, room.clone()).await?;
 
-                    let message = fsl_ctx.generate_message(&message).await?;
-
-                    if !message.is_empty() {
-                        let message = RoomMessageEventContent::text_markdown(&message);
-                        room.send(message).await.unwrap();
-                    }
-
-                    Ok(Value::None)
-                }
+            if !message.is_empty() {
+                let message =
+                    RoomMessageEventContent::text_markdown(format!("{}\n\n{}", user, &message));
+                let message = message.add_mentions(Mentions::with_user_ids([user]));
+                room.send(message).await.unwrap();
             }
+
+            Ok(())
         }
-    };
-    Some(Arc::new(say_command))
+    }
+
+    fn mention(&self) -> String {
+        self.sender.user_id.to_string()
+    }
+
+    fn await_response(
+        &self,
+        timeout: f64,
+    ) -> impl std::future::Future<Output = Result<String, CommandError>> + Send {
+        async move {
+            self.await_response_from_user(self.sender.clone(), timeout)
+                .await
+        }
+    }
+
+    fn await_user_response(
+        &self,
+        user_name: &str,
+        timeout: f64,
+    ) -> impl std::future::Future<Output = Result<String, CommandError>> + Send {
+        async move {
+            let user = user_name_to_id(&user_name, self.room.clone()).await?;
+            let receiver = MatrixUser::new(self.room.room_id().into(), user);
+            self.await_response_from_user(receiver, timeout).await
+        }
+    }
 }
 
 async fn user_name_to_id(user_name: &str, room: Room) -> Result<OwnedUserId, CommandError> {
@@ -149,147 +158,37 @@ async fn user_name_to_id(user_name: &str, room: Room) -> Result<OwnedUserId, Com
     Ok((*user).clone())
 }
 
-pub fn create_say_to_command(fsl_ctx: FslCtx) -> Executor {
-    let say_command = {
-        move |command: fsl_interpreter::types::command::Command,
-              interpreter_data: Arc<InterpreterData>| {
-            let fsl_ctx = fsl_ctx.clone();
-            let room = fsl_ctx.matrix_ctx.room.clone();
-            {
-                async move {
-                    let mut values = command.take_args();
-                    let user_name = values
-                        .pop_front()
-                        .unwrap()
-                        .as_text(interpreter_data.clone())
-                        .await?;
-                    let message = values
-                        .pop_front()
-                        .unwrap()
-                        .as_text(interpreter_data)
-                        .await?;
-
-                    let user = user_name_to_id(&user_name, room.clone()).await?;
-
-                    let message = fsl_ctx.generate_message(&message).await?;
-
-                    if !message.is_empty() {
-                        let message = RoomMessageEventContent::text_markdown(format!(
-                            "{}\n\n{}",
-                            user, &message
-                        ));
-                        let message = message.add_mentions(Mentions::with_user_ids([user]));
-                        room.send(message).await.unwrap();
-                    }
-
-                    Ok(Value::None)
-                }
-            }
-        }
-    };
-    Some(Arc::new(say_command))
-}
-
-async fn await_response(
-    fsl_ctx: FslCtx,
-    sender: MatrixUser,
-    pending_asks: Arc<Mutex<HashMap<MatrixUser, Sender<String>>>>,
-    timeout: f64,
-) -> Result<Value, CommandError> {
-    let (tx, rx) = oneshot::channel::<String>();
-    let mut asks = pending_asks.lock().await;
-    asks.insert(sender, tx);
-    drop(asks);
-
-    match timeout_at(Instant::now() + Duration::from_secs_f64(timeout), rx).await {
-        Ok(Ok(response)) => {
-            if response == "-STOP-" {
-                return Err(fsl_interpreter::types::command::CommandError::Custom(
-                    format!("{}", "user quit the program"),
-                ));
-            } else {
-                return Ok(Value::Text(fsl_ctx.generate_message(&response).await?));
-            }
-        }
-        Ok(Err(e)) => {
-            return Err(fsl_interpreter::types::command::CommandError::Custom(
-                format!("{}", e.to_string()),
-            ));
-        }
-        Err(_) => {
-            return Err(fsl_interpreter::types::command::CommandError::Custom(
-                format!("{}", "didn't receive message before timeout"),
-            ));
-        }
-    }
-}
-
-pub fn create_ask_command(fsl_ctx: FslCtx) -> Executor {
-    let ask_command = {
-        move |command: fsl_interpreter::types::command::Command, data: Arc<InterpreterData>| {
-            let fsl_ctx = fsl_ctx.clone();
-            let room = fsl_ctx.matrix_ctx.room.clone();
-            let sender = fsl_ctx.matrix_ctx.sender.clone();
-            let pending_asks = fsl_ctx.matrix_ctx.pending_asks.clone();
-            {
-                async move {
-                    let mut values = command.take_args();
-
-                    let question = values.pop_front().unwrap().as_text(data.clone()).await?;
-                    let timeout = values
-                        .pop_front()
-                        .unwrap_or(Value::Float(DEFAULT_TIMEOUT_SECS))
-                        .as_float(data.clone())
-                        .await?;
-
-                    let question = format!("{}\n{}", question, "(enter -STOP- to quit)");
-
-                    let question = fsl_ctx.generate_message(&question).await?;
-
-                    let question = RoomMessageEventContent::text_markdown(&question);
-                    room.send(question).await.unwrap();
-
-                    await_response(fsl_ctx, sender, pending_asks, timeout).await
-                }
-            }
-        }
-    };
-    Some(Arc::new(ask_command))
-}
-
-pub fn create_ask_to_command(fsl_ctx: FslCtx) -> Executor {
-    let ask_command = {
-        move |command: fsl_interpreter::types::command::Command, data: Arc<InterpreterData>| {
-            let fsl_ctx = fsl_ctx.clone();
-            let room = fsl_ctx.matrix_ctx.room.clone();
-            let pending_asks = fsl_ctx.matrix_ctx.pending_asks.clone();
-            {
-                async move {
-                    let mut values = command.take_args();
-
-                    let user_name = values.pop_front().unwrap().as_text(data.clone()).await?;
-                    let question = values.pop_front().unwrap().as_text(data.clone()).await?;
-                    let timeout = values
-                        .pop_front()
-                        .unwrap_or(Value::Float(DEFAULT_TIMEOUT_SECS))
-                        .as_float(data.clone())
-                        .await?;
-
-                    let user = user_name_to_id(&user_name, room.clone()).await?;
-
-                    let question =
-                        format!("{}\n\n{}\n{}", user, question, "(enter -STOP- to quit)");
-
-                    let question = fsl_ctx.generate_message(&question).await?;
-
-                    let question = RoomMessageEventContent::text_markdown(&question);
-                    room.send(question).await.unwrap();
-
-                    let receiver = MatrixUser::new(room.room_id().into(), user);
-                    await_response(fsl_ctx, receiver, pending_asks, timeout).await
-                }
-            }
-        }
-    };
-    Some(Arc::new(ask_command))
+pub async fn create_interpreter(
+    funboy: Arc<Funboy<MatrixUser>>,
+    matrix_ctx: MatrixCtx,
+) -> Arc<Mutex<FslInterpreter>> {
+    let mut interpreter = FslInterpreter::new();
+    let ictx = InterpreterContext::new(
+        matrix_ctx.clone().sender,
+        funboy.clone(),
+        // TODO give this a longer lifetime
+        Arc::new(Mutex::new(RateLimit::default())),
+        matrix_ctx,
+    );
+    interpreter.add_command(
+        SAY,
+        SAY_RULES,
+        funboy_core::interpreter::create_say_command(ictx.clone()),
+    );
+    interpreter.add_command(
+        SAY_TO,
+        SAY_TO_RULES,
+        funboy_core::interpreter::create_say_to_command(ictx.clone()),
+    );
+    interpreter.add_command(
+        ASK,
+        ASK_RULES,
+        funboy_core::interpreter::create_ask_command(ictx.clone()),
+    );
+    interpreter.add_command(
+        ASK_TO,
+        ASK_TO_RULES,
+        funboy_core::interpreter::create_ask_to_command(ictx.clone()),
+    );
+    Arc::new(Mutex::new(interpreter))
 }

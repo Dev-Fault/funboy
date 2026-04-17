@@ -1,31 +1,22 @@
 use std::{sync::Arc, time::Duration};
 
-use fsl_interpreter::{
-    FslInterpreter, InterpreterData,
-    types::{
-        command::{Command, CommandError, Executor},
-        value::Value,
-    },
-};
+use fsl_interpreter::{FslInterpreter, types::command::CommandError};
 use funboy_core::{
-    Funboy,
     format::{TWO_THOUSAND, split_message},
     interpreter::{
-        ASK, ASK_RULES, ASK_TO, ASK_TO_RULES, DEFAULT_TIMEOUT_SECS, SAY, SAY_RULES, SAY_TO,
-        SAY_TO_RULES,
+        ASK, ASK_RULES, ASK_TO, ASK_TO_RULES, CommunicationChannel, InterpreterContext, SAY,
+        SAY_RULES, SAY_TO, SAY_TO_RULES,
     },
-    rate_limiter::{RateLimit, RateLimitResult},
 };
 use serenity::{
     all::{Cache, ChannelId, GuildId, Http, Member, Mentionable, ShardMessenger, UserId},
     futures::StreamExt,
 };
-use tokio::{sync::Mutex, time::sleep};
 
 use crate::{Context, DiscordUserId, context_extension::BOT_MAX_MESSAGE_SIZE};
 
 #[derive(Clone)]
-pub struct InterpreterContext {
+pub struct DiscordContext {
     pub http: Arc<Http>,
     #[allow(dead_code)]
     pub cache: Arc<Cache>,
@@ -33,32 +24,22 @@ pub struct InterpreterContext {
     pub guild_id: Option<GuildId>,
     pub channel_id: ChannelId,
     pub author_id: UserId,
-    pub funboy: Arc<Funboy<DiscordUserId>>,
-    pub rate_limit: Arc<Mutex<RateLimit<DiscordUserId>>>,
-    pub command_call_count: Arc<Mutex<u16>>,
-    interpreter: Arc<Mutex<FslInterpreter>>,
 }
 
-impl InterpreterContext {
-    pub fn from_poise(ctx: &Context<'_>) -> Self {
-        Self {
-            http: ctx.serenity_context().http.clone(),
-            cache: ctx.serenity_context().cache.clone(),
-            shard: ctx.serenity_context().shard.clone(),
-            guild_id: ctx.guild_id(),
-            channel_id: ctx.channel_id(),
-            author_id: ctx.author().id,
-            funboy: ctx.data().funboy.clone(),
-            rate_limit: ctx.data().interpreter_rate_limit.clone(),
-            command_call_count: Arc::new(Mutex::new(0)),
-            interpreter: Arc::new(Mutex::new(FslInterpreter::new())),
-        }
+impl CommunicationChannel for DiscordContext {
+    fn say(&self, message: &str) {
+        let channel_id = self.channel_id.clone();
+        let http = self.http.clone();
+        let message = message.to_owned();
+        tokio::spawn(async move {
+            channel_id.say(http, message).await.ok();
+        });
     }
 
-    pub async fn get_guild_members(&self) -> Result<Vec<Member>, CommandError> {
-        if let Some(guild_id) = self.guild_id {
+    async fn say_to_user(&self, user_name: &str, message: &str) -> Result<(), CommandError> {
+        let members = if let Some(guild_id) = self.guild_id {
             if let Ok(members) = guild_id.members(self.http.clone(), None, None).await {
-                Ok(members)
+                members
             } else {
                 return Err(CommandError::Custom(format!(
                     "failed to fetch guild members",
@@ -66,11 +47,7 @@ impl InterpreterContext {
             }
         } else {
             return Err(CommandError::Custom(format!("failed to get guild id",)));
-        }
-    }
-
-    pub async fn say_to_user(&self, user_name: &str, message: &str) -> Result<(), CommandError> {
-        let members = self.get_guild_members().await?;
+        };
 
         let say_message = async |mention: &str| {
             if message.len() < BOT_MAX_MESSAGE_SIZE {
@@ -108,6 +85,100 @@ impl InterpreterContext {
         Ok(())
     }
 
+    fn mention(&self) -> String {
+        self.author_id.mention().to_string()
+    }
+
+    fn await_response(
+        &self,
+        timeout: f64,
+    ) -> impl std::future::Future<Output = Result<String, CommandError>> + Send {
+        async move {
+            let mut collector = self
+                .channel_id
+                .await_reply(self.shard.clone())
+                .timeout(Duration::from_secs_f64(timeout))
+                .channel_id(self.channel_id)
+                .author_id(self.author_id)
+                .stream();
+
+            if let Some(msg) = collector.next().await {
+                if msg.content == "-STOP-" {
+                    Err(CommandError::Custom("User quit the program".into()))
+                } else {
+                    Ok(msg.content)
+                }
+            } else {
+                Err(CommandError::Custom(format!(
+                    "Didn't receive a message before timeout ended"
+                )))
+            }
+        }
+    }
+
+    fn await_user_response(
+        &self,
+        user_name: &str,
+        timeout: f64,
+    ) -> impl std::future::Future<Output = Result<String, CommandError>> + Send {
+        async move {
+            let mut collector = if user_name == "everyone" {
+                self.channel_id
+                    .await_reply(self.shard.clone())
+                    .timeout(Duration::from_secs_f64(timeout))
+                    .channel_id(self.channel_id)
+                    .stream()
+            } else {
+                let user_id = self.get_user_id(&user_name).await?;
+                self.channel_id
+                    .await_reply(self.shard.clone())
+                    .timeout(Duration::from_secs_f64(timeout))
+                    .channel_id(self.channel_id)
+                    .author_id(user_id)
+                    .stream()
+            };
+
+            if let Some(msg) = collector.next().await {
+                if msg.content == "-STOP-" {
+                    Err(CommandError::Custom("User quit the program".into()))
+                } else {
+                    Ok(msg.content)
+                }
+            } else {
+                Err(CommandError::Custom(format!(
+                    "Didn't receive a message before timeout ended"
+                )))
+            }
+        }
+    }
+}
+
+impl DiscordContext {
+    pub fn from_poise(ctx: &Context<'_>) -> Self {
+        Self {
+            http: ctx.serenity_context().http.clone(),
+            cache: ctx.serenity_context().cache.clone(),
+            shard: ctx.serenity_context().shard.clone(),
+            guild_id: ctx.guild_id(),
+            channel_id: ctx.channel_id(),
+            author_id: ctx.author().id,
+        }
+    }
+
+    pub async fn get_guild_members(&self) -> Result<Vec<Member>, CommandError> {
+        if let Some(guild_id) = self.guild_id {
+            if let Ok(members) = guild_id.members(self.http.clone(), None, None).await {
+                Ok(members)
+            } else {
+                return Err(CommandError::Custom(format!(
+                    "failed to fetch guild members",
+                )));
+            }
+        } else {
+            return Err(CommandError::Custom(format!("failed to get guild id",)));
+        }
+    }
+
     pub async fn get_user_id(&self, user_name: &str) -> Result<UserId, CommandError> {
         let members = self.get_guild_members().await?;
 
@@ -125,259 +196,39 @@ impl InterpreterContext {
             )));
         }
     }
-
-    pub async fn generate_message(&self, message: &str) -> Result<String, CommandError> {
-        match self
-            .funboy
-            .generate(&message, self.interpreter.clone())
-            .await
-        {
-            Ok(gen_msg) => Ok(gen_msg),
-            Err(e) => {
-                return Err(CommandError::Custom(e.to_string()));
-            }
-        }
-    }
 }
 
-const COMMAND_MESSAGE_DELAY_MS: u64 = 500;
 pub fn create_custom_interpreter(ctx: &Context<'_>) -> Arc<tokio::sync::Mutex<FslInterpreter>> {
     let mut interpreter = FslInterpreter::new();
 
-    let ictx = InterpreterContext::from_poise(ctx);
+    let dctx = DiscordContext::from_poise(ctx);
+    let ictx = InterpreterContext::new(
+        DiscordUserId(ctx.author().id),
+        ctx.data().funboy.clone(),
+        ctx.data().interpreter_rate_limit.clone(),
+        dctx,
+    );
 
-    interpreter.add_command(SAY, SAY_RULES, create_say_command(ictx.clone()));
-    interpreter.add_command(SAY_TO, SAY_TO_RULES, create_say_to_command(ictx.clone()));
-    interpreter.add_command(ASK, ASK_RULES, create_ask_command(ictx.clone()));
-    interpreter.add_command(ASK_TO, ASK_TO_RULES, create_ask_to_command(ictx.clone()));
+    interpreter.add_command(
+        SAY,
+        SAY_RULES,
+        funboy_core::interpreter::create_say_command(ictx.clone()),
+    );
+    interpreter.add_command(
+        SAY_TO,
+        SAY_TO_RULES,
+        funboy_core::interpreter::create_say_to_command(ictx.clone()),
+    );
+    interpreter.add_command(
+        ASK,
+        ASK_RULES,
+        funboy_core::interpreter::create_ask_command(ictx.clone()),
+    );
+    interpreter.add_command(
+        ASK_TO,
+        ASK_TO_RULES,
+        funboy_core::interpreter::create_ask_to_command(ictx.clone()),
+    );
 
     Arc::new(tokio::sync::Mutex::new(interpreter))
-}
-
-const MAX_CALLS: u16 = 2000;
-async fn check_limits(ictx: InterpreterContext) -> Result<(), CommandError> {
-    let mut rate_limit = ictx.rate_limit.lock().await;
-    let mut call_count = ictx.command_call_count.lock().await;
-    if *call_count >= MAX_CALLS {
-        *call_count = 0;
-        return Err(CommandError::Custom(format!(
-            "cannot use commands that send more than {} messages per generation",
-            MAX_CALLS
-        )));
-    }
-    *call_count = call_count.saturating_add(1);
-
-    match rate_limit.check(DiscordUserId(ictx.author_id)) {
-        RateLimitResult::MaxLimitsReached => {
-            return Err(CommandError::Custom(format!(
-                "exceeded rate limit too many times, please wait a bit before trying again",
-            )));
-        }
-        RateLimitResult::UsesPerIntervalreached => Ok(()),
-        RateLimitResult::Ok => Ok(()),
-    }
-}
-
-pub fn create_say_command(ictx: InterpreterContext) -> Executor {
-    let say_command = {
-        let ictx = ictx.clone();
-        move |command: Command, interpreter_data| {
-            let ictx = ictx.clone();
-            async move {
-                check_limits(ictx.clone()).await?;
-
-                sleep(Duration::from_millis(COMMAND_MESSAGE_DELAY_MS)).await;
-
-                let mut values = command.take_args();
-                let message = values
-                    .pop_front()
-                    .unwrap()
-                    .as_text(interpreter_data)
-                    .await?;
-
-                let message = ictx.generate_message(&message).await?;
-
-                if message.len() < BOT_MAX_MESSAGE_SIZE {
-                    for m in split_message(&message, TWO_THOUSAND) {
-                        ictx.channel_id.say(&ictx.http, m).await.ok();
-                    }
-                    Ok(Value::None)
-                } else {
-                    return Err(CommandError::Custom(format!(
-                        "Message exceeded max length of {} characters",
-                        BOT_MAX_MESSAGE_SIZE,
-                    )));
-                }
-            }
-        }
-    };
-    Some(Arc::new(say_command))
-}
-
-pub fn create_say_to_command(ictx: InterpreterContext) -> Executor {
-    let say_command = {
-        let ictx = ictx.clone();
-        move |command: Command, interpreter_data: Arc<InterpreterData>| {
-            let ictx = ictx.clone();
-            async move {
-                check_limits(ictx.clone()).await?;
-
-                sleep(Duration::from_millis(COMMAND_MESSAGE_DELAY_MS)).await;
-
-                let mut values = command.take_args();
-                let user_name = values
-                    .pop_front()
-                    .unwrap()
-                    .as_text(interpreter_data.clone())
-                    .await?;
-                let message = values
-                    .pop_front()
-                    .unwrap()
-                    .as_text(interpreter_data)
-                    .await?;
-
-                ictx.say_to_user(&user_name, &ictx.generate_message(&message).await?)
-                    .await?;
-
-                Ok(Value::None)
-            }
-        }
-    };
-    Some(Arc::new(say_command))
-}
-
-const MAX_TIMEOUT_SECS: f64 = 60.0 * 60.0;
-pub fn create_ask_command(ictx: InterpreterContext) -> Executor {
-    let ask_command = {
-        move |command: Command, data: Arc<InterpreterData>| {
-            let ictx = ictx.clone();
-            async move {
-                check_limits(ictx.clone()).await?;
-
-                sleep(Duration::from_millis(COMMAND_MESSAGE_DELAY_MS)).await;
-
-                let mut values = command.take_args();
-
-                let arg_0 = values.pop_front().unwrap().as_text(data.clone()).await?;
-                let arg_1 = values
-                    .pop_front()
-                    .unwrap_or(Value::Float(DEFAULT_TIMEOUT_SECS));
-
-                let question = format!("{}\n{}", ictx.author_id.mention(), arg_0);
-                let question = format!("{}\n\n{}", question, "(enter -STOP- to quit)");
-
-                let time_out = arg_1.as_float(data.clone()).await?;
-                validate_time_out(time_out, MAX_TIMEOUT_SECS)?;
-
-                let question = ictx.generate_message(&question).await?;
-
-                if question.len() < BOT_MAX_MESSAGE_SIZE {
-                    for m in split_message(&question, TWO_THOUSAND) {
-                        ictx.channel_id.say(&ictx.http, m).await.ok();
-                    }
-                } else {
-                    return Err(CommandError::Custom(format!(
-                        "Message exceeded max length of {} characters",
-                        BOT_MAX_MESSAGE_SIZE,
-                    )));
-                }
-
-                let mut collector = ictx
-                    .channel_id
-                    .await_reply(ictx.shard.clone())
-                    .timeout(Duration::from_secs_f64(time_out))
-                    .channel_id(ictx.channel_id)
-                    .author_id(ictx.author_id)
-                    .stream();
-
-                if let Some(msg) = collector.next().await {
-                    if msg.content == "-STOP-" {
-                        Err(CommandError::Custom("User quit the program".into()))
-                    } else {
-                        Ok(Value::Text(ictx.generate_message(&msg.content).await?))
-                    }
-                } else {
-                    Err(CommandError::Custom(format!(
-                        "Didn't receive a message before timeout ended"
-                    )))
-                }
-            }
-        }
-    };
-    Some(Arc::new(ask_command))
-}
-
-pub fn create_ask_to_command(ictx: InterpreterContext) -> Executor {
-    let ask_command = {
-        move |command: Command, data: Arc<InterpreterData>| {
-            let ictx = ictx.clone();
-            async move {
-                check_limits(ictx.clone()).await?;
-
-                sleep(Duration::from_millis(COMMAND_MESSAGE_DELAY_MS)).await;
-
-                let mut values = command.take_args();
-
-                let user_name = values.pop_front().unwrap().as_text(data.clone()).await?;
-                let arg_1 = values.pop_front().unwrap().as_text(data.clone()).await?;
-                let arg_2 = values
-                    .pop_front()
-                    .unwrap_or(Value::Float(DEFAULT_TIMEOUT_SECS));
-
-                let question = format!("{}\n{}", ictx.author_id.mention(), arg_1);
-                let question = format!("{}\n\n{}", question, "(enter -STOP- to quit)");
-
-                let time_out = arg_2.as_float(data.clone()).await?;
-                validate_time_out(time_out, MAX_TIMEOUT_SECS)?;
-
-                ictx.say_to_user(&user_name, &ictx.generate_message(&question).await?)
-                    .await?;
-
-                let mut collector = if user_name == "everyone" {
-                    ictx.channel_id
-                        .await_reply(ictx.shard.clone())
-                        .timeout(Duration::from_secs_f64(time_out))
-                        .channel_id(ictx.channel_id)
-                        .stream()
-                } else {
-                    let user_id = ictx.get_user_id(&user_name).await?;
-                    ictx.channel_id
-                        .await_reply(ictx.shard.clone())
-                        .timeout(Duration::from_secs_f64(time_out))
-                        .channel_id(ictx.channel_id)
-                        .author_id(user_id)
-                        .stream()
-                };
-
-                if let Some(msg) = collector.next().await {
-                    if msg.content == "-STOP-" {
-                        Err(CommandError::Custom("User quit the program".into()))
-                    } else {
-                        Ok(Value::Text(ictx.generate_message(&msg.content).await?))
-                    }
-                } else {
-                    Err(CommandError::Custom(format!(
-                        "Didn't receive a message before timeout ended"
-                    )))
-                }
-            }
-        }
-    };
-    Some(Arc::new(ask_command))
-}
-
-pub fn validate_time_out(time_out: f64, max: f64) -> Result<(), CommandError> {
-    if !time_out.is_finite() {
-        return Err(CommandError::NonFiniteValue);
-    } else if time_out.is_sign_negative() {
-        return Err(CommandError::Custom(format!(
-            "time_out cannot be a negative number"
-        )));
-    } else if time_out > max {
-        return Err(CommandError::Custom(format!(
-            "timeout cannot be greater than {} seconds",
-            max
-        )));
-    }
-    Ok(())
 }

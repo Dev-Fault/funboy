@@ -9,7 +9,6 @@ use tokio::time::sleep;
 pub const BOT_MAX_MESSAGE_SIZE: usize = TWO_THOUSAND * 4;
 pub const WARN_MESSAGE_SIZE_EXCEEDED: &str = "Message was too large to send.";
 pub const WARN_EMPTY_MESSAGE: &str = "Message was empty.";
-pub const MESSAGE_DELAY_MS: u64 = 300;
 
 pub trait ContextExtension {
     async fn say_list(&self, message: &[&str], ephemeral: bool) -> Result<(), Error>;
@@ -55,7 +54,7 @@ impl<'a> ContextExtension for Context<'a> {
             )
             .await?;
             if i != 0 {
-                sleep(Duration::from_millis(MESSAGE_DELAY_MS)).await;
+                sleep(Duration::from_millis(200)).await;
             }
         }
 

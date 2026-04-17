@@ -40,9 +40,7 @@ impl Data {
             funboy,
             track_list: Mutex::new(TrackList::new()).into(),
             track_player_lock: Default::default(),
-            interpreter_rate_limit: Arc::new(Mutex::new(
-                RateLimit::new(25, 15).with_timeout(60, 10),
-            )),
+            interpreter_rate_limit: Arc::new(Mutex::new(RateLimit::default())),
             yt_dlp_cookies_path: None,
         }
     }

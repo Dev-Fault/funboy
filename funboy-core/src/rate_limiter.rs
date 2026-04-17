@@ -31,6 +31,18 @@ pub struct RateLimit<U: UserId> {
     timeout: u64,
 }
 
+impl<U: UserId> Default for RateLimit<U> {
+    fn default() -> Self {
+        Self {
+            users: Default::default(),
+            uses_per_interval: 20,
+            interval: 15,
+            limits_before_timeout: 10,
+            timeout: 60,
+        }
+    }
+}
+
 pub enum RateLimitResult {
     MaxLimitsReached,
     UsesPerIntervalreached,
