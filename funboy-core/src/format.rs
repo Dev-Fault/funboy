@@ -1,11 +1,6 @@
-use std::{borrow::Cow, mem, str::FromStr};
+use std::{borrow::Cow, str::FromStr};
 
-use sqlx::Execute;
-
-use crate::{
-    FunboyError,
-    template_database::{Identifiable, Substitute, Template},
-};
+use crate::{FunboyError, template_database::Identifiable};
 
 pub const TWO_THOUSAND: usize = 2000;
 pub const ONE_HUNDRED: usize = 100;
