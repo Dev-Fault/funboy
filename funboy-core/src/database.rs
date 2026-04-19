@@ -208,7 +208,7 @@ pub struct PermissionRow {
     pub permission: String,
 }
 
-#[derive(Debug, Clone, Copy, strum_macros::Display)]
+#[derive(Debug, Clone, Copy, strum_macros::Display, PartialEq, Eq, Hash)]
 pub enum Platform {
     Matrix,
     Discord,

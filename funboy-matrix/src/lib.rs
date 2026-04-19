@@ -1,8 +1,11 @@
 use std::{collections::HashMap, env, str::FromStr, sync::Arc, time::Duration};
 
 use fsl_interpreter::FslInterpreter;
-use funboy_cli::{CommandError, CommandResult, Context, FunboyEnv, interpret_bot_commands};
-use funboy_core::{Funboy, Request, UserId};
+use funboy_cli::{FunboyEnv, interpret_bot_commands};
+use funboy_core::{
+    Funboy, Request, UserId,
+    commands::{CommandError, CommandResult},
+};
 use matrix_sdk::{
     Client, Room, RoomState,
     ruma::{
@@ -295,36 +298,21 @@ pub async fn handle_bot_command(
     )
     .await;
 
-    let result = interpret_bot_commands(
-        MatrixUser::new(room.room_id().to_owned(), event.sender),
+    let result = interpret_matrix_commands(
         &funboy,
         interpreter,
-        Context::Matrix,
-        message,
+        MatrixUser::new(room.room_id().to_owned(), event.sender),
+        room.clone(),
+        &message,
     )
     .await;
 
-    if let Ok(result) = result {
-        handle_command_result(result, room).await;
-    } else {
-        let err = result.err().unwrap();
-        match err {
-            CommandError::UnhandledCommand(command) => {
-                let result =
-                    interpret_matrix_commands(&funboy, user_id.clone(), room.clone(), command)
-                        .await;
-                match result {
-                    Ok(result) => {
-                        handle_command_result(result, room).await;
-                    }
-                    Err(err) => {
-                        handle_command_err(err, room).await;
-                    }
-                }
-            }
-            _ => {
-                handle_command_err(err, room).await;
-            }
+    match result {
+        Ok(result) => {
+            handle_command_result(result, room).await;
+        }
+        Err(e) => {
+            handle_command_err(e, room).await;
         }
     }
 }
@@ -337,15 +325,7 @@ async fn handle_command_result(result: CommandResult, room: Room) {
                 room.send(content).await.unwrap();
             }
         }
-        CommandResult::Mode(_) => {
-            let content = RoomMessageEventContent::text_plain(
-                "Mode switching not available in matrix client.",
-            );
-            room.send(content).await.unwrap();
-            return;
-        }
         CommandResult::None => {}
-        CommandResult::Exit => {}
     }
 }
 

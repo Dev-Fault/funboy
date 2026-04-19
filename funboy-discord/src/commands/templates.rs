@@ -1,6 +1,9 @@
-use funboy_cli::{CommandResult, copy, rename, replace};
-use funboy_core::format::{
-    ListStyle, ONE_HUNDRED, TWO_THOUSAND, TruncateEllipsize, parse_bot_args, split_message,
+use funboy_core::{
+    commands::{self, CommandResult},
+    database::Platform,
+    format::{
+        ListStyle, ONE_HUNDRED, TWO_THOUSAND, TruncateEllipsize, parse_bot_args, split_message,
+    },
 };
 use poise::{ChoiceParameter, CreateReply};
 use serenity::all::{Attachment, ComponentInteraction, CreateAttachment};
@@ -51,42 +54,48 @@ pub async fn generate(ctx: Context<'_>, input: String) -> Result<(), Error> {
     let user_id = ctx.author().id;
     let http = ctx.http();
     let channel_id = ctx.channel_id();
+    let funboy = ctx.data().funboy.clone();
+    let interpreter = create_custom_interpreter(&ctx);
 
     let original_message = ctx.say("Generating...").await?;
 
-    let output = ctx
-        .data()
-        .funboy
-        .user_generate(
+    let result = funboy
+        .generate_command(
+            Platform::Discord,
             DiscordUserId(user_id),
-            &input,
-            create_custom_interpreter(&ctx),
+            interpreter,
+            vec![input],
+            false,
+            false,
         )
         .await;
 
     // Don't use ctx if the webhook token expired or is close to expiring
     let ctx_window_over = start.elapsed() > std::time::Duration::from_secs(60 * 10);
 
-    match output {
-        Ok(output) => {
-            if !output.trim().is_empty() {
-                if ctx_window_over {
-                    for m in split_message(&output, TWO_THOUSAND) {
-                        channel_id.say(&http, m).await?;
+    match result {
+        Ok(result) => match result {
+            commands::CommandResult::Text(output) => {
+                if !output.trim().is_empty() {
+                    if ctx_window_over {
+                        for m in split_message(&output, TWO_THOUSAND) {
+                            channel_id.say(&http, m).await?;
+                        }
+                    } else {
+                        ctx.edit_long(original_message, &output, false).await?;
                     }
                 } else {
-                    ctx.edit_long(original_message, &output, false).await?;
-                }
-            } else {
-                if ctx_window_over {
-                    return Ok(());
-                } else {
-                    original_message
-                        .edit(ctx, CreateReply::default().content("Generation complete."))
-                        .await?;
+                    if ctx_window_over {
+                        return Ok(());
+                    } else {
+                        original_message
+                            .edit(ctx, CreateReply::default().content("Generation complete."))
+                            .await?;
+                    }
                 }
             }
-        }
+            commands::CommandResult::None => {}
+        },
         Err(e) => {
             eprintln!("{:?}", e);
             if ctx_window_over {
@@ -95,7 +104,8 @@ pub async fn generate(ctx: Context<'_>, input: String) -> Result<(), Error> {
                 ctx.say_ephemeral(&e.to_string()).await?;
             }
         }
-    };
+    }
+
     Ok(())
 }
 
@@ -165,15 +175,15 @@ pub async fn add_subs(
 ) -> Result<(), Error> {
     let single = single.unwrap_or(false);
     let funboy = ctx.data().funboy.clone();
-    let result = funboy_cli::add(
-        &funboy,
-        DiscordUserId(ctx.author().id),
-        funboy_cli::Context::Discord,
-        template,
-        substitutes,
-        single,
-    )
-    .await;
+    let result = funboy
+        .add_command(
+            DiscordUserId(ctx.author().id),
+            Platform::Discord,
+            template,
+            substitutes,
+            single,
+        )
+        .await;
 
     match result {
         Ok(result) => {
@@ -220,16 +230,16 @@ pub async fn delete_subs(
     let id = id.unwrap_or(false);
     let funboy = ctx.data().funboy.clone();
 
-    let result = funboy_cli::delete(
-        &funboy,
-        DiscordUserId(ctx.author().id),
-        funboy_cli::Context::Discord,
-        template,
-        substitutes,
-        single,
-        id,
-    )
-    .await;
+    let result = funboy
+        .delete_command(
+            DiscordUserId(ctx.author().id),
+            Platform::Discord,
+            template,
+            substitutes,
+            single,
+            id,
+        )
+        .await;
 
     match result {
         Ok(result) => {
@@ -293,13 +303,9 @@ pub async fn copy_subs(
     to_template: String,
 ) -> Result<(), Error> {
     let funboy = ctx.data().funboy.clone();
-    let result = copy(
-        &funboy,
-        DiscordUserId(ctx.author().id),
-        from_template,
-        to_template,
-    )
-    .await;
+    let result = funboy
+        .copy_command(DiscordUserId(ctx.author().id), from_template, to_template)
+        .await;
     match result {
         Ok(result) => {
             if let CommandResult::Text(output) = result {
@@ -333,15 +339,15 @@ pub async fn replace_sub(
     id: Option<bool>,
 ) -> Result<(), Error> {
     let funboy = ctx.data().funboy.clone();
-    let result = replace(
-        &funboy,
-        DiscordUserId(ctx.author().id),
-        template,
-        from,
-        to,
-        id.unwrap_or(false),
-    )
-    .await;
+    let result = funboy
+        .replace_command(
+            DiscordUserId(ctx.author().id),
+            template,
+            from,
+            to,
+            id.unwrap_or(false),
+        )
+        .await;
     match result {
         Ok(result) => {
             if let CommandResult::Text(output) = result {
@@ -520,7 +526,9 @@ pub async fn delete_templates(ctx: Context<'_>, names: String) -> Result<(), Err
 #[poise::command(slash_command, prefix_command, category = "Templates")]
 pub async fn rename_template(ctx: Context<'_>, from: String, to: String) -> Result<(), Error> {
     let funboy = ctx.data().funboy.clone();
-    let result = rename(&funboy, DiscordUserId(ctx.author().id), from, to).await;
+    let result = funboy
+        .rename_command(DiscordUserId(ctx.author().id), from, to)
+        .await;
     match result {
         Ok(result) => {
             if let CommandResult::Text(output) = result {
@@ -578,7 +586,9 @@ pub async fn list_subs(
 ) -> Result<(), Error> {
     let funboy = ctx.data().funboy.clone();
     let list_style = list_style.unwrap_or(DiscordListStyle::Default);
-    let result = funboy_cli::list(&funboy, Some(template), search_term, list_style.into()).await;
+    let result = funboy
+        .list_command(Some(template), search_term, list_style.into())
+        .await;
     match result {
         Ok(result) => {
             if let CommandResult::Text(output) = result {
@@ -624,7 +634,9 @@ pub async fn list_templates(
 ) -> Result<(), Error> {
     let funboy = ctx.data().funboy.clone();
     let list_style = list_style.unwrap_or(DiscordListStyle::Default);
-    let result = funboy_cli::list(&funboy, None, search_term, list_style.into()).await;
+    let result = funboy
+        .list_command(None, search_term, list_style.into())
+        .await;
     match result {
         Ok(result) => {
             if let CommandResult::Text(output) = result {

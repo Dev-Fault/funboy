@@ -32,6 +32,7 @@ use crate::{
     template_substitutor::{TemplateDelimiter, TemplateSubstitutor, VALID_TEMPLATE_CHARS},
 };
 
+pub mod commands;
 pub mod database;
 pub mod format;
 pub mod interpreter;

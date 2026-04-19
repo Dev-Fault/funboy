@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use crate::{Context, DiscordUserId, Error, context_extension::ContextExtension};
 
 use clap::ValueEnum;
-use funboy_cli::CommandError;
 use funboy_core::{
     Permission,
+    commands::CommandError,
     format::{TWO_THOUSAND, extract_image_urls},
 };
 use poise::{

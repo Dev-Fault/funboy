@@ -5,10 +5,11 @@ use fsl_interpreter::{
     types::{command::Executor, value::Value},
 };
 use funboy_cli::{
-    CommandResult, Context, FslContext, FunboyEnv, Mode, get_funboy, interpret_bot_commands,
+    CliCommandResult, FslContext, FunboyEnv, Mode, get_funboy, interpret_bot_commands,
 };
 use funboy_core::{
     Funboy, UserId,
+    commands::CommandResult,
     database::Platform,
     interpreter::{ASK, ASK_RULES, SAY, SAY_RULES},
     ollama::{MAX_PREDICT, OllamaSettings},
@@ -212,14 +213,15 @@ async fn main() -> rustyline::Result<()> {
                     Id(0),
                     &funboy,
                     create_interpreter(funboy.clone(), rl.clone()).await,
-                    Context::Cli,
                     &line,
                 )
                 .await
                 {
                     Ok(output) => match output {
-                        CommandResult::Text(text) => println!("{}", text),
-                        CommandResult::Mode(context) => match context {
+                        CliCommandResult::CommandResult(CommandResult::Text(text)) => {
+                            println!("{}", text)
+                        }
+                        CliCommandResult::Mode(context) => match context {
                             Mode::Generate => {
                                 enter_interactive_generation(funboy.clone(), rl.clone()).await?;
                             }
@@ -227,10 +229,10 @@ async fn main() -> rustyline::Result<()> {
                                 enter_interpreter(funboy.clone(), rl.clone()).await?;
                             }
                         },
-                        CommandResult::None => {
+                        CliCommandResult::CommandResult(CommandResult::None) => {
                             continue;
                         }
-                        CommandResult::Exit => {
+                        CliCommandResult::Exit => {
                             break;
                         }
                     },

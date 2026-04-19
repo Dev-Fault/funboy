@@ -1,204 +1,361 @@
-use funboy_cli::{Command, CommandError, CommandResult, ImageAction};
-use funboy_core::{Funboy, Permission, Request};
+use std::sync::Arc;
+
+use clap::Parser;
+use fsl_interpreter::FslInterpreter;
+use funboy_core::{
+    Funboy, Permission, Request,
+    commands::{CommandError, CommandResult, OllamaAction, parse_command_args},
+    database::Platform,
+    format::{LIST_STYLE_NONE, ListStyle},
+};
 use matrix_sdk::{
     Room,
     attachment::AttachmentConfig,
     ruma::{OwnedUserId, events::room::message::RoomMessageEventContent},
 };
+use tokio::sync::Mutex;
 
 use crate::MatrixUser;
 
+#[derive(Parser, Debug, Clone)]
+pub enum ImageAction {
+    Embed { url: String },
+}
+
+#[derive(Parser, Debug, Clone)]
+pub enum Command {
+    Generate {
+        #[arg(short, long)]
+        file: bool,
+
+        #[arg(short, long)]
+        ollama: bool,
+
+        #[arg(trailing_var_arg = true)]
+        input: Vec<String>,
+    },
+    Add {
+        template: String,
+
+        #[arg(short, long)]
+        single: bool,
+
+        #[arg(short, long)]
+        file: bool,
+
+        #[arg(trailing_var_arg = true)]
+        substitutes: Vec<String>,
+    },
+    Delete {
+        template: String,
+
+        #[arg(short, long)]
+        single: bool,
+
+        #[arg(short, long)]
+        id: bool,
+
+        #[arg(trailing_var_arg = true)]
+        substitutes: Vec<String>,
+    },
+    List {
+        template: Option<String>,
+
+        #[arg(short, long, default_value = None)]
+        search_term: Option<String>,
+
+        #[arg(short, long, value_parser = clap::value_parser!(ListStyle), default_value = LIST_STYLE_NONE)]
+        list_style: ListStyle,
+    },
+    Copy {
+        from_template: String,
+        to_template: String,
+    },
+    Rename {
+        from_template: String,
+        to_template: String,
+    },
+    Replace {
+        substitute: String,
+        with_substitute: String,
+
+        #[arg(short, long)]
+        template: Option<String>,
+
+        #[arg(short, long)]
+        id: bool,
+    },
+    Ollama {
+        #[command(subcommand)]
+        action: OllamaAction,
+    },
+    Image {
+        #[command(subcommand)]
+        action: ImageAction,
+    },
+    Grant {
+        user: String,
+
+        #[arg(trailing_var_arg = true)]
+        permissions: Vec<Permission>,
+    },
+    Revoke {
+        user: String,
+
+        #[arg(trailing_var_arg = true)]
+        permissions: Vec<Permission>,
+    },
+}
+
 pub async fn interpret_matrix_commands(
     funboy: &Funboy<MatrixUser>,
+    interpreter: Arc<Mutex<FslInterpreter>>,
     matrix_user: MatrixUser,
     room: Room,
-    command: Command,
+    input: &str,
 ) -> Result<CommandResult, CommandError> {
     let user_ctx = funboy.users.get_or_insert(matrix_user.clone()).await;
-    let user_permissions = funboy.users.get_permissions(matrix_user).await;
+    let user_permissions = funboy.users.get_permissions(matrix_user.clone()).await;
     let room_id = room.room_id().to_owned();
+    let user_id = matrix_user.clone();
 
-    match command {
-        Command::Image { action } => match action {
-            ImageAction::Embed { url } => {
-                let Ok(bytes) = reqwest::get(&url).await else {
-                    return Err(CommandError::ExecutionFailed(
-                        "invalid image url".to_string(),
-                    ));
-                };
-                let Ok(bytes) = bytes.bytes().await else {
-                    return Err(CommandError::ExecutionFailed(
-                        "invalid image url".to_string(),
-                    ));
-                };
-                let (mime, extension) = if url.contains("png") {
-                    ("image/png", "png")
-                } else if url.contains("gif") {
-                    ("image/gif", "gif")
-                } else if url.contains("webp") {
-                    ("image/webp", "webp")
-                } else {
-                    ("image/jpeg", "jpeg")
-                };
-                let mime = mime.parse::<mime::Mime>().unwrap();
-                match room
-                    .send_attachment(
-                        &format!("image.{}", extension),
-                        &mime,
-                        bytes.to_vec(),
-                        AttachmentConfig::new(),
-                    )
+    let args = parse_command_args(input);
+
+    match Command::try_parse_from(args) {
+        Ok(command) => match command {
+            Command::Image { action } => match action {
+                ImageAction::Embed { url } => {
+                    if user_permissions.can_use_files() {
+                        let Ok(bytes) = reqwest::get(&url).await else {
+                            return Err(CommandError::ExecutionFailed(
+                                "invalid image url".to_string(),
+                            ));
+                        };
+                        let Ok(bytes) = bytes.bytes().await else {
+                            return Err(CommandError::ExecutionFailed(
+                                "invalid image url".to_string(),
+                            ));
+                        };
+                        let (mime, extension) = if url.contains("png") {
+                            ("image/png", "png")
+                        } else if url.contains("gif") {
+                            ("image/gif", "gif")
+                        } else if url.contains("webp") {
+                            ("image/webp", "webp")
+                        } else {
+                            ("image/jpeg", "jpeg")
+                        };
+                        let mime = mime.parse::<mime::Mime>().unwrap();
+                        match room
+                            .send_attachment(
+                                &format!("image.{}", extension),
+                                &mime,
+                                bytes.to_vec(),
+                                AttachmentConfig::new(),
+                            )
+                            .await
+                        {
+                            Ok(_) => Ok(CommandResult::None),
+                            Err(_) => Err(CommandError::ExecutionFailed(
+                                "failed to upload image".to_string(),
+                            )),
+                        }
+                    } else {
+                        Err(CommandError::LackingPermission(Permission::File))
+                    }
+                }
+            },
+            Command::Generate {
+                file: false,
+                input,
+                ollama,
+            } => {
+                funboy
+                    .generate_command(Platform::Matrix, user_id, interpreter, input, false, ollama)
                     .await
-                {
-                    Ok(_) => Ok(CommandResult::None),
-                    Err(_) => Err(CommandError::ExecutionFailed(
-                        "failed to upload image".to_string(),
-                    )),
+            }
+            Command::Generate { file: true, .. } => {
+                if user_permissions.can_use_files() && user_permissions.can_generate() {
+                    let mut pending_requests = user_ctx.pending_requests.lock().await;
+                    pending_requests.push(Request::GenerateFile);
+                    Ok(CommandResult::Text(format!(
+                        "Attach the file you want to upload."
+                    )))
+                } else {
+                    Err(CommandError::LackingPermissions(
+                        user_permissions.get_lacking(&[Permission::File, Permission::Generate]),
+                    ))
+                }
+            }
+            Command::Add {
+                file: false,
+                template,
+                single,
+                substitutes,
+            } => {
+                let substitutes = substitutes.join(" ");
+                funboy
+                    .add_command(user_id, Platform::Matrix, template, substitutes, single)
+                    .await
+            }
+            Command::Add {
+                template,
+                file: true,
+                ..
+            } => {
+                if user_permissions.can_use_files() && user_permissions.can_update() {
+                    let mut pending_requests = user_ctx.pending_requests.lock().await;
+                    pending_requests.push(Request::UploadSub(template));
+                    Ok(CommandResult::Text(format!(
+                        "Attach the file you want to add as a substitute.",
+                    )))
+                } else {
+                    Err(CommandError::LackingPermissions(
+                        user_permissions.get_lacking(&[Permission::File, Permission::Update]),
+                    ))
+                }
+            }
+            Command::Delete {
+                template,
+                single,
+                id,
+                substitutes,
+            } => {
+                let substitutes = substitutes.join(" ");
+                funboy
+                    .delete_command(user_id, Platform::Matrix, template, substitutes, single, id)
+                    .await
+            }
+            Command::List {
+                template,
+                search_term,
+                list_style,
+            } => funboy.list_command(template, search_term, list_style).await,
+            Command::Copy {
+                from_template,
+                to_template,
+            } => {
+                funboy
+                    .copy_command(user_id, from_template, to_template)
+                    .await
+            }
+            Command::Rename {
+                from_template,
+                to_template,
+            } => {
+                funboy
+                    .rename_command(user_id, from_template, to_template)
+                    .await
+            }
+            Command::Replace {
+                substitute,
+                with_substitute,
+                template,
+                id,
+            } => {
+                funboy
+                    .replace_command(user_id, template, substitute, with_substitute, id)
+                    .await
+            }
+            Command::Ollama { action } => funboy.ollama_command(user_id, action).await,
+            Command::Grant { user, permissions } => {
+                if user_permissions.can_grant() {
+                    let user_id = match OwnedUserId::try_from(user.as_str()) {
+                        Ok(user_id) => user_id,
+                        Err(_) => {
+                            room.send(RoomMessageEventContent::text_plain(format!(
+                                "No user named {} in room",
+                                user
+                            )))
+                            .await
+                            .unwrap();
+                            return Ok(CommandResult::None);
+                        }
+                    };
+
+                    let matrix_user = MatrixUser::new(room_id, user_id);
+                    let mut users = funboy.users.clone();
+                    let result = users
+                        .grant_permissions(matrix_user.clone(), &permissions)
+                        .await;
+
+                    match result {
+                        Ok(_) => {
+                            room.send(RoomMessageEventContent::text_plain(&format!(
+                                "Granted {} permissions to {}",
+                                permissions
+                                    .iter()
+                                    .map(|p| p.to_string())
+                                    .collect::<Vec<String>>()
+                                    .join(", "),
+                                matrix_user.user_id,
+                            )))
+                            .await
+                            .unwrap();
+                        }
+                        Err(e) => {
+                            room.send(RoomMessageEventContent::text_plain(e.to_string()))
+                                .await
+                                .unwrap();
+                        }
+                    }
+
+                    println!("Granted {:?} permissions from user ", permissions);
+
+                    Ok(CommandResult::None)
+                } else {
+                    Err(CommandError::LackingPermission(Permission::Grant))
+                }
+            }
+            Command::Revoke { user, permissions } => {
+                if user_permissions.can_revoke() {
+                    let user_id = match OwnedUserId::try_from(user.as_str()) {
+                        Ok(user_id) => user_id,
+                        Err(_) => {
+                            room.send(RoomMessageEventContent::text_plain(format!(
+                                "No user named {} in room",
+                                user
+                            )))
+                            .await
+                            .unwrap();
+                            return Ok(CommandResult::None);
+                        }
+                    };
+
+                    let matrix_user = MatrixUser::new(room_id, user_id);
+                    let mut users = funboy.users.clone();
+                    let result = users
+                        .revoke_permissions(matrix_user.clone(), &permissions)
+                        .await;
+
+                    match result {
+                        Ok(_) => {
+                            room.send(RoomMessageEventContent::text_plain(&format!(
+                                "Revoked {} permissions from {}",
+                                permissions
+                                    .iter()
+                                    .map(|p| p.to_string())
+                                    .collect::<Vec<String>>()
+                                    .join(", "),
+                                matrix_user.user_id,
+                            )))
+                            .await
+                            .unwrap();
+                        }
+                        Err(e) => {
+                            room.send(RoomMessageEventContent::text_plain(e.to_string()))
+                                .await
+                                .unwrap();
+                        }
+                    }
+                    println!("Revoked {:?} permissions from user ", permissions);
+
+                    Ok(CommandResult::None)
+                } else {
+                    Err(CommandError::LackingPermission(Permission::Grant))
                 }
             }
         },
-        Command::Generate { file: false, .. } => Err(CommandError::UnhandledCommand(command)),
-        Command::Generate { file: true, .. } => {
-            if user_permissions.can_use_files() && user_permissions.can_generate() {
-                let mut pending_requests = user_ctx.pending_requests.lock().await;
-                pending_requests.push(Request::GenerateFile);
-                room.send(RoomMessageEventContent::text_plain(
-                    "Attach the file you want to upload.",
-                ))
-                .await
-                .unwrap();
-                Ok(CommandResult::None)
-            } else {
-                Err(CommandError::LackingPermissions(
-                    user_permissions.get_lacking(&[Permission::File, Permission::Generate]),
-                ))
-            }
-        }
-        Command::Add { file: false, .. } => Err(CommandError::UnhandledCommand(command)),
-        Command::Add {
-            template,
-            file: true,
-            ..
-        } => {
-            if user_permissions.can_use_files() && user_permissions.can_update() {
-                let mut pending_requests = user_ctx.pending_requests.lock().await;
-                pending_requests.push(Request::UploadSub(template));
-                room.send(RoomMessageEventContent::text_plain(
-                    "Attach the file you want to add as a substitute.",
-                ))
-                .await
-                .unwrap();
-                Ok(CommandResult::None)
-            } else {
-                Err(CommandError::LackingPermissions(
-                    user_permissions.get_lacking(&[Permission::File, Permission::Update]),
-                ))
-            }
-        }
-        Command::Delete { .. } => Err(CommandError::UnhandledCommand(command)),
-        Command::List { .. } => Err(CommandError::UnhandledCommand(command)),
-        Command::Copy { .. } => Err(CommandError::UnhandledCommand(command)),
-        Command::Rename { .. } => Err(CommandError::UnhandledCommand(command)),
-        Command::Replace { .. } => Err(CommandError::UnhandledCommand(command)),
-        Command::Ollama { .. } => Err(CommandError::UnhandledCommand(command)),
-        Command::Context { .. } => Err(CommandError::UnhandledCommand(command)),
-        Command::Exit => Err(CommandError::UnhandledCommand(command)),
-        Command::Grant { user, permissions } => {
-            if user_permissions.can_grant() {
-                let user_id = match OwnedUserId::try_from(user.as_str()) {
-                    Ok(user_id) => user_id,
-                    Err(_) => {
-                        room.send(RoomMessageEventContent::text_plain(format!(
-                            "No user named {} in room",
-                            user
-                        )))
-                        .await
-                        .unwrap();
-                        return Ok(CommandResult::None);
-                    }
-                };
-
-                let matrix_user = MatrixUser::new(room_id, user_id);
-                let mut users = funboy.users.clone();
-                let result = users
-                    .grant_permissions(matrix_user.clone(), &permissions)
-                    .await;
-
-                match result {
-                    Ok(_) => {
-                        room.send(RoomMessageEventContent::text_plain(&format!(
-                            "Granted {} permissions to {}",
-                            permissions
-                                .iter()
-                                .map(|p| p.to_string())
-                                .collect::<Vec<String>>()
-                                .join(", "),
-                            matrix_user.user_id,
-                        )))
-                        .await
-                        .unwrap();
-                    }
-                    Err(e) => {
-                        room.send(RoomMessageEventContent::text_plain(e.to_string()))
-                            .await
-                            .unwrap();
-                    }
-                }
-
-                println!("Granted {:?} permissions from user ", permissions);
-
-                Ok(CommandResult::None)
-            } else {
-                Err(CommandError::LackingPermission(Permission::Grant))
-            }
-        }
-        Command::Revoke { user, permissions } => {
-            if user_permissions.can_revoke() {
-                let user_id = match OwnedUserId::try_from(user.as_str()) {
-                    Ok(user_id) => user_id,
-                    Err(_) => {
-                        room.send(RoomMessageEventContent::text_plain(format!(
-                            "No user named {} in room",
-                            user
-                        )))
-                        .await
-                        .unwrap();
-                        return Ok(CommandResult::None);
-                    }
-                };
-
-                let matrix_user = MatrixUser::new(room_id, user_id);
-                let mut users = funboy.users.clone();
-                let result = users
-                    .revoke_permissions(matrix_user.clone(), &permissions)
-                    .await;
-
-                match result {
-                    Ok(_) => {
-                        room.send(RoomMessageEventContent::text_plain(&format!(
-                            "Revoked {} permissions from {}",
-                            permissions
-                                .iter()
-                                .map(|p| p.to_string())
-                                .collect::<Vec<String>>()
-                                .join(", "),
-                            matrix_user.user_id,
-                        )))
-                        .await
-                        .unwrap();
-                    }
-                    Err(e) => {
-                        room.send(RoomMessageEventContent::text_plain(e.to_string()))
-                            .await
-                            .unwrap();
-                    }
-                }
-                println!("Revoked {:?} permissions from user ", permissions);
-
-                Ok(CommandResult::None)
-            } else {
-                Err(CommandError::LackingPermission(Permission::Grant))
-            }
-        }
+        Err(e) => Err(CommandError::UnknownCommand(e.to_string())),
     }
 }
