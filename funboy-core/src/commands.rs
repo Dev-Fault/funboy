@@ -26,6 +26,12 @@ pub enum CommandError {
     UnknownCommand(String),
 }
 
+impl From<String> for CommandError {
+    fn from(value: String) -> Self {
+        CommandError::ExecutionFailed(value)
+    }
+}
+
 #[derive(Parser, Debug, Clone)]
 pub enum OllamaAction {
     List {
@@ -611,5 +617,67 @@ impl<U: UserId> Funboy<U> {
                 return Err(CommandError::ExecutionFailed(e.to_string()).into());
             }
         };
+    }
+
+    pub async fn grant_command(
+        &self,
+        invoker: U,
+        receiver: U,
+        permissions: Vec<Permission>,
+    ) -> Result<CommandResult, CommandError> {
+        let mut users = self.users.clone();
+        let invoker_permissions = self.users.get_permissions(invoker.clone()).await;
+
+        if invoker_permissions.can_grant() {
+            let result = users
+                .grant_permissions(receiver.clone(), &permissions)
+                .await;
+
+            match result {
+                Ok(_) => Ok(CommandResult::Text(format!(
+                    "Granted {} permissions to {}",
+                    permissions
+                        .iter()
+                        .map(|p| p.to_string())
+                        .collect::<Vec<String>>()
+                        .join(", "),
+                    receiver.to_string(),
+                ))),
+                Err(e) => Err(CommandError::ExecutionFailed(e.to_string())),
+            }
+        } else {
+            Err(CommandError::LackingPermission(Permission::Grant))
+        }
+    }
+
+    pub async fn revoke_command(
+        &self,
+        invoker: U,
+        receiver: U,
+        permissions: Vec<Permission>,
+    ) -> Result<CommandResult, CommandError> {
+        let mut users = self.users.clone();
+        let invoker_permissions = self.users.get_permissions(invoker.clone()).await;
+
+        if invoker_permissions.can_revoke() {
+            let result = users
+                .revoke_permissions(receiver.clone(), &permissions)
+                .await;
+
+            match result {
+                Ok(_) => Ok(CommandResult::Text(format!(
+                    "Revoked {} permissions from {}",
+                    permissions
+                        .iter()
+                        .map(|p| p.to_string())
+                        .collect::<Vec<String>>()
+                        .join(", "),
+                    receiver.to_string(),
+                ))),
+                Err(e) => Err(CommandError::ExecutionFailed(e.to_string())),
+            }
+        } else {
+            Err(CommandError::LackingPermission(Permission::Revoke))
+        }
     }
 }

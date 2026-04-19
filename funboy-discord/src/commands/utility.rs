@@ -5,7 +5,7 @@ use crate::{Context, DiscordUserId, Error, context_extension::ContextExtension};
 use clap::ValueEnum;
 use funboy_core::{
     Permission,
-    commands::CommandError,
+    commands::{CommandError, CommandResult},
     format::{TWO_THOUSAND, extract_image_urls},
 };
 use poise::{
@@ -291,86 +291,54 @@ impl ChoiceParameter for PermissionChoice {
 #[poise::command(slash_command, prefix_command, category = "Utility")]
 pub async fn grant(
     ctx: Context<'_>,
-    #[description = "Selected user"] user: Option<serenity::User>,
+    #[description = "Selected user"] user: serenity::User,
     permissions: Vec<PermissionChoice>,
 ) -> Result<(), Error> {
     let funboy = ctx.data().funboy.clone();
-    let mut users = funboy.users.clone();
 
-    let command_user = ctx.author().id;
-    let command_user_permissions = users.get_permissions(DiscordUserId(command_user)).await;
-    if command_user_permissions.can_grant() {
-        let u = user.as_ref().unwrap_or_else(|| ctx.author());
-        let permissions: Vec<Permission> = permissions.iter().map(|p| p.0).collect();
-        let result = users
-            .grant_permissions(DiscordUserId(u.id), &permissions)
-            .await;
+    let invoker = ctx.author().id;
 
-        match result {
-            Ok(_) => {
-                ctx.say_ephemeral(&format!(
-                    "Granted {} permissions to {}",
-                    permissions
-                        .iter()
-                        .map(|p| p.to_string())
-                        .collect::<Vec<String>>()
-                        .join(", "),
-                    u.name,
-                ))
-                .await?;
-            }
-            Err(e) => {
-                ctx.say_ephemeral(&e.to_string()).await?;
-            }
+    let permissions: Vec<Permission> = permissions.iter().map(|p| p.0).collect();
+    let result = funboy
+        .grant_command(DiscordUserId(invoker), DiscordUserId(user.id), permissions)
+        .await;
+
+    match result {
+        Ok(CommandResult::Text(result)) => {
+            ctx.say_ephemeral(&result).await?;
         }
-        Ok(())
-    } else {
-        ctx.say_ephemeral(&CommandError::LackingPermission(Permission::Grant).to_string())
-            .await?;
-        Ok(())
+        Err(e) => {
+            ctx.say_ephemeral(&e.to_string()).await?;
+        }
+        _ => {}
     }
+    Ok(())
 }
 
 /// Revokes permissions from user
 #[poise::command(slash_command, prefix_command, category = "Utility")]
 pub async fn revoke(
     ctx: Context<'_>,
-    #[description = "Selected user"] user: Option<serenity::User>,
+    #[description = "Selected user"] user: serenity::User,
     permissions: Vec<PermissionChoice>,
 ) -> Result<(), Error> {
     let funboy = ctx.data().funboy.clone();
-    let mut users = funboy.users.clone();
 
-    let command_user = ctx.author().id;
-    let command_user_permissions = users.get_permissions(DiscordUserId(command_user)).await;
-    if command_user_permissions.can_revoke() {
-        let u = user.as_ref().unwrap_or_else(|| ctx.author());
-        let permissions: Vec<Permission> = permissions.iter().map(|p| p.0).collect();
-        let result = users
-            .revoke_permissions(DiscordUserId(u.id), &permissions)
-            .await;
+    let invoker = ctx.author().id;
 
-        match result {
-            Ok(_) => {
-                ctx.say_ephemeral(&format!(
-                    "Revoked {} permissions from {}",
-                    permissions
-                        .iter()
-                        .map(|p| p.to_string())
-                        .collect::<Vec<String>>()
-                        .join(", "),
-                    u.name,
-                ))
-                .await?;
-            }
-            Err(e) => {
-                ctx.say_ephemeral(&e.to_string()).await?;
-            }
+    let permissions: Vec<Permission> = permissions.iter().map(|p| p.0).collect();
+    let result = funboy
+        .revoke_command(DiscordUserId(invoker), DiscordUserId(user.id), permissions)
+        .await;
+
+    match result {
+        Ok(CommandResult::Text(result)) => {
+            ctx.say_ephemeral(&result).await?;
         }
-        Ok(())
-    } else {
-        ctx.say_ephemeral(&CommandError::LackingPermission(Permission::Revoke).to_string())
-            .await?;
-        Ok(())
+        Err(e) => {
+            ctx.say_ephemeral(&e.to_string()).await?;
+        }
+        _ => {}
     }
+    Ok(())
 }

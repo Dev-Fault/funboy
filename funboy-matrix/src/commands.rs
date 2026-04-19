@@ -8,11 +8,7 @@ use funboy_core::{
     database::Platform,
     format::{LIST_STYLE_NONE, ListStyle},
 };
-use matrix_sdk::{
-    Room,
-    attachment::AttachmentConfig,
-    ruma::{OwnedUserId, events::room::message::RoomMessageEventContent},
-};
+use matrix_sdk::{Room, attachment::AttachmentConfig, ruma::OwnedUserId};
 use tokio::sync::Mutex;
 
 use crate::MatrixUser;
@@ -259,103 +255,33 @@ pub async fn interpret_matrix_commands(
             }
             Command::Ollama { action } => funboy.ollama_command(user_id, action).await,
             Command::Grant { user, permissions } => {
-                if user_permissions.can_grant() {
-                    let user_id = match OwnedUserId::try_from(user.as_str()) {
-                        Ok(user_id) => user_id,
-                        Err(_) => {
-                            room.send(RoomMessageEventContent::text_plain(format!(
-                                "No user named {} in room",
-                                user
-                            )))
-                            .await
-                            .unwrap();
-                            return Ok(CommandResult::None);
-                        }
-                    };
+                let receiver_id = find_user(&user, room).await?;
+                let receiver = MatrixUser::new(room_id, receiver_id);
 
-                    let matrix_user = MatrixUser::new(room_id, user_id);
-                    let mut users = funboy.users.clone();
-                    let result = users
-                        .grant_permissions(matrix_user.clone(), &permissions)
-                        .await;
-
-                    match result {
-                        Ok(_) => {
-                            room.send(RoomMessageEventContent::text_plain(&format!(
-                                "Granted {} permissions to {}",
-                                permissions
-                                    .iter()
-                                    .map(|p| p.to_string())
-                                    .collect::<Vec<String>>()
-                                    .join(", "),
-                                matrix_user.user_id,
-                            )))
-                            .await
-                            .unwrap();
-                        }
-                        Err(e) => {
-                            room.send(RoomMessageEventContent::text_plain(e.to_string()))
-                                .await
-                                .unwrap();
-                        }
-                    }
-
-                    println!("Granted {:?} permissions from user ", permissions);
-
-                    Ok(CommandResult::None)
-                } else {
-                    Err(CommandError::LackingPermission(Permission::Grant))
-                }
+                funboy.grant_command(user_id, receiver, permissions).await
             }
             Command::Revoke { user, permissions } => {
-                if user_permissions.can_revoke() {
-                    let user_id = match OwnedUserId::try_from(user.as_str()) {
-                        Ok(user_id) => user_id,
-                        Err(_) => {
-                            room.send(RoomMessageEventContent::text_plain(format!(
-                                "No user named {} in room",
-                                user
-                            )))
-                            .await
-                            .unwrap();
-                            return Ok(CommandResult::None);
-                        }
-                    };
+                let receiver_id = find_user(&user, room).await?;
+                let receiver = MatrixUser::new(room_id, receiver_id);
 
-                    let matrix_user = MatrixUser::new(room_id, user_id);
-                    let mut users = funboy.users.clone();
-                    let result = users
-                        .revoke_permissions(matrix_user.clone(), &permissions)
-                        .await;
-
-                    match result {
-                        Ok(_) => {
-                            room.send(RoomMessageEventContent::text_plain(&format!(
-                                "Revoked {} permissions from {}",
-                                permissions
-                                    .iter()
-                                    .map(|p| p.to_string())
-                                    .collect::<Vec<String>>()
-                                    .join(", "),
-                                matrix_user.user_id,
-                            )))
-                            .await
-                            .unwrap();
-                        }
-                        Err(e) => {
-                            room.send(RoomMessageEventContent::text_plain(e.to_string()))
-                                .await
-                                .unwrap();
-                        }
-                    }
-                    println!("Revoked {:?} permissions from user ", permissions);
-
-                    Ok(CommandResult::None)
-                } else {
-                    Err(CommandError::LackingPermission(Permission::Grant))
-                }
+                funboy.revoke_command(user_id, receiver, permissions).await
             }
         },
         Err(e) => Err(CommandError::UnknownCommand(e.to_string())),
+    }
+}
+
+pub async fn find_user(user: &str, room: Room) -> Result<OwnedUserId, String> {
+    match OwnedUserId::try_from(user) {
+        Ok(receiver_id) => {
+            if room.get_member(&receiver_id).await.ok().is_some() {
+                Ok(receiver_id)
+            } else {
+                return Err(format!("No user named {} in room", user));
+            }
+        }
+        Err(_) => {
+            return Err(format!("No user named {} in room", user));
+        }
     }
 }
