@@ -1,7 +1,7 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, env, str::FromStr, sync::Arc, time::Duration};
 
 use fsl_interpreter::FslInterpreter;
-use funboy_cli::{CommandError, CommandResult, Context, Permissions, interpret_bot_commands};
+use funboy_cli::{CommandError, CommandResult, Context, FunboyEnv, interpret_bot_commands};
 use funboy_core::{Funboy, Request, UserId};
 use matrix_sdk::{
     Client, Room, RoomState,
@@ -26,7 +26,48 @@ use crate::{
 mod commands;
 mod interpreter;
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone)]
+pub struct MatrixEnv {
+    pub homeserver: String,
+    pub username: String,
+    pub password: String,
+    pub host_ids: Vec<String>,
+}
+
+impl MatrixEnv {
+    pub fn new(funboy_env: &FunboyEnv) -> MatrixEnv {
+        dotenvy::dotenv().expect("parent directory should have .env file");
+        let homeserver = env::var("HOME_SERVER").expect(".env file should contain HOME_SERVER");
+
+        let (username, password) = if funboy_env.debug_mode {
+            (
+                env::var("DEBUG_USERNAME").expect(".env file should contain DEBUG_USERNAME"),
+                env::var("DEBUG_PASSWORD").expect(".env file should contain DEBUG_PASSWORD"),
+            )
+        } else {
+            (
+                env::var("USERNAME").expect(".env file should contain USERNAME"),
+                env::var("PASSWORD").expect(".env file should contain PASSWORD"),
+            )
+        };
+
+        let host_ids: Vec<String> = env::var("HOSTS")
+            .unwrap_or_default()
+            .split(",")
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+            .collect();
+
+        Self {
+            homeserver,
+            username,
+            password,
+            host_ids,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct MatrixUser {
     room_id: OwnedRoomId,
     user_id: OwnedUserId,
@@ -40,10 +81,37 @@ impl MatrixUser {
 
 impl UserId for MatrixUser {}
 
+impl ToString for MatrixUser {
+    fn to_string(&self) -> String {
+        self.user_id.to_string()
+    }
+}
+
+pub async fn grant_host_permissions(
+    env: &MatrixEnv,
+    funboy: Arc<Funboy<MatrixUser>>,
+    room_id: OwnedRoomId,
+) {
+    for host_id in &env.host_ids {
+        let user_id = match OwnedUserId::from_str(&host_id) {
+            Ok(user_id) => user_id,
+            Err(e) => {
+                eprintln!("{}", e.to_string());
+                continue;
+            }
+        };
+        let user = MatrixUser::new(room_id.clone(), user_id);
+        let mut users = funboy.users.clone();
+        users.grant_all_permissions(user).await;
+    }
+}
+
 pub async fn on_stripped_state_member(
     room_member: StrippedRoomMemberEvent,
     client: Client,
     room: Room,
+    env: MatrixEnv,
+    funboy: Arc<Funboy<MatrixUser>>,
 ) {
     if room_member.state_key != client.user_id().unwrap() {
         return;
@@ -67,6 +135,9 @@ pub async fn on_stripped_state_member(
                 break;
             }
         }
+
+        grant_host_permissions(&env, funboy, room.room_id().to_owned()).await;
+
         println!("Successfully joined room {}", room.room_id());
     });
 }
@@ -85,7 +156,7 @@ pub async fn on_room_message(
     }
 
     let matrix_user = MatrixUser::new(room.room_id().to_owned(), event.sender.clone());
-    let user_ctx = funboy.get_user_ctx(matrix_user.clone()).await;
+    let user_ctx = funboy.users.get_or_insert(matrix_user.clone()).await;
     let mut pending_requests = user_ctx.pending_requests.lock().await;
     let interpreter = create_interpreter(
         funboy.clone(),
@@ -228,7 +299,6 @@ pub async fn handle_bot_command(
         MatrixUser::new(room.room_id().to_owned(), event.sender),
         &funboy,
         interpreter,
-        &Permissions::power_user(),
         Context::Matrix,
         message,
     )

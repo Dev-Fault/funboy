@@ -34,7 +34,12 @@ pub async fn list_ollama_models(ctx: Context<'_>) -> Result<(), Error> {
 #[poise::command(slash_command, prefix_command, category = "Ollama")]
 pub async fn list_ollama_settings(ctx: Context<'_>) -> Result<(), Error> {
     let user_id = ctx.author().id;
-    let user_ctx = ctx.data().funboy.get_user_ctx(DiscordUserId(user_id)).await;
+    let user_ctx = ctx
+        .data()
+        .funboy
+        .users
+        .get_or_insert(DiscordUserId(user_id))
+        .await;
     let settings = user_ctx.ollama_settings.lock().await;
 
     let current_model = ctx.data().funboy.get_ollama_model().await;
@@ -91,7 +96,12 @@ pub async fn set_ollama_parameters(
     top_p: Option<f32>,
 ) -> Result<(), Error> {
     let user_id = ctx.author().id;
-    let user_ctx = ctx.data().funboy.get_user_ctx(DiscordUserId(user_id)).await;
+    let user_ctx = ctx
+        .data()
+        .funboy
+        .users
+        .get_or_insert(DiscordUserId(user_id))
+        .await;
     let mut settings = user_ctx.ollama_settings.lock().await;
 
     if let Some(temperature) = temperature {
@@ -114,7 +124,12 @@ pub async fn set_ollama_parameters(
 #[poise::command(slash_command, prefix_command, category = "Ollama")]
 pub async fn reset_ollama_parameters(ctx: Context<'_>) -> Result<(), Error> {
     let user_id = ctx.author().id;
-    let user_ctx = ctx.data().funboy.get_user_ctx(DiscordUserId(user_id)).await;
+    let user_ctx = ctx
+        .data()
+        .funboy
+        .users
+        .get_or_insert(DiscordUserId(user_id))
+        .await;
     let mut settings = user_ctx.ollama_settings.lock().await;
 
     settings.reset_parameters();
@@ -129,7 +144,12 @@ pub async fn set_ollama_system_prompt(
     system_prompt: String,
 ) -> Result<(), Error> {
     let user_id = ctx.author().id;
-    let user_ctx = ctx.data().funboy.get_user_ctx(DiscordUserId(user_id)).await;
+    let user_ctx = ctx
+        .data()
+        .funboy
+        .users
+        .get_or_insert(DiscordUserId(user_id))
+        .await;
     let mut settings = user_ctx.ollama_settings.lock().await;
 
     settings.set_system_prompt(&system_prompt);
@@ -141,7 +161,12 @@ pub async fn set_ollama_system_prompt(
 #[poise::command(slash_command, prefix_command, category = "Ollama")]
 pub async fn reset_ollama_system_prompt(ctx: Context<'_>) -> Result<(), Error> {
     let user_id = ctx.author().id;
-    let user_ctx = ctx.data().funboy.get_user_ctx(DiscordUserId(user_id)).await;
+    let user_ctx = ctx
+        .data()
+        .funboy
+        .users
+        .get_or_insert(DiscordUserId(user_id))
+        .await;
     let mut settings = user_ctx.ollama_settings.lock().await;
 
     settings.reset_system_prompt();
@@ -153,7 +178,12 @@ pub async fn reset_ollama_system_prompt(ctx: Context<'_>) -> Result<(), Error> {
 #[poise::command(slash_command, prefix_command, category = "Ollama")]
 pub async fn set_ollama_template(ctx: Context<'_>, template: String) -> Result<(), Error> {
     let user_id = ctx.author().id;
-    let user_ctx = ctx.data().funboy.get_user_ctx(DiscordUserId(user_id)).await;
+    let user_ctx = ctx
+        .data()
+        .funboy
+        .users
+        .get_or_insert(DiscordUserId(user_id))
+        .await;
     let mut settings = user_ctx.ollama_settings.lock().await;
 
     settings.set_template(&template);
@@ -165,7 +195,12 @@ pub async fn set_ollama_template(ctx: Context<'_>, template: String) -> Result<(
 #[poise::command(slash_command, prefix_command, category = "Ollama")]
 pub async fn reset_ollama_template(ctx: Context<'_>) -> Result<(), Error> {
     let user_id = ctx.author().id;
-    let user_ctx = ctx.data().funboy.get_user_ctx(DiscordUserId(user_id)).await;
+    let user_ctx = ctx
+        .data()
+        .funboy
+        .users
+        .get_or_insert(DiscordUserId(user_id))
+        .await;
     let mut settings = user_ctx.ollama_settings.lock().await;
 
     settings.reset_template();
@@ -177,7 +212,12 @@ pub async fn reset_ollama_template(ctx: Context<'_>) -> Result<(), Error> {
 #[poise::command(slash_command, prefix_command, category = "Ollama")]
 pub async fn set_ollama_word_limit(ctx: Context<'_>, limit: u16) -> Result<(), Error> {
     let user_id = ctx.author().id;
-    let user_ctx = ctx.data().funboy.get_user_ctx(DiscordUserId(user_id)).await;
+    let user_ctx = ctx
+        .data()
+        .funboy
+        .users
+        .get_or_insert(DiscordUserId(user_id))
+        .await;
     let mut settings = user_ctx.ollama_settings.lock().await;
 
     if settings.set_output_limit(limit) {

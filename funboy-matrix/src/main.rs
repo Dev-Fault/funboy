@@ -1,42 +1,16 @@
-use std::{collections::HashMap, env, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use funboy_cli::{FunboyEnv, get_funboy};
-use funboy_matrix::{MatrixUser, on_room_message, on_stripped_state_member};
+use funboy_core::database::Platform;
+use funboy_matrix::{
+    MatrixEnv, MatrixUser, grant_host_permissions, on_room_message, on_stripped_state_member,
+};
 use matrix_sdk::{
-    Client, Room, config::SyncSettings, ruma::events::room::message::OriginalSyncRoomMessageEvent,
+    Client, Room,
+    config::SyncSettings,
+    ruma::events::room::{member::StrippedRoomMemberEvent, message::OriginalSyncRoomMessageEvent},
 };
 use tokio::sync::{Mutex, oneshot};
-
-struct MatrixEnv {
-    homeserver: String,
-    username: String,
-    password: String,
-}
-
-impl MatrixEnv {
-    pub fn new(funboy_env: &FunboyEnv) -> MatrixEnv {
-        dotenvy::dotenv().expect("parent directory should have .env file");
-        let homeserver = env::var("HOME_SERVER").expect(".env file should contain HOME_SERVER");
-
-        let (username, password) = if funboy_env.debug_mode {
-            (
-                env::var("DEBUG_USERNAME").expect(".env file should contain DEBUG_USERNAME"),
-                env::var("DEBUG_PASSWORD").expect(".env file should contain DEBUG_PASSWORD"),
-            )
-        } else {
-            (
-                env::var("USERNAME").expect(".env file should contain USERNAME"),
-                env::var("PASSWORD").expect(".env file should contain PASSWORD"),
-            )
-        };
-
-        Self {
-            homeserver,
-            username,
-            password,
-        }
-    }
-}
 
 #[tokio::main]
 async fn main() {
@@ -55,7 +29,15 @@ async fn main() {
         .await
         .expect("couldn't login");
 
-    client.add_event_handler(on_stripped_state_member);
+    let funboy = Arc::new(get_funboy(&funboy_env, Platform::Matrix).await);
+
+    let funboy_clone = funboy.clone();
+    let env_clone = env.clone();
+    client.add_event_handler(
+        move |room_member: StrippedRoomMemberEvent, client: Client, room: Room| {
+            on_stripped_state_member(room_member, client, room, env_clone, funboy_clone)
+        },
+    );
 
     let sync_token = client
         .sync_once(SyncSettings::default())
@@ -63,17 +45,20 @@ async fn main() {
         .unwrap()
         .next_batch;
 
-    let funboy = Arc::new(get_funboy(&funboy_env).await);
-
     let pending_asks: Arc<Mutex<HashMap<MatrixUser, oneshot::Sender<String>>>> =
         Arc::new(Mutex::new(HashMap::new()));
 
     let client_clone = client.clone();
+    let funboy_clone = funboy.clone();
     client.add_event_handler(move |event: OriginalSyncRoomMessageEvent, room: Room| {
-        on_room_message(client_clone, event, room, funboy, pending_asks)
+        on_room_message(client_clone, event, room, funboy_clone, pending_asks)
     });
 
     let settings = SyncSettings::default().token(sync_token);
+
+    for room in client.joined_rooms() {
+        grant_host_permissions(&env, funboy.clone(), room.room_id().to_owned()).await;
+    }
 
     client.sync(settings).await.expect("failed to sync client");
 }

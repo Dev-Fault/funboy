@@ -1,6 +1,6 @@
 use std::{borrow::Cow, str::FromStr};
 
-use crate::{FunboyError, template_database::Identifiable};
+use crate::{FunboyError, database::Identifiable};
 
 pub const TWO_THOUSAND: usize = 2000;
 pub const ONE_HUNDRED: usize = 100;

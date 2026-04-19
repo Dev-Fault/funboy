@@ -1,9 +1,9 @@
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 
 use ::serenity::all::{FullEvent, Interaction, UserId};
 use dotenvy::dotenv;
 use funboy_cli::{FunboyEnv, get_funboy};
-use funboy_core::{Funboy, rate_limiter::RateLimit};
+use funboy_core::{Funboy, database::Platform, rate_limiter::RateLimit};
 use poise::serenity_prelude as serenity;
 use reqwest::Client as HttpClient;
 use songbird::{SerenityInit, typemap::TypeMapKey};
@@ -25,6 +25,12 @@ type Context<'a> = poise::Context<'a, Data, Error>;
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct DiscordUserId(UserId);
 impl funboy_core::UserId for DiscordUserId {}
+
+impl ToString for DiscordUserId {
+    fn to_string(&self) -> String {
+        self.0.to_string()
+    }
+}
 
 struct Data {
     pub funboy: Arc<Funboy<DiscordUserId>>,
@@ -69,6 +75,7 @@ pub async fn register(ctx: Context<'_>) -> Result<(), Error> {
 pub struct DiscordEnv {
     funboy_env: FunboyEnv,
     token: String,
+    host_ids: Vec<String>,
 }
 
 impl DiscordEnv {
@@ -77,7 +84,18 @@ impl DiscordEnv {
 
         let token = std::env::var("DISCORD_TOKEN").expect("missing DISCORD_TOKEN");
 
-        DiscordEnv { funboy_env, token }
+        let host_ids: Vec<String> = std::env::var("HOSTS")
+            .unwrap_or_default()
+            .split(",")
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+            .collect();
+
+        DiscordEnv {
+            funboy_env,
+            token,
+            host_ids,
+        }
     }
 }
 
@@ -107,6 +125,8 @@ fn get_discord_commands()
         commands::utility::help_command(),
         commands::utility::move_bot_pins(),
         commands::utility::age(),
+        commands::utility::grant(),
+        commands::utility::revoke(),
         commands::ollama::list_ollama_models(),
         commands::ollama::set_ollama_model(),
         commands::ollama::list_ollama_settings(),
@@ -121,6 +141,21 @@ fn get_discord_commands()
     ]
 }
 
+pub async fn grant_host_permissions(env: &DiscordEnv, funboy: Arc<Funboy<DiscordUserId>>) {
+    for host_id in &env.host_ids {
+        let user_id = match UserId::from_str(host_id.as_str()) {
+            Ok(user_id) => user_id,
+            Err(e) => {
+                eprintln!("{e}");
+                continue;
+            }
+        };
+        let user_id = DiscordUserId(user_id);
+        let mut users = funboy.users.clone();
+        users.grant_all_permissions(user_id).await;
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let intents = serenity::GatewayIntents::non_privileged()
@@ -129,7 +164,10 @@ async fn main() {
 
     let funboy_env = FunboyEnv::new();
     let env = DiscordEnv::new(funboy_env);
-    let funboy = Arc::new(get_funboy(&env.funboy_env).await);
+
+    let funboy = Arc::new(get_funboy(&env.funboy_env, Platform::Discord).await);
+
+    grant_host_permissions(&env, funboy.clone()).await;
 
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {

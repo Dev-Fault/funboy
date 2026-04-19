@@ -5,11 +5,11 @@ use fsl_interpreter::{
     types::{command::Executor, value::Value},
 };
 use funboy_cli::{
-    CommandResult, Context, FslContext, FunboyEnv, Mode, Permissions, get_funboy,
-    interpret_bot_commands,
+    CommandResult, Context, FslContext, FunboyEnv, Mode, get_funboy, interpret_bot_commands,
 };
 use funboy_core::{
     Funboy, UserId,
+    database::Platform,
     interpreter::{ASK, ASK_RULES, SAY, SAY_RULES},
     ollama::{MAX_PREDICT, OllamaSettings},
 };
@@ -182,16 +182,24 @@ async fn create_interpreter<U: UserId>(
 struct Id(u64);
 impl UserId for Id {}
 
+impl ToString for Id {
+    fn to_string(&self) -> String {
+        self.0.to_string()
+    }
+}
+
 #[tokio::main]
 async fn main() -> rustyline::Result<()> {
     let env = FunboyEnv::new();
-    let funboy = Arc::new(get_funboy::<Id>(&env).await);
+    let funboy = Arc::new(get_funboy::<Id>(&env, Platform::Cli).await);
+
+    let mut users = funboy.users.clone();
+    users.grant_all_permissions(Id(0)).await;
+
     funboy.set_ollama_model(env.default_ollama_model).await;
     let rl = Arc::new(Mutex::new(DefaultEditor::new()?));
     let mut ollama_settings = OllamaSettings::default();
     ollama_settings.set_output_limit(MAX_PREDICT);
-
-    let permissions = Permissions::all();
 
     loop {
         let mut rl_lock = rl.lock().await;
@@ -204,7 +212,6 @@ async fn main() -> rustyline::Result<()> {
                     Id(0),
                     &funboy,
                     create_interpreter(funboy.clone(), rl.clone()).await,
-                    &permissions,
                     Context::Cli,
                     &line,
                 )

@@ -167,6 +167,7 @@ pub async fn add_subs(
     let funboy = ctx.data().funboy.clone();
     let result = funboy_cli::add(
         &funboy,
+        DiscordUserId(ctx.author().id),
         funboy_cli::Context::Discord,
         template,
         substitutes,
@@ -221,6 +222,7 @@ pub async fn delete_subs(
 
     let result = funboy_cli::delete(
         &funboy,
+        DiscordUserId(ctx.author().id),
         funboy_cli::Context::Discord,
         template,
         substitutes,
@@ -291,7 +293,13 @@ pub async fn copy_subs(
     to_template: String,
 ) -> Result<(), Error> {
     let funboy = ctx.data().funboy.clone();
-    let result = copy(&funboy, from_template, to_template).await;
+    let result = copy(
+        &funboy,
+        DiscordUserId(ctx.author().id),
+        from_template,
+        to_template,
+    )
+    .await;
     match result {
         Ok(result) => {
             if let CommandResult::Text(output) = result {
@@ -325,7 +333,15 @@ pub async fn replace_sub(
     id: Option<bool>,
 ) -> Result<(), Error> {
     let funboy = ctx.data().funboy.clone();
-    let result = replace(&funboy, template, from, to, id.unwrap_or(false)).await;
+    let result = replace(
+        &funboy,
+        DiscordUserId(ctx.author().id),
+        template,
+        from,
+        to,
+        id.unwrap_or(false),
+    )
+    .await;
     match result {
         Ok(result) => {
             if let CommandResult::Text(output) = result {
@@ -504,7 +520,7 @@ pub async fn delete_templates(ctx: Context<'_>, names: String) -> Result<(), Err
 #[poise::command(slash_command, prefix_command, category = "Templates")]
 pub async fn rename_template(ctx: Context<'_>, from: String, to: String) -> Result<(), Error> {
     let funboy = ctx.data().funboy.clone();
-    let result = rename(&funboy, from, to).await;
+    let result = rename(&funboy, DiscordUserId(ctx.author().id), from, to).await;
     match result {
         Ok(result) => {
             if let CommandResult::Text(output) = result {

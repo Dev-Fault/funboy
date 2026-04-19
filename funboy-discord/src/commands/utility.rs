@@ -1,10 +1,15 @@
 use std::collections::HashMap;
 
-use crate::{Context, Error, context_extension::ContextExtension};
+use crate::{Context, DiscordUserId, Error, context_extension::ContextExtension};
 
-use funboy_core::format::{TWO_THOUSAND, extract_image_urls};
+use clap::ValueEnum;
+use funboy_cli::CommandError;
+use funboy_core::{
+    Permission,
+    format::{TWO_THOUSAND, extract_image_urls},
+};
 use poise::{
-    CreateReply,
+    ChoiceParameter, CreateReply,
     serenity_prelude::{self as serenity, ChannelId, CreateEmbed, CreateMessage},
 };
 use tokio::sync::OnceCell;
@@ -246,4 +251,126 @@ pub async fn age(
     let response = format!("{}'s account was created at {}.", u.name, u.created_at());
     ctx.say(response).await?;
     Ok(())
+}
+
+struct PermissionChoice(Permission);
+
+impl ChoiceParameter for PermissionChoice {
+    fn list() -> Vec<poise::CommandParameterChoice> {
+        Permission::value_variants()
+            .iter()
+            .map(|v| poise::CommandParameterChoice {
+                name: v.to_string(),
+                localizations: Default::default(),
+                __non_exhaustive: (),
+            })
+            .collect()
+    }
+
+    fn from_index(index: usize) -> Option<Self> {
+        Permission::value_variants()
+            .get(index)
+            .copied()
+            .map(PermissionChoice)
+    }
+
+    fn from_name(name: &str) -> Option<Self> {
+        Permission::from_str(name, true).ok().map(PermissionChoice)
+    }
+
+    fn name(&self) -> &'static str {
+        self.0.as_str()
+    }
+
+    fn localized_name(&self, _locale: &str) -> Option<&'static str> {
+        None
+    }
+}
+
+/// Grants user with permissions
+#[poise::command(slash_command, prefix_command, category = "Utility")]
+pub async fn grant(
+    ctx: Context<'_>,
+    #[description = "Selected user"] user: Option<serenity::User>,
+    permissions: Vec<PermissionChoice>,
+) -> Result<(), Error> {
+    let funboy = ctx.data().funboy.clone();
+    let mut users = funboy.users.clone();
+
+    let command_user = ctx.author().id;
+    let command_user_permissions = users.get_permissions(DiscordUserId(command_user)).await;
+    if command_user_permissions.can_grant() {
+        let u = user.as_ref().unwrap_or_else(|| ctx.author());
+        let permissions: Vec<Permission> = permissions.iter().map(|p| p.0).collect();
+        let result = users
+            .grant_permissions(DiscordUserId(u.id), &permissions)
+            .await;
+
+        match result {
+            Ok(_) => {
+                ctx.say_ephemeral(&format!(
+                    "Granted {} permissions to {}",
+                    permissions
+                        .iter()
+                        .map(|p| p.to_string())
+                        .collect::<Vec<String>>()
+                        .join(", "),
+                    u.name,
+                ))
+                .await?;
+            }
+            Err(e) => {
+                ctx.say_ephemeral(&e.to_string()).await?;
+            }
+        }
+        Ok(())
+    } else {
+        ctx.say_ephemeral(&CommandError::LackingPermission(Permission::Grant).to_string())
+            .await?;
+        Ok(())
+    }
+}
+
+/// Revokes permissions from user
+#[poise::command(slash_command, prefix_command, category = "Utility")]
+pub async fn revoke(
+    ctx: Context<'_>,
+    #[description = "Selected user"] user: Option<serenity::User>,
+    permissions: Vec<PermissionChoice>,
+) -> Result<(), Error> {
+    let funboy = ctx.data().funboy.clone();
+    let mut users = funboy.users.clone();
+
+    let command_user = ctx.author().id;
+    let command_user_permissions = users.get_permissions(DiscordUserId(command_user)).await;
+    if command_user_permissions.can_revoke() {
+        let u = user.as_ref().unwrap_or_else(|| ctx.author());
+        let permissions: Vec<Permission> = permissions.iter().map(|p| p.0).collect();
+        let result = users
+            .revoke_permissions(DiscordUserId(u.id), &permissions)
+            .await;
+
+        match result {
+            Ok(_) => {
+                ctx.say_ephemeral(&format!(
+                    "Revoked {} permissions from {}",
+                    permissions
+                        .iter()
+                        .map(|p| p.to_string())
+                        .collect::<Vec<String>>()
+                        .join(", "),
+                    u.name,
+                ))
+                .await?;
+            }
+            Err(e) => {
+                ctx.say_ephemeral(&e.to_string()).await?;
+            }
+        }
+        Ok(())
+    } else {
+        ctx.say_ephemeral(&CommandError::LackingPermission(Permission::Revoke).to_string())
+            .await?;
+        Ok(())
+    }
 }

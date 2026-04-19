@@ -4,12 +4,12 @@ use clap::Parser;
 use dotenvy::dotenv;
 use fsl_interpreter::FslInterpreter;
 use funboy_core::{
-    Funboy, UserId,
+    Funboy, Permission, Permissions, UserId,
+    database::{FunboyDatabase, KeySize, Limit, OrderBy, Platform, SortOrder, SubstituteReceipt},
     format::{
         AsStrs, LIST_STYLE_NONE, ListStyle, ONE_HUNDRED, SeperatedListOptions, TruncateEllipsize,
         format_as_item_seperated_list, format_item_list, parse_bot_args,
     },
-    template_database::{KeySize, Limit, OrderBy, SortOrder, SubstituteReceipt, TemplateDatabase},
 };
 use sqlx::postgres::PgPoolOptions;
 use tokio::sync::Mutex;
@@ -47,7 +47,7 @@ impl FunboyEnv {
     }
 }
 
-pub async fn get_funboy<U: UserId>(env: &FunboyEnv) -> Funboy<U> {
+pub async fn get_funboy<U: UserId>(env: &FunboyEnv, platform: Platform) -> Funboy<U> {
     let pool = Arc::new(
         PgPoolOptions::new()
             .max_connections(15)
@@ -60,17 +60,18 @@ pub async fn get_funboy<U: UserId>(env: &FunboyEnv) -> Funboy<U> {
             .expect("failed to connect to database"),
     );
 
-    TemplateDatabase::migrate(&pool)
+    FunboyDatabase::migrate(&pool)
         .await
         .expect("sqlx migration failed");
 
-    Funboy::new(TemplateDatabase::new(pool))
+    Funboy::new(FunboyDatabase::new(pool), platform)
 }
 
 #[derive(Debug, Clone)]
 pub enum CommandError {
     ExecutionFailed(String),
     LackingPermission(Permission),
+    LackingPermissions(Permissions),
     UnknownCommand(String),
     UnhandledCommand(Command),
 }
@@ -81,6 +82,9 @@ impl ToString for CommandError {
             CommandError::ExecutionFailed(error_text) => error_text.clone(),
             CommandError::LackingPermission(permission) => {
                 format!("User lacks {} permission", permission.to_string())
+            }
+            CommandError::LackingPermissions(permissions) => {
+                format!("User lacks [{}] permissions", permissions.to_string(),)
             }
             CommandError::UnknownCommand(e) => e.clone(),
             CommandError::UnhandledCommand(command) => {
@@ -258,6 +262,18 @@ pub enum Command {
         #[command(subcommand)]
         action: ImageAction,
     },
+    Grant {
+        user: String,
+
+        #[arg(trailing_var_arg = true)]
+        permissions: Vec<Permission>,
+    },
+    Revoke {
+        user: String,
+
+        #[arg(trailing_var_arg = true)]
+        permissions: Vec<Permission>,
+    },
     Exit,
 }
 
@@ -266,67 +282,6 @@ fn parse_substitutes<'a>(input: &'a str, single: bool) -> Result<Vec<&'a str>, C
         return Ok(vec![input]);
     } else {
         parse_bot_args(input).map_err(|e| CommandError::ExecutionFailed(e.to_string()))
-    }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum Permission {
-    FileAccess,
-    Add,
-    Modify,
-    OllamaUsage,
-}
-
-impl ToString for Permission {
-    fn to_string(&self) -> String {
-        match self {
-            Permission::FileAccess => "file access",
-            Permission::Add => "add",
-            Permission::Modify => "modify",
-            Permission::OllamaUsage => "ollama usage",
-        }
-        .to_string()
-    }
-}
-
-pub struct Permissions(Vec<Permission>);
-
-impl Permissions {
-    pub fn all() -> Self {
-        Permissions(vec![
-            Permission::FileAccess,
-            Permission::Add,
-            Permission::Modify,
-            Permission::OllamaUsage,
-        ])
-    }
-
-    pub fn power_user() -> Self {
-        Permissions(vec![
-            Permission::Add,
-            Permission::Modify,
-            Permission::OllamaUsage,
-        ])
-    }
-
-    pub fn user() -> Self {
-        Permissions(vec![Permission::Add, Permission::OllamaUsage])
-    }
-
-    pub fn can_access_files(&self) -> bool {
-        self.0.contains(&Permission::FileAccess)
-    }
-
-    pub fn can_add(&self) -> bool {
-        self.0.contains(&Permission::Add)
-    }
-
-    pub fn can_modify(&self) -> bool {
-        self.0.contains(&Permission::Modify)
-    }
-
-    pub fn can_use_ollama(&self) -> bool {
-        self.0.contains(&Permission::OllamaUsage)
     }
 }
 
@@ -374,7 +329,6 @@ pub async fn interpret_bot_commands<U: UserId>(
     user_id: U,
     funboy: &Funboy<U>,
     interpreter: Arc<Mutex<FslInterpreter>>,
-    permissions: &Permissions,
     context: Context,
     input: &str,
 ) -> Result<CommandResult, CommandError> {
@@ -397,14 +351,7 @@ pub async fn interpret_bot_commands<U: UserId>(
                 input,
                 file,
                 ollama,
-            } => {
-                if file && !permissions.can_access_files() {
-                    return Err(CommandError::LackingPermission(Permission::FileAccess).into());
-                } else if ollama && !permissions.can_use_ollama() {
-                    return Err(CommandError::LackingPermission(Permission::OllamaUsage).into());
-                }
-                generate(funboy, user_id, interpreter, input, file, ollama).await
-            }
+            } => generate(funboy, user_id, interpreter, input, file, ollama).await,
             Command::Context { context } => return Ok(CommandResult::Mode(context)),
             Command::Add { file: true, .. } if context == Context::Matrix => {
                 return Err(CommandError::UnhandledCommand(command));
@@ -415,11 +362,8 @@ pub async fn interpret_bot_commands<U: UserId>(
                 single,
                 file,
             } => {
-                if !permissions.can_add() {
-                    return Err(CommandError::LackingPermission(Permission::Add).into());
-                }
                 let substitutes = substitutes.join(" ");
-                add(funboy, context, template, substitutes, single).await
+                add(funboy, user_id, context, template, substitutes, single).await
             }
             Command::Delete {
                 template,
@@ -427,54 +371,33 @@ pub async fn interpret_bot_commands<U: UserId>(
                 single,
                 id,
             } => {
-                if !permissions.can_modify() {
-                    return Err(CommandError::LackingPermission(Permission::Modify).into());
-                }
                 let substitutes = substitutes.join(" ");
-                delete(funboy, context, template, substitutes, single, id).await
+                delete(funboy, user_id, context, template, substitutes, single, id).await
             }
             Command::List {
                 template,
                 search_term,
                 list_style,
             } => list(funboy, template, search_term, list_style).await,
-            Command::Ollama { action } => {
-                if !permissions.can_use_ollama() {
-                    return Err(CommandError::LackingPermission(Permission::OllamaUsage).into());
-                }
-                ollama(funboy, user_id, action).await
-            }
+            Command::Ollama { action } => ollama(funboy, user_id, action).await,
             Command::Copy {
                 from_template,
                 to_template,
-            } => {
-                if !permissions.can_modify() {
-                    return Err(CommandError::LackingPermission(Permission::Modify).into());
-                }
-                copy(funboy, from_template, to_template).await
-            }
+            } => copy(funboy, user_id, from_template, to_template).await,
             Command::Rename {
                 from_template,
                 to_template,
-            } => {
-                if !permissions.can_modify() {
-                    return Err(CommandError::LackingPermission(Permission::Modify).into());
-                }
-                rename(funboy, from_template, to_template).await
-            }
+            } => rename(funboy, user_id, from_template, to_template).await,
             Command::Replace {
                 template,
                 substitute,
                 with_substitute,
                 id,
-            } => {
-                if !permissions.can_modify() {
-                    return Err(CommandError::LackingPermission(Permission::Modify).into());
-                }
-                replace(funboy, template, substitute, with_substitute, id).await
-            }
+            } => replace(funboy, user_id, template, substitute, with_substitute, id).await,
             Command::Exit => Ok(CommandResult::Exit),
             Command::Image { .. } => Err(CommandError::UnhandledCommand(command)),
+            Command::Grant { .. } => Err(CommandError::UnhandledCommand(command)),
+            Command::Revoke { .. } => Err(CommandError::UnhandledCommand(command)),
         },
         Err(e) => Err(CommandError::UnknownCommand(e.to_string())),
     }
@@ -482,11 +405,17 @@ pub async fn interpret_bot_commands<U: UserId>(
 
 pub async fn replace<U: UserId>(
     funboy: &Funboy<U>,
+    user_id: U,
     template: Option<String>,
     substitute: String,
     with_substitute: String,
     id: bool,
 ) -> Result<CommandResult, CommandError> {
+    let permissions = funboy.users.get_permissions(user_id.clone()).await;
+    if !permissions.can_update() {
+        return Err(CommandError::LackingPermission(Permission::Update).into());
+    }
+
     if id {
         match substitute.parse::<i64>() {
             Ok(id) => {
@@ -551,9 +480,15 @@ pub async fn replace<U: UserId>(
 
 pub async fn rename<U: UserId>(
     funboy: &Funboy<U>,
+    user_id: U,
     from_template: String,
     to_template: String,
 ) -> Result<CommandResult, CommandError> {
+    let permissions = funboy.users.get_permissions(user_id.clone()).await;
+    if !permissions.can_update() {
+        return Err(CommandError::LackingPermission(Permission::Update).into());
+    }
+
     let result = funboy.rename_template(&from_template, &to_template).await;
     match result {
         Ok(receipt) => match receipt {
@@ -579,9 +514,15 @@ pub async fn rename<U: UserId>(
 
 pub async fn copy<U: UserId>(
     funboy: &Funboy<U>,
+    user_id: U,
     from_template: String,
     to_template: String,
 ) -> Result<CommandResult, CommandError> {
+    let permissions = funboy.users.get_permissions(user_id.clone()).await;
+    if !permissions.can_update() {
+        return Err(CommandError::LackingPermission(Permission::Update).into());
+    }
+
     let result = funboy.copy_substitutes(&from_template, &to_template).await;
     match result {
         Ok(_) => {
@@ -601,7 +542,12 @@ async fn ollama<U: UserId>(
     user_id: U,
     action: OllamaAction,
 ) -> Result<CommandResult, CommandError> {
-    let ollama_settings = funboy.get_user_ctx(user_id).await.ollama_settings;
+    let permissions = funboy.users.get_permissions(user_id.clone()).await;
+    if !permissions.can_use_ollama() {
+        return Err(CommandError::LackingPermission(Permission::Ollama).into());
+    }
+
+    let ollama_settings = funboy.users.get_or_insert(user_id).await.ollama_settings;
     match action {
         OllamaAction::List { option } => match option {
             OllamaListOption::Model => {
@@ -785,12 +731,17 @@ fn sub_receipt_to_string(
 
 pub async fn delete<U: UserId>(
     funboy: &Funboy<U>,
+    user_id: U,
     context: Context,
     template: String,
     substitutes: String,
     single: bool,
     id: bool,
 ) -> Result<CommandResult, CommandError> {
+    let permissions = funboy.users.get_permissions(user_id.clone()).await;
+    if !permissions.can_update() {
+        return Err(CommandError::LackingPermission(Permission::Update).into());
+    }
     let substitutes: Vec<&str> = parse_substitutes(&substitutes, single)?;
     if substitutes.len() > 0 {
         let result = if id {
@@ -850,11 +801,16 @@ pub async fn delete<U: UserId>(
 
 pub async fn add<U: UserId>(
     funboy: &Funboy<U>,
+    user_id: U,
     context: Context,
     template: String,
     substitutes: String,
     single: bool,
 ) -> Result<CommandResult, CommandError> {
+    let permissions = funboy.users.get_permissions(user_id.clone()).await;
+    if !permissions.can_create() {
+        return Err(CommandError::LackingPermission(Permission::Create).into());
+    }
     let substitutes: Vec<&str> = parse_substitutes(&substitutes, single)?;
     if substitutes.len() > 0 {
         let result = funboy.add_substitutes(&template, &substitutes).await;
@@ -881,7 +837,10 @@ pub async fn add<U: UserId>(
         let result = funboy.add_substitutes(&template, &vec![]).await;
         match result {
             Ok(_) => {
-                let output = format!("Created {}", template.truncate_with_ellipse(ONE_HUNDRED));
+                let output = format!(
+                    "Created template `{}`",
+                    template.truncate_with_ellipse(ONE_HUNDRED)
+                );
                 return Ok(CommandResult::Text(output));
             }
             Err(e) => {
@@ -899,6 +858,16 @@ async fn generate<U: UserId>(
     file: bool,
     ollama: bool,
 ) -> Result<CommandResult, CommandError> {
+    let permissions = funboy.users.get_permissions(user_id.clone()).await;
+    if !permissions.can_generate() {
+        return Err(CommandError::LackingPermission(Permission::Generate).into());
+    } else if file && !permissions.has_permission(Permission::Owner) {
+        // Must be host because this allows access to server file system
+        return Err(CommandError::LackingPermission(Permission::Owner).into());
+    } else if ollama && !permissions.can_use_ollama() {
+        return Err(CommandError::LackingPermission(Permission::Ollama).into());
+    }
+
     let input = input.join(" ");
     let input = if file {
         let input = match std::fs::read_to_string(input) {

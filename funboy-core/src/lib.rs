@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    fmt::Debug,
+    fmt::{Debug, Display},
     hash::{DefaultHasher, Hash, Hasher},
     str::FromStr,
     sync::{
@@ -11,31 +11,53 @@ use std::{
 };
 
 use async_recursion::async_recursion;
+use clap::ValueEnum;
 use fsl_interpreter::FslInterpreter;
 use moka::future::{Cache, CacheBuilder};
 use ollama_rs::models::ModelInfo;
 use rand::{Rng, distr::uniform::SampleUniform, random_range};
 use regex::Regex;
+use strum_macros::{Display, EnumString};
 use tokio::sync::Mutex;
 
 use crate::{
+    database::{
+        FunboyDatabase, KeySize, Limit, OrderBy, Platform, Substitute, SubstituteReceipt, Template,
+        TemplateReceipt,
+    },
     interpreter::{
         ASK_AI, ASK_AI_RULES, GET_SUB, GET_SUB_RULES, create_ask_ai_command, create_get_sub_command,
     },
     ollama::{OllamaGenerator, OllamaSettings},
-    template_database::{
-        KeySize, Limit, OrderBy, Substitute, SubstituteReceipt, Template, TemplateDatabase,
-        TemplateReceipt,
-    },
     template_substitutor::{TemplateDelimiter, TemplateSubstitutor, VALID_TEMPLATE_CHARS},
 };
 
+pub mod database;
 pub mod format;
 pub mod interpreter;
 pub mod ollama;
 pub mod rate_limiter;
-pub mod template_database;
 pub mod template_substitutor;
+
+#[derive(Debug, Clone)]
+pub enum PermissionError {
+    CannotGrantOwnerPermission,
+    CannotRevokeOwnerPermission,
+    CannotRevokePermissionsFromOwner,
+}
+
+impl ToString for PermissionError {
+    fn to_string(&self) -> String {
+        match self {
+            PermissionError::CannotGrantOwnerPermission => "owner permission cannot be granted",
+            PermissionError::CannotRevokeOwnerPermission => "owner permission cannot be revoked",
+            PermissionError::CannotRevokePermissionsFromOwner => {
+                "permissions cannot be revoked from owner"
+            }
+        }
+        .to_owned()
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum FunboyError {
@@ -44,6 +66,7 @@ pub enum FunboyError {
     Database(String),
     UserInput(String),
     UsageLimit(String),
+    Permission(PermissionError),
 }
 
 impl ToString for FunboyError {
@@ -62,6 +85,7 @@ impl ToString for FunboyError {
                 format!("User input error:\n{}", e)
             }
             FunboyError::UsageLimit(e) => e.clone(),
+            FunboyError::Permission(permission_error) => permission_error.to_string(),
         }
     }
 }
@@ -89,6 +113,7 @@ pub struct UserCtx {
     pub is_generating: Arc<AtomicBool>,
     pub ollama_settings: Arc<Mutex<OllamaSettings>>,
     pub pending_requests: Arc<Mutex<Vec<Request>>>,
+    permissions: Arc<Mutex<Permissions>>,
 }
 
 impl Default for UserCtx {
@@ -97,6 +122,7 @@ impl Default for UserCtx {
             is_generating: Default::default(),
             ollama_settings: Default::default(),
             pending_requests: Default::default(),
+            permissions: Default::default(),
         }
     }
 }
@@ -105,9 +131,18 @@ impl UserCtx {
     pub fn new() -> UserCtx {
         Self {
             is_generating: Arc::new(AtomicBool::new(false)),
-            ollama_settings: Arc::new(Mutex::new(OllamaSettings::default())),
-            pending_requests: Arc::new(Mutex::new(Vec::new())),
+            ..Default::default()
         }
+    }
+
+    pub fn with_permissions(mut self, permissions: Permissions) -> UserCtx {
+        self.permissions = Arc::new(Mutex::new(permissions));
+        self
+    }
+
+    pub fn with_ollama_settings(mut self, settings: OllamaSettings) -> UserCtx {
+        self.ollama_settings = Arc::new(Mutex::new(settings));
+        self
     }
 }
 
@@ -129,54 +164,307 @@ impl Drop for FlagGuard {
     }
 }
 
-pub trait UserId: Eq + Hash + Send + Sync + Clone + 'static {}
+pub trait UserId: Eq + Hash + Send + Sync + Clone + ToString + 'static {}
 
 #[derive(Debug, Clone)]
-pub struct UserMap<U: UserId>(Arc<Mutex<HashMap<U, UserCtx>>>);
+pub struct UserMap<U: UserId> {
+    platform: Platform,
+    db: FunboyDatabase,
+    users: Arc<Mutex<HashMap<U, UserCtx>>>,
+}
 
 impl<U: UserId> UserMap<U> {
-    pub fn new() -> Self {
-        UserMap(Arc::new(Mutex::new(HashMap::new())))
+    pub fn new(platform: Platform, db: FunboyDatabase) -> Self {
+        Self {
+            platform,
+            db,
+            users: Arc::new(Mutex::new(HashMap::new())),
+        }
     }
 
     pub async fn get_or_insert(&self, user_id: U) -> UserCtx {
-        let mut map = self.0.lock().await;
-        let user_ctx = map.entry(user_id).or_insert(UserCtx::default()).clone();
-        drop(map);
-        user_ctx
+        let users = self.users.lock().await;
+        if let Some(user_ctx) = users.get(&user_id) {
+            user_ctx.clone()
+        } else {
+            drop(users);
+
+            let user_ctx = match self
+                .db
+                .create_user(self.platform, user_id.to_string())
+                .await
+            {
+                Ok(user) => match self.db.get_permissions(user.id).await {
+                    Ok(permissions) => UserCtx::new()
+                        .with_permissions(permissions)
+                        .with_ollama_settings(OllamaSettings::default()),
+                    Err(e) => {
+                        eprintln!("{e}");
+                        UserCtx::default()
+                    }
+                },
+                Err(e) => {
+                    eprintln!("{e}");
+                    UserCtx::default()
+                }
+            };
+
+            let mut users = self.users.lock().await;
+            users.entry(user_id).or_insert(user_ctx).clone()
+        }
+    }
+
+    pub async fn grant_all_permissions(&mut self, user_id: U) {
+        let user_ctx = self.get_or_insert(user_id.clone()).await;
+
+        let mut permissions = user_ctx.permissions.lock().await;
+        permissions.0 = Permissions::all().0;
+
+        let result = self
+            .db
+            .overwrite_user_permissions(self.platform, user_id.to_string(), &Permissions::all())
+            .await;
+
+        if let Err(e) = result {
+            eprintln!("{}", e.to_string())
+        }
+    }
+
+    pub async fn grant_permissions(
+        &mut self,
+        user_id: U,
+        permissions: &[Permission],
+    ) -> Result<(), PermissionError> {
+        if permissions.contains(&Permission::Owner) {
+            return Err(PermissionError::CannotGrantOwnerPermission);
+        }
+
+        let user_ctx = self.get_or_insert(user_id.clone()).await;
+
+        let mut current_permissions = user_ctx.permissions.lock().await;
+        for permission in permissions {
+            current_permissions.0.insert(*permission);
+        }
+
+        let result = self
+            .db
+            .overwrite_user_permissions(self.platform, user_id.to_string(), &current_permissions)
+            .await;
+
+        if let Err(e) = result {
+            eprintln!("{}", e.to_string())
+        }
+
+        Ok(())
+    }
+
+    pub async fn revoke_permissions(
+        &mut self,
+        user_id: U,
+        permissions: &[Permission],
+    ) -> Result<(), PermissionError> {
+        if permissions.contains(&Permission::Owner) {
+            return Err(PermissionError::CannotRevokeOwnerPermission);
+        }
+
+        let user_ctx = self.get_or_insert(user_id.clone()).await;
+        let mut current_permissions = user_ctx.permissions.lock().await;
+
+        if current_permissions.is_host() {
+            return Err(PermissionError::CannotRevokePermissionsFromOwner);
+        }
+
+        for permission in permissions {
+            current_permissions.0.remove(permission);
+        }
+
+        let result = self
+            .db
+            .overwrite_user_permissions(self.platform, user_id.to_string(), &current_permissions)
+            .await;
+
+        if let Err(e) = result {
+            eprintln!("{}", e.to_string())
+        }
+
+        Ok(())
+    }
+
+    pub async fn get_permissions(&self, user_id: U) -> Permissions {
+        let user_ctx = self.get_or_insert(user_id.clone()).await;
+        let permissions = user_ctx.permissions.lock().await;
+        permissions.clone()
     }
 }
 
 pub const MAX_TEMPLATE_LENGTH: usize = 255;
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, ValueEnum, Display, EnumString)]
+pub enum Permission {
+    Owner,
+    File,
+    Create,
+    Update,
+    Generate,
+    Ollama,
+    Grant,
+    Revoke,
+}
+
+impl Permission {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Permission::Owner => "owner",
+            Permission::File => "file",
+            Permission::Create => "create",
+            Permission::Update => "update",
+            Permission::Generate => "generate",
+            Permission::Ollama => "ollama",
+            Permission::Grant => "grant",
+            Permission::Revoke => "revoke",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Permissions(HashSet<Permission>);
+
+impl ToString for Permissions {
+    fn to_string(&self) -> String {
+        let mut permissions: Vec<String> = vec![];
+
+        for permission in &self.0 {
+            permissions.push(permission.as_str().to_owned());
+        }
+
+        permissions.join(", ")
+    }
+}
+
+impl Default for Permissions {
+    fn default() -> Self {
+        Permissions::user()
+    }
+}
+
+impl Permissions {
+    pub fn from(permissions: HashSet<Permission>) -> Self {
+        Self(permissions)
+    }
+
+    pub fn all() -> Self {
+        Permissions(HashSet::from([
+            Permission::Owner,
+            Permission::File,
+            Permission::Create,
+            Permission::Update,
+            Permission::Generate,
+            Permission::Ollama,
+            Permission::Grant,
+            Permission::Revoke,
+        ]))
+    }
+
+    pub fn admin() -> Self {
+        Permissions(HashSet::from([
+            Permission::File,
+            Permission::Create,
+            Permission::Update,
+            Permission::Generate,
+            Permission::Ollama,
+            Permission::Grant,
+            Permission::Revoke,
+        ]))
+    }
+
+    pub fn trusted_user() -> Self {
+        Permissions(HashSet::from([
+            Permission::Create,
+            Permission::Update,
+            Permission::Generate,
+            Permission::Ollama,
+        ]))
+    }
+
+    pub fn user() -> Self {
+        Permissions(HashSet::from([Permission::Generate, Permission::Ollama]))
+    }
+
+    pub fn none() -> Self {
+        Permissions(HashSet::new())
+    }
+
+    pub fn can_use_files(&self) -> bool {
+        self.0.contains(&Permission::File)
+    }
+
+    pub fn can_generate(&self) -> bool {
+        self.0.contains(&Permission::Generate)
+    }
+
+    pub fn can_create(&self) -> bool {
+        self.0.contains(&Permission::Create)
+    }
+
+    pub fn can_update(&self) -> bool {
+        self.0.contains(&Permission::Update)
+    }
+
+    pub fn can_use_ollama(&self) -> bool {
+        self.0.contains(&Permission::Ollama)
+    }
+
+    pub fn can_grant(&self) -> bool {
+        self.0.contains(&Permission::Grant)
+    }
+
+    pub fn can_revoke(&self) -> bool {
+        self.0.contains(&Permission::Revoke)
+    }
+
+    pub fn has_permission(&self, permission: Permission) -> bool {
+        self.0.contains(&permission)
+    }
+
+    pub fn is_host(&self) -> bool {
+        self.0.contains(&Permission::Owner)
+    }
+
+    pub fn get_lacking(&self, required_permissions: &[Permission]) -> Permissions {
+        Permissions::from(
+            required_permissions
+                .iter()
+                .filter(|p| !self.0.contains(p))
+                .map(|p| p.to_owned())
+                .collect(),
+        )
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Funboy<U: UserId> {
-    template_db: TemplateDatabase,
+    funboy_db: FunboyDatabase,
     ollama_model: Arc<Mutex<Option<String>>>,
     ollama_generator: OllamaGenerator,
     valid_template_regex: Regex,
-    user_map: UserMap<U>,
+    pub users: UserMap<U>,
     random_sub_cache: Arc<Cache<String, Vec<Substitute>>>,
 }
 
 impl<U: UserId> Funboy<U> {
-    pub fn new(template_db: TemplateDatabase) -> Self {
+    pub fn new(funboy_db: FunboyDatabase, platform: Platform) -> Self {
         Self {
-            template_db,
+            funboy_db: funboy_db.clone(),
             ollama_generator: OllamaGenerator::default(),
             ollama_model: Arc::new(Mutex::new(None)),
             valid_template_regex: Regex::new(&format!("^[{}]+$", VALID_TEMPLATE_CHARS)).unwrap(),
-            user_map: UserMap::new(),
+            users: UserMap::new(platform, funboy_db),
             random_sub_cache: Arc::new(
                 CacheBuilder::new(20)
                     .time_to_live(Duration::from_secs(60))
                     .build(),
             ),
         }
-    }
-
-    pub async fn get_user_ctx(&self, user_id: U) -> UserCtx {
-        self.user_map.get_or_insert(user_id).await
     }
 
     pub async fn get_ollama_model(&self) -> Option<String> {
@@ -220,7 +508,7 @@ impl<U: UserId> Funboy<U> {
     ) -> Result<SubstituteReceipt, FunboyError> {
         self.validate_template_name(template)?;
 
-        let receipt = self.template_db.create_substitutes(template, substitutes);
+        let receipt = self.funboy_db.create_substitutes(template, substitutes);
         let receipt = receipt.await?;
         self.random_sub_cache.invalidate(template).await;
         Ok(receipt)
@@ -234,7 +522,7 @@ impl<U: UserId> Funboy<U> {
         self.validate_template_name(template)?;
 
         let receipt = self
-            .template_db
+            .funboy_db
             .delete_substitutes_by_name(template, substitutes);
         let receipt = receipt.await?;
         self.random_sub_cache.invalidate(template).await;
@@ -245,10 +533,10 @@ impl<U: UserId> Funboy<U> {
         &self,
         ids: &[KeySize],
     ) -> Result<SubstituteReceipt, FunboyError> {
-        let receipt = self.template_db.delete_substitutes_by_id(ids);
+        let receipt = self.funboy_db.delete_substitutes_by_id(ids);
         let receipt = receipt.await?;
         for sub in &receipt.updated {
-            let template = self.template_db.read_template_by_id(sub.template_id);
+            let template = self.funboy_db.read_template_by_id(sub.template_id);
             let template = template.await?.expect("sub must be inside template");
             self.random_sub_cache.invalidate(&template.name).await;
         }
@@ -264,7 +552,7 @@ impl<U: UserId> Funboy<U> {
         self.validate_template_name(to_template)?;
 
         let subs = self
-            .template_db
+            .funboy_db
             .copy_substitutes_from_template_to_template(from_template, to_template);
         let subs = subs.await?;
         self.random_sub_cache.invalidate(to_template).await;
@@ -279,9 +567,7 @@ impl<U: UserId> Funboy<U> {
     ) -> Result<Option<Substitute>, FunboyError> {
         self.validate_template_name(template)?;
 
-        let sub = self
-            .template_db
-            .update_substitute_by_name(template, old, new);
+        let sub = self.funboy_db.update_substitute_by_name(template, old, new);
         let sub = sub.await?;
         self.random_sub_cache.invalidate(template).await;
         Ok(sub)
@@ -292,10 +578,10 @@ impl<U: UserId> Funboy<U> {
         id: KeySize,
         new: &str,
     ) -> Result<Option<Substitute>, FunboyError> {
-        let sub = self.template_db.update_substitute_by_id(id, new);
+        let sub = self.funboy_db.update_substitute_by_id(id, new);
         let sub = sub.await?;
         if let Some(sub) = sub.as_ref() {
-            let template = self.template_db.read_template_by_id(sub.template_id);
+            let template = self.funboy_db.read_template_by_id(sub.template_id);
             let template = template.await?.expect("sub must be inside template");
             self.random_sub_cache.invalidate(&template.name).await;
         }
@@ -305,7 +591,7 @@ impl<U: UserId> Funboy<U> {
     pub async fn delete_template(&self, template: &str) -> Result<Option<Template>, FunboyError> {
         self.validate_template_name(template)?;
 
-        let template = self.template_db.delete_template_by_name(template);
+        let template = self.funboy_db.delete_template_by_name(template);
         let template = template.await?;
         self.random_sub_cache.invalidate_all();
         Ok(template)
@@ -319,7 +605,7 @@ impl<U: UserId> Funboy<U> {
             self.validate_template_name(template)?;
         }
 
-        let receipt = self.template_db.delete_templates_by_name(templates);
+        let receipt = self.funboy_db.delete_templates_by_name(templates);
         let receipt = receipt.await?;
         self.random_sub_cache.invalidate_all();
         Ok(receipt)
@@ -333,7 +619,7 @@ impl<U: UserId> Funboy<U> {
         self.validate_template_name(from)?;
         self.validate_template_name(to)?;
 
-        let template = self.template_db.update_template_by_name(from, to);
+        let template = self.funboy_db.update_template_by_name(from, to);
         let template = template.await?;
         self.random_sub_cache.invalidate_all();
         Ok(template)
@@ -345,7 +631,7 @@ impl<U: UserId> Funboy<U> {
         order: OrderBy,
         limit: Limit,
     ) -> Result<Vec<Template>, FunboyError> {
-        let templates = self.template_db.read_templates(search_term, order, limit);
+        let templates = self.funboy_db.read_templates(search_term, order, limit);
         let templates = templates.await?;
         Ok(templates)
     }
@@ -359,7 +645,7 @@ impl<U: UserId> Funboy<U> {
     ) -> Result<Vec<Substitute>, FunboyError> {
         self.validate_template_name(template)?;
         let subs =
-            self.template_db
+            self.funboy_db
                 .read_substitutes_from_template(template, search_term, order, limit);
         let subs = subs.await?;
         Ok(subs)
@@ -565,7 +851,7 @@ impl<U: UserId> Funboy<U> {
         input: &str,
         interpreter: Arc<Mutex<FslInterpreter>>,
     ) -> Result<String, FunboyError> {
-        let user_ctx = self.user_map.get_or_insert(user_id).await;
+        let user_ctx = self.users.get_or_insert(user_id).await;
         let Some(_guard) = FlagGuard::new(user_ctx.is_generating.clone()) else {
             return Err(FunboyError::UsageLimit(
                 "You're already generating something, please wait until it's finished.".to_string(),
@@ -582,7 +868,7 @@ impl<U: UserId> Funboy<U> {
         prompt: &str,
         interpreter: Arc<Mutex<FslInterpreter>>,
     ) -> Result<OllamaResponse, FunboyError> {
-        let user_ctx = self.user_map.get_or_insert(user_id).await;
+        let user_ctx = self.users.get_or_insert(user_id).await;
         let Some(_guard) = FlagGuard::new(user_ctx.is_generating.clone()) else {
             return Err(FunboyError::UsageLimit(
                 "You're already generating something, please wait until it's finished.".to_string(),
@@ -661,9 +947,9 @@ pub fn random_entry<'b>(list: &[&'b str]) -> Result<&'b str, FunboyError> {
 #[cfg(test)]
 mod core {
     use super::*;
+    use database::test::create_debug_db;
     use sqlx::PgPool;
     use std::panic;
-    use template_database::test::create_debug_db;
 
     #[tokio::test]
     async fn random_number_produces_int_in_range() {
@@ -742,16 +1028,14 @@ mod core {
     }
 
     async fn get_pool() -> PgPool {
-        PgPool::connect(template_database::DEBUG_DB_URL)
-            .await
-            .unwrap()
+        PgPool::connect(database::DEBUG_DB_URL).await.unwrap()
     }
 
     impl UserId for u64 {}
 
     async fn get_funboy(pool: PgPool) -> Funboy<u64> {
         let db = create_debug_db(pool).await.unwrap();
-        Funboy::new(db)
+        Funboy::new(db, Platform::Cli)
     }
 
     #[tokio::test]
