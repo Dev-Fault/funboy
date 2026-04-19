@@ -1,6 +1,6 @@
 use std::{str::FromStr, sync::Arc, time::Duration};
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use dotenvy::dotenv;
 use fsl_interpreter::FslInterpreter;
 use funboy_core::{
@@ -9,8 +9,85 @@ use funboy_core::{
     database::{FunboyDatabase, Platform},
     format::{LIST_STYLE_NONE, ListStyle},
 };
+use rustyline::DefaultEditor;
 use sqlx::postgres::PgPoolOptions;
 use tokio::sync::Mutex;
+
+use crate::interpreter::create_interpreter;
+
+pub mod interpreter;
+
+pub async fn enter_interactive_generation(
+    funboy: Arc<Funboy<Id>>,
+    rl: Arc<Mutex<DefaultEditor>>,
+) -> rustyline::Result<()> {
+    let interpreter = create_interpreter(funboy.clone(), rl.clone()).await;
+    loop {
+        let mut rl = rl.lock().await;
+        let readline = rl.readline("G> ");
+        match readline {
+            Ok(input) => {
+                rl.add_history_entry(&input)?;
+                drop(rl);
+                match funboy.generate(&input, interpreter.clone()).await {
+                    Ok(output) => println!("{}", output),
+                    Err(e) => {
+                        eprint!("{:?}", e);
+                    }
+                };
+            }
+            Err(e) => {
+                eprintln!("{:?}", e);
+                drop(rl);
+                break;
+            }
+        }
+    }
+    Ok(())
+}
+
+pub async fn enter_interpreter(
+    funboy: Arc<Funboy<Id>>,
+    rl: Arc<Mutex<DefaultEditor>>,
+) -> rustyline::Result<()> {
+    let interpreter = create_interpreter(funboy, rl.clone()).await;
+    loop {
+        let mut rl = rl.lock().await;
+        let readline = rl.readline("I> ");
+
+        match readline {
+            Ok(input) => {
+                rl.add_history_entry(&input)?;
+                drop(rl);
+                let interpreter_lock = interpreter.lock().await;
+                let result = interpreter_lock.interpret(&input).await;
+                drop(interpreter_lock);
+                match result {
+                    Ok(output) => println!("{}", output),
+                    Err(e) => {
+                        eprintln!("{:?}", e)
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("{:?}", e);
+                drop(rl);
+                break;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct Id(pub u64);
+impl UserId for Id {}
+
+impl ToString for Id {
+    fn to_string(&self) -> String {
+        self.0.to_string()
+    }
+}
 
 pub struct FunboyEnv {
     pub debug_mode: bool,
@@ -68,7 +145,7 @@ pub async fn get_funboy<U: UserId>(env: &FunboyEnv, platform: Platform) -> Funbo
 const GENERATE: &str = "generate";
 const FSL: &str = "fsl";
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, ValueEnum)]
 pub enum Mode {
     Generate,
     FSL,
@@ -158,39 +235,6 @@ pub enum Command {
         mode: Mode,
     },
     Exit,
-}
-
-#[derive(Clone)]
-pub struct FslContext<U: UserId> {
-    pub funboy: Arc<Funboy<U>>,
-    pub interpreter: Arc<Mutex<FslInterpreter>>,
-}
-
-impl<U: UserId> FslContext<U> {
-    pub fn new(funboy: Arc<Funboy<U>>) -> Self {
-        Self {
-            funboy: funboy,
-            interpreter: Arc::new(Mutex::new(FslInterpreter::new())),
-        }
-    }
-
-    pub async fn generate_message(
-        &self,
-        message: &str,
-    ) -> Result<String, fsl_interpreter::types::command::CommandError> {
-        match self
-            .funboy
-            .generate(&message, self.interpreter.clone())
-            .await
-        {
-            Ok(gen_msg) => Ok(gen_msg),
-            Err(e) => {
-                return Err(fsl_interpreter::types::command::CommandError::Custom(
-                    e.to_string(),
-                ));
-            }
-        }
-    }
 }
 
 pub enum CliCommandResult {

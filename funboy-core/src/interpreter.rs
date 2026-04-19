@@ -18,48 +18,51 @@ use crate::{
     template_substitutor::TemplateDelimiter,
 };
 
-pub trait CommunicationChannel: Clone + Sync + Send + 'static {
+pub trait Messenger: Clone + Sync + Send + 'static {
     fn say(&self, message: &str);
-    fn say_to_user(
-        &self,
-        user_name: &str,
-        message: &str,
-    ) -> impl std::future::Future<Output = Result<(), CommandError>> + Send;
     fn await_response(
         &self,
-        timeout: f64,
-    ) -> impl std::future::Future<Output = Result<String, CommandError>> + Send;
-    fn await_user_response(
-        &self,
-        user_name: &str,
         timeout: f64,
     ) -> impl std::future::Future<Output = Result<String, CommandError>> + Send;
     fn mention(&self) -> String;
 }
 
+pub trait Interactor: Clone + Sync + Send + 'static {
+    fn say_to_user(
+        &self,
+        user_name: &str,
+        message: &str,
+    ) -> impl std::future::Future<Output = Result<(), CommandError>> + Send;
+    fn await_user_response(
+        &self,
+        user_name: &str,
+        timeout: f64,
+    ) -> impl std::future::Future<Output = Result<String, CommandError>> + Send;
+}
+
 #[derive(Clone)]
-pub struct InterpreterContext<U: UserId, C: CommunicationChannel> {
+pub struct InterpreterContext<U: UserId, M: Messenger> {
     pub user_id: U,
     pub funboy: Arc<Funboy<U>>,
     pub rate_limit: Arc<Mutex<RateLimit<U>>>,
     pub messages_sent: Arc<Mutex<u16>>,
-    pub communication_channel: C,
+    pub messenger: M,
     interpreter: Arc<Mutex<FslInterpreter>>,
 }
 
-impl<U: UserId, C: CommunicationChannel> InterpreterContext<U, C> {
+impl<U: UserId, M: Messenger> InterpreterContext<U, M> {
     pub fn new(
         user_id: U,
         funboy: Arc<Funboy<U>>,
         rate_limit: Arc<Mutex<RateLimit<U>>>,
-        communication_channel: C,
+        messenger: M,
     ) -> Self {
         Self {
             user_id: user_id,
             funboy: funboy,
             rate_limit: rate_limit,
             messages_sent: Arc::new(Mutex::new(0)),
-            communication_channel: communication_channel,
+            messenger,
             interpreter: Arc::new(Mutex::new(FslInterpreter::new())),
         }
     }
@@ -79,8 +82,8 @@ impl<U: UserId, C: CommunicationChannel> InterpreterContext<U, C> {
 }
 
 const MAX_MESSAGES: u16 = 2000;
-async fn check_limits<U: UserId, C: CommunicationChannel>(
-    ictx: InterpreterContext<U, C>,
+async fn check_limits<U: UserId, M: Messenger>(
+    ictx: InterpreterContext<U, M>,
 ) -> Result<(), CommandError> {
     let mut rate_limit = ictx.rate_limit.lock().await;
     let mut call_count = ictx.messages_sent.lock().await;
@@ -105,9 +108,7 @@ pub const SAY: &str = "say";
 pub const SAY_RULES: &'static [ArgRule] = &[ArgRule::new(ArgPos::Index(0), TEXT_TYPES)];
 pub const SAY_DELAY_MS: u64 = 500;
 pub const SAY_MAX_OUTPUT_LENGTH: usize = 8000;
-pub fn create_say_command<U: UserId, C: CommunicationChannel>(
-    ictx: InterpreterContext<U, C>,
-) -> Executor {
+pub fn create_say_command<U: UserId, M: Messenger>(ictx: InterpreterContext<U, M>) -> Executor {
     let say_command = {
         let ictx = ictx.clone();
         move |command: Command, interpreter_data| {
@@ -125,7 +126,7 @@ pub fn create_say_command<U: UserId, C: CommunicationChannel>(
                 if message.len() < SAY_MAX_OUTPUT_LENGTH {
                     for m in split_message(&message, TWO_THOUSAND) {
                         check_limits(ictx.clone()).await?;
-                        ictx.communication_channel.say(m);
+                        ictx.messenger.say(m);
                     }
 
                     sleep(Duration::from_millis(SAY_DELAY_MS)).await;
@@ -147,8 +148,8 @@ pub const SAY_TO_RULES: &'static [ArgRule] = &[
     ArgRule::new(ArgPos::Index(0), TEXT_TYPES),
     ArgRule::new(ArgPos::Index(1), TEXT_TYPES),
 ];
-pub fn create_say_to_command<U: UserId, C: CommunicationChannel>(
-    ictx: InterpreterContext<U, C>,
+pub fn create_say_to_command<U: UserId, M: Messenger + Interactor>(
+    ictx: InterpreterContext<U, M>,
 ) -> Executor {
     let say_command = {
         let ictx = ictx.clone();
@@ -170,9 +171,7 @@ pub fn create_say_to_command<U: UserId, C: CommunicationChannel>(
                     .await?;
 
                 let message = ictx.generate_message(&message).await?;
-                ictx.communication_channel
-                    .say_to_user(&user_name, &message)
-                    .await?;
+                ictx.messenger.say_to_user(&user_name, &message).await?;
 
                 sleep(Duration::from_millis(SAY_DELAY_MS)).await;
                 Ok(Value::None)
@@ -190,9 +189,7 @@ pub const ASK_RULES: &'static [ArgRule] = &[
 ];
 const MAX_TIMEOUT_SECS: f64 = 60.0 * 60.0;
 
-pub fn create_ask_command<U: UserId, C: CommunicationChannel>(
-    ictx: InterpreterContext<U, C>,
-) -> Executor {
+pub fn create_ask_command<U: UserId, M: Messenger>(ictx: InterpreterContext<U, M>) -> Executor {
     let ask_command = {
         move |command: Command, data: Arc<InterpreterData>| {
             let ictx = ictx.clone();
@@ -206,13 +203,13 @@ pub fn create_ask_command<U: UserId, C: CommunicationChannel>(
                     .pop_front()
                     .unwrap_or(Value::Float(DEFAULT_TIMEOUT_SECS));
 
-                let question = format!("{}\n\n{}", ictx.communication_channel.mention(), question);
+                let question = format!("{}\n\n{}", ictx.messenger.mention(), question);
                 let question = format!("{}\n\n{}", question, "(enter -STOP- to quit)");
                 let question = ictx.generate_message(&question).await?;
 
                 if question.len() < SAY_MAX_OUTPUT_LENGTH {
                     for m in split_message(&question, TWO_THOUSAND) {
-                        ictx.communication_channel.say(&m);
+                        ictx.messenger.say(&m);
                         sleep(Duration::from_millis(SAY_DELAY_MS)).await;
                     }
                 } else {
@@ -225,7 +222,7 @@ pub fn create_ask_command<U: UserId, C: CommunicationChannel>(
                 let timeout = timeout.as_float(data.clone()).await?;
                 validate_time_out(timeout, MAX_TIMEOUT_SECS)?;
 
-                let response = ictx.communication_channel.await_response(timeout).await?;
+                let response = ictx.messenger.await_response(timeout).await?;
                 let response = ictx.generate_message(&response).await?;
 
                 Ok(Value::Text(response))
@@ -242,8 +239,8 @@ pub const ASK_TO_RULES: &'static [ArgRule] = &[
     ArgRule::new(ArgPos::OptionalIndex(2), NUMERIC_TYPES),
 ];
 
-pub fn create_ask_to_command<U: UserId, C: CommunicationChannel>(
-    ictx: InterpreterContext<U, C>,
+pub fn create_ask_to_command<U: UserId, M: Messenger + Interactor>(
+    ictx: InterpreterContext<U, M>,
 ) -> Executor {
     let ask_command = {
         move |command: Command, data: Arc<InterpreterData>| {
@@ -266,12 +263,12 @@ pub fn create_ask_to_command<U: UserId, C: CommunicationChannel>(
                 let timeout = timeout.as_float(data.clone()).await?;
                 validate_time_out(timeout, MAX_TIMEOUT_SECS)?;
 
-                ictx.communication_channel
+                ictx.messenger
                     .say_to_user(&user_name, &ictx.generate_message(&question).await?)
                     .await?;
 
                 let response = ictx
-                    .communication_channel
+                    .messenger
                     .await_user_response(&user_name, timeout)
                     .await?;
                 let response = ictx.generate_message(&response).await?;

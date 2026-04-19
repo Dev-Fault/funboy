@@ -4,7 +4,7 @@ use fsl_interpreter::{FslInterpreter, types::command::CommandError};
 use funboy_core::{
     Funboy,
     interpreter::{
-        ASK, ASK_RULES, ASK_TO, ASK_TO_RULES, CommunicationChannel, InterpreterContext, SAY,
+        ASK, ASK_RULES, ASK_TO, ASK_TO_RULES, Interactor, InterpreterContext, Messenger, SAY,
         SAY_RULES, SAY_TO, SAY_TO_RULES,
     },
     rate_limiter::RateLimit,
@@ -80,7 +80,7 @@ impl MatrixCtx {
     }
 }
 
-impl CommunicationChannel for MatrixCtx {
+impl Messenger for MatrixCtx {
     fn say(&self, message: &str) {
         let room = self.room.clone();
         let message = message.to_owned();
@@ -90,6 +90,22 @@ impl CommunicationChannel for MatrixCtx {
         });
     }
 
+    fn mention(&self) -> String {
+        self.sender.user_id.to_string()
+    }
+
+    fn await_response(
+        &self,
+        timeout: f64,
+    ) -> impl std::future::Future<Output = Result<String, CommandError>> + Send {
+        async move {
+            self.await_response_from_user(self.sender.clone(), timeout)
+                .await
+        }
+    }
+}
+
+impl Interactor for MatrixCtx {
     fn say_to_user(
         &self,
         user_name: &str,
@@ -108,20 +124,6 @@ impl CommunicationChannel for MatrixCtx {
             }
 
             Ok(())
-        }
-    }
-
-    fn mention(&self) -> String {
-        self.sender.user_id.to_string()
-    }
-
-    fn await_response(
-        &self,
-        timeout: f64,
-    ) -> impl std::future::Future<Output = Result<String, CommandError>> + Send {
-        async move {
-            self.await_response_from_user(self.sender.clone(), timeout)
-                .await
         }
     }
 

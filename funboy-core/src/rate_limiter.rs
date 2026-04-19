@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     time::{Duration, SystemTime},
+    usize,
 };
 
 use crate::UserId;
@@ -60,6 +61,16 @@ impl<U: UserId> RateLimit<U> {
         }
     }
 
+    pub fn none() -> Self {
+        Self {
+            users: HashMap::new(),
+            uses_per_interval: usize::MAX,
+            interval: u64::MAX,
+            limits_before_timeout: u16::MAX,
+            timeout: 0,
+        }
+    }
+
     pub fn with_timeout(mut self, timeout: u64, limits_before_timeout: u16) -> Self {
         self.timeout = timeout;
         self.limits_before_timeout = limits_before_timeout;
@@ -68,7 +79,9 @@ impl<U: UserId> RateLimit<U> {
 
     pub fn check(&mut self, user_id: U) -> RateLimitResult {
         let now = SystemTime::now();
-        let usage_window = now - Duration::from_secs(self.interval);
+        let usage_window = now
+            .checked_sub(Duration::from_secs(self.interval))
+            .unwrap_or(SystemTime::UNIX_EPOCH);
 
         let uses = self.users.entry(user_id).or_insert_with(Uses::new);
 

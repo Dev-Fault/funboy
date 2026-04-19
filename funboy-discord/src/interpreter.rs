@@ -4,7 +4,7 @@ use fsl_interpreter::{FslInterpreter, types::command::CommandError};
 use funboy_core::{
     format::{TWO_THOUSAND, split_message},
     interpreter::{
-        ASK, ASK_RULES, ASK_TO, ASK_TO_RULES, CommunicationChannel, InterpreterContext, SAY,
+        ASK, ASK_RULES, ASK_TO, ASK_TO_RULES, Interactor, InterpreterContext, Messenger, SAY,
         SAY_RULES, SAY_TO, SAY_TO_RULES,
     },
 };
@@ -26,7 +26,7 @@ pub struct DiscordContext {
     pub author_id: UserId,
 }
 
-impl CommunicationChannel for DiscordContext {
+impl Messenger for DiscordContext {
     fn say(&self, message: &str) {
         let channel_id = self.channel_id.clone();
         let http = self.http.clone();
@@ -36,6 +36,39 @@ impl CommunicationChannel for DiscordContext {
         });
     }
 
+    fn mention(&self) -> String {
+        self.author_id.mention().to_string()
+    }
+
+    fn await_response(
+        &self,
+        timeout: f64,
+    ) -> impl std::future::Future<Output = Result<String, CommandError>> + Send {
+        async move {
+            let mut collector = self
+                .channel_id
+                .await_reply(self.shard.clone())
+                .timeout(Duration::from_secs_f64(timeout))
+                .channel_id(self.channel_id)
+                .author_id(self.author_id)
+                .stream();
+
+            if let Some(msg) = collector.next().await {
+                if msg.content == "-STOP-" {
+                    Err(CommandError::Custom("User quit the program".into()))
+                } else {
+                    Ok(msg.content)
+                }
+            } else {
+                Err(CommandError::Custom(format!(
+                    "Didn't receive a message before timeout ended"
+                )))
+            }
+        }
+    }
+}
+
+impl Interactor for DiscordContext {
     async fn say_to_user(&self, user_name: &str, message: &str) -> Result<(), CommandError> {
         let members = if let Some(guild_id) = self.guild_id {
             if let Ok(members) = guild_id.members(self.http.clone(), None, None).await {
@@ -83,37 +116,6 @@ impl CommunicationChannel for DiscordContext {
             )));
         }
         Ok(())
-    }
-
-    fn mention(&self) -> String {
-        self.author_id.mention().to_string()
-    }
-
-    fn await_response(
-        &self,
-        timeout: f64,
-    ) -> impl std::future::Future<Output = Result<String, CommandError>> + Send {
-        async move {
-            let mut collector = self
-                .channel_id
-                .await_reply(self.shard.clone())
-                .timeout(Duration::from_secs_f64(timeout))
-                .channel_id(self.channel_id)
-                .author_id(self.author_id)
-                .stream();
-
-            if let Some(msg) = collector.next().await {
-                if msg.content == "-STOP-" {
-                    Err(CommandError::Custom("User quit the program".into()))
-                } else {
-                    Ok(msg.content)
-                }
-            } else {
-                Err(CommandError::Custom(format!(
-                    "Didn't receive a message before timeout ended"
-                )))
-            }
-        }
     }
 
     fn await_user_response(
