@@ -58,13 +58,7 @@ impl MatrixCtx {
 
         match timeout_at(Instant::now() + Duration::from_secs_f64(timeout), rx).await {
             Ok(Ok(response)) => {
-                if response == "-STOP-" {
-                    return Err(fsl_interpreter::types::command::CommandError::Custom(
-                        format!("{}", "user quit the program"),
-                    ));
-                } else {
-                    return Ok(response);
-                }
+                return Ok(response);
             }
             Ok(Err(e)) => {
                 return Err(fsl_interpreter::types::command::CommandError::Custom(

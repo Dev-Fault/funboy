@@ -188,6 +188,7 @@ pub const ASK_RULES: &'static [ArgRule] = &[
     ArgRule::new(ArgPos::OptionalIndex(1), NUMERIC_TYPES),
 ];
 const MAX_TIMEOUT_SECS: f64 = 60.0 * 60.0;
+const STOP: &str = "-STOP-";
 
 pub fn create_ask_command<U: UserId, M: Messenger>(ictx: InterpreterContext<U, M>) -> Executor {
     let ask_command = {
@@ -223,6 +224,9 @@ pub fn create_ask_command<U: UserId, M: Messenger>(ictx: InterpreterContext<U, M
                 validate_time_out(timeout, MAX_TIMEOUT_SECS)?;
 
                 let response = ictx.messenger.await_response(timeout).await?;
+                if response == STOP {
+                    return Err(CommandError::ProgramExited);
+                }
                 let response = ictx.generate_message(&response).await?;
 
                 Ok(Value::Text(response))
@@ -271,6 +275,9 @@ pub fn create_ask_to_command<U: UserId, M: Messenger + Interactor>(
                     .messenger
                     .await_user_response(&user_name, timeout)
                     .await?;
+                if response == STOP {
+                    return Err(CommandError::ProgramExited);
+                }
                 let response = ictx.generate_message(&response).await?;
 
                 Ok(Value::Text(response))

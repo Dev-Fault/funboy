@@ -54,11 +54,7 @@ impl Messenger for DiscordContext {
                 .stream();
 
             if let Some(msg) = collector.next().await {
-                if msg.content == "-STOP-" {
-                    Err(CommandError::Custom("User quit the program".into()))
-                } else {
-                    Ok(msg.content)
-                }
+                Ok(msg.content)
             } else {
                 Err(CommandError::Custom(format!(
                     "Didn't receive a message before timeout ended"
@@ -141,11 +137,7 @@ impl Interactor for DiscordContext {
             };
 
             if let Some(msg) = collector.next().await {
-                if msg.content == "-STOP-" {
-                    Err(CommandError::Custom("User quit the program".into()))
-                } else {
-                    Ok(msg.content)
-                }
+                Ok(msg.content)
             } else {
                 Err(CommandError::Custom(format!(
                     "Didn't receive a message before timeout ended"

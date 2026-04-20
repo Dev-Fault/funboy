@@ -39,15 +39,7 @@ impl Messenger for CliContext {
             let result = rl.readline("A> ");
 
             match result {
-                Ok(output) => {
-                    if output == "-STOP-" {
-                        Err(fsl_interpreter::types::command::CommandError::Custom(
-                            format!("{}", "user quit the program"),
-                        ))
-                    } else {
-                        Ok(output)
-                    }
-                }
+                Ok(output) => Ok(output),
                 Err(e) => {
                     return Err(fsl_interpreter::types::command::CommandError::Custom(
                         format!("{:?}", e),
