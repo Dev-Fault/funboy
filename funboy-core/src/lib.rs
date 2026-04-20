@@ -190,28 +190,66 @@ impl<U: UserId> UserMap<U> {
         } else {
             drop(users);
 
-            let user_ctx = match self
+            let user = match self
                 .db
                 .create_user(self.platform, user_id.to_string())
                 .await
             {
-                Ok(user) => match self.db.get_permissions(user.id).await {
-                    Ok(permissions) => UserCtx::new()
-                        .with_permissions(permissions)
-                        .with_ollama_settings(OllamaSettings::default()),
-                    Err(e) => {
-                        eprintln!("{e}");
-                        UserCtx::default()
-                    }
-                },
+                Ok(user) => user,
                 Err(e) => {
                     eprintln!("{e}");
-                    UserCtx::default()
+                    return UserCtx::default();
                 }
             };
 
+            let permissions = match self.db.get_permissions(user.id).await {
+                Ok(permissions) => permissions,
+                Err(e) => {
+                    eprintln!("{e}");
+                    return UserCtx::default();
+                }
+            };
+
+            let ollama_settings = match self.db.get_ollama_settings(user.id).await {
+                Ok(ollama_settings) => ollama_settings,
+                Err(e) => {
+                    eprintln!("{e}");
+                    return UserCtx::default();
+                }
+            };
+
+            let user_ctx = UserCtx::default()
+                .with_permissions(permissions)
+                .with_ollama_settings(ollama_settings);
+
             let mut users = self.users.lock().await;
             users.entry(user_id).or_insert(user_ctx).clone()
+        }
+    }
+
+    pub async fn update_ollama_settings(
+        &self,
+        user_id: U,
+        platform: Platform,
+        settings: OllamaSettings,
+    ) {
+        let user_ctx = self.get_or_insert(user_id.clone()).await;
+        let mut ollama_settings = user_ctx.ollama_settings.lock().await;
+        *ollama_settings = settings;
+
+        match self.db.get_user_id(&user_id.to_string(), platform).await {
+            Ok(user_id) => {
+                let result = self
+                    .db
+                    .update_ollama_settings(user_id, ollama_settings.clone())
+                    .await;
+                if let Err(e) = result {
+                    eprintln!("{}", e.to_string())
+                }
+            }
+            Err(e) => {
+                eprintln!("{}", e.to_string())
+            }
         }
     }
 
@@ -223,7 +261,7 @@ impl<U: UserId> UserMap<U> {
 
         let result = self
             .db
-            .overwrite_user_permissions(self.platform, user_id.to_string(), &Permissions::all())
+            .update_permissions(self.platform, user_id.to_string(), &Permissions::all())
             .await;
 
         if let Err(e) = result {
@@ -249,7 +287,7 @@ impl<U: UserId> UserMap<U> {
 
         let result = self
             .db
-            .overwrite_user_permissions(self.platform, user_id.to_string(), &current_permissions)
+            .update_permissions(self.platform, user_id.to_string(), &current_permissions)
             .await;
 
         if let Err(e) = result {
@@ -281,7 +319,7 @@ impl<U: UserId> UserMap<U> {
 
         let result = self
             .db
-            .overwrite_user_permissions(self.platform, user_id.to_string(), &current_permissions)
+            .update_permissions(self.platform, user_id.to_string(), &current_permissions)
             .await;
 
         if let Err(e) = result {

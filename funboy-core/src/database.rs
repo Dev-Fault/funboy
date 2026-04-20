@@ -4,6 +4,7 @@ use sqlx::{Error, FromRow, PgPool, Pool, Postgres, Transaction};
 
 use crate::{
     Permission, Permissions,
+    ollama::OllamaSettings,
     template_substitutor::{TemplateDelimiter, TemplateSubstitutor},
 };
 pub const DEBUG_DB_URL: &str = "postgres://funboy:funboy@localhost/funboy_db";
@@ -208,6 +209,18 @@ pub struct PermissionRow {
     pub permission: String,
 }
 
+#[derive(Debug, FromRow, Clone)]
+pub struct OllamaSettingsRow {
+    pub user_id: KeySize,
+    pub system_prompt: Option<String>,
+    pub template: Option<String>,
+    pub output_limit: i16,
+    pub temperature: Option<f32>,
+    pub repeat_penalty: Option<f32>,
+    pub top_k: Option<i32>,
+    pub top_p: Option<f32>,
+}
+
 #[derive(Debug, Clone, Copy, strum_macros::Display, PartialEq, Eq, Hash)]
 pub enum Platform {
     Matrix,
@@ -273,7 +286,74 @@ impl FunboyDatabase {
         Ok(Permissions(permissions))
     }
 
-    pub async fn overwrite_user_permissions(
+    pub async fn get_ollama_settings(&self, user_id: KeySize) -> Result<OllamaSettings, Error> {
+        const QUERY: &str = "
+          SELECT * FROM user_ollama_settings WHERE user_id = $1  
+        ";
+
+        let settings = sqlx::query_as::<_, OllamaSettingsRow>(QUERY)
+            .bind(user_id)
+            .fetch_optional(self.pool.as_ref())
+            .await?;
+
+        if let Some(settings) = settings {
+            Ok(OllamaSettings::from(settings))
+        } else {
+            Ok(OllamaSettings::default())
+        }
+    }
+
+    pub async fn get_user_id(
+        &self,
+        platform_user_id: &str,
+        platform: Platform,
+    ) -> Result<KeySize, Error> {
+        const QUERY: &str = "
+            SELECT id FROM users WHERE platform_user_id = $1 AND platform = $2
+        ";
+        let id = sqlx::query_scalar::<_, KeySize>(QUERY)
+            .bind(platform_user_id)
+            .bind(platform.to_string())
+            .fetch_one(self.pool.as_ref())
+            .await?;
+
+        Ok(id)
+    }
+
+    pub async fn update_ollama_settings(
+        &self,
+        user_id: KeySize,
+        settings: OllamaSettings,
+    ) -> Result<(), Error> {
+        const QUERY: &str = "
+        INSERT INTO user_ollama_settings
+        (user_id, system_prompt, template, output_limit, temperature, repeat_penalty, top_k, top_p)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        ON CONFLICT (user_id) DO UPDATE SET
+            system_prompt  = EXCLUDED.system_prompt,
+            template       = EXCLUDED.template,
+            output_limit   = EXCLUDED.output_limit,
+            temperature    = EXCLUDED.temperature,
+            repeat_penalty = EXCLUDED.repeat_penalty,
+            top_k          = EXCLUDED.top_k,
+            top_p          = EXCLUDED.top_p
+        ";
+        sqlx::query(QUERY)
+            .bind(user_id)
+            .bind(settings.system_prompt)
+            .bind(settings.template)
+            .bind(settings.output_limit as i16)
+            .bind(settings.parameters.temperature)
+            .bind(settings.parameters.repeat_penalty)
+            .bind(settings.parameters.top_k.map(|k| k as i32))
+            .bind(settings.parameters.top_p)
+            .execute(self.pool.as_ref())
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn update_permissions(
         &self,
         platform: Platform,
         user_id: String,

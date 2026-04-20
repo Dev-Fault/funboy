@@ -5,6 +5,8 @@ use ollama_rs::{
     models::{LocalModel, ModelInfo, ModelOptions},
 };
 
+use crate::database::OllamaSettingsRow;
+
 const DEFAULT_SYSTEM_PROMPT: &str = "";
 const DEFAULT_TEMPLATE: &str = "{{ .Prompt }}";
 const DEFAULT_MAX_PREDICT: u16 = 200;
@@ -63,10 +65,27 @@ impl Default for OllamaParameters {
 
 #[derive(Debug, Clone)]
 pub struct OllamaSettings {
-    system_prompt: String,
-    template: String,
-    output_limit: u16,
-    parameters: OllamaParameters,
+    pub system_prompt: String,
+    pub template: String,
+    pub output_limit: u16,
+    pub parameters: OllamaParameters,
+}
+
+impl From<OllamaSettingsRow> for OllamaSettings {
+    fn from(value: OllamaSettingsRow) -> Self {
+        let parameters = OllamaParameters {
+            temperature: value.temperature,
+            repeat_penalty: value.repeat_penalty,
+            top_k: value.top_k.map(|k| k as u32),
+            top_p: value.top_p,
+        };
+        Self {
+            system_prompt: value.system_prompt.unwrap_or(Default::default()),
+            template: value.template.unwrap_or(Default::default()),
+            output_limit: value.output_limit as u16,
+            parameters: parameters,
+        }
+    }
 }
 
 impl OllamaSettings {

@@ -257,6 +257,7 @@ impl<U: UserId> Funboy<U> {
     pub async fn ollama_command(
         &self,
         user_id: U,
+        platform: Platform,
         action: OllamaAction,
     ) -> Result<CommandResult, CommandError> {
         let permissions = self.users.get_permissions(user_id.clone()).await;
@@ -264,7 +265,11 @@ impl<U: UserId> Funboy<U> {
             return Err(CommandError::LackingPermission(Permission::Ollama).into());
         }
 
-        let ollama_settings = self.users.get_or_insert(user_id).await.ollama_settings;
+        let ollama_settings = self
+            .users
+            .get_or_insert(user_id.clone())
+            .await
+            .ollama_settings;
         match action {
             OllamaAction::List { option } => match option {
                 OllamaListOption::Model => {
@@ -296,7 +301,11 @@ impl<U: UserId> Funboy<U> {
                     let mut ollama_settings = ollama_settings.lock().await;
                     let system_prompt = system_prompt.join(" ");
                     ollama_settings.set_system_prompt(&system_prompt);
+                    let settings = ollama_settings.clone();
                     drop(ollama_settings);
+                    self.users
+                        .update_ollama_settings(user_id, platform, settings)
+                        .await;
                     Ok(CommandResult::Text(format!(
                         "Set ollama system prompt to {}",
                         system_prompt
@@ -310,7 +319,11 @@ impl<U: UserId> Funboy<U> {
                     let mut ollama_settings = ollama_settings.lock().await;
                     let template = template.join(" ");
                     ollama_settings.set_template(&template);
+                    let settings = ollama_settings.clone();
                     drop(ollama_settings);
+                    self.users
+                        .update_ollama_settings(user_id, platform, settings)
+                        .await;
                     Ok(CommandResult::Text(format!(
                         "Set ollama template to {}",
                         template
@@ -319,7 +332,11 @@ impl<U: UserId> Funboy<U> {
                 OllamaSetOptions::OutputLimit { limit } => {
                     let mut ollama_settings = ollama_settings.lock().await;
                     ollama_settings.set_output_limit(limit);
+                    let settings = ollama_settings.clone();
                     drop(ollama_settings);
+                    self.users
+                        .update_ollama_settings(user_id, platform, settings)
+                        .await;
                     Ok(CommandResult::Text(format!(
                         "Set ollama output limit to {}",
                         limit
@@ -328,7 +345,11 @@ impl<U: UserId> Funboy<U> {
                 OllamaSetOptions::Temperature { temperature } => {
                     let mut ollama_settings = ollama_settings.lock().await;
                     ollama_settings.set_temperature(temperature);
+                    let settings = ollama_settings.clone();
                     drop(ollama_settings);
+                    self.users
+                        .update_ollama_settings(user_id, platform, settings)
+                        .await;
                     Ok(CommandResult::Text(format!(
                         "Set ollama temperature limit to {}",
                         temperature
@@ -337,7 +358,11 @@ impl<U: UserId> Funboy<U> {
                 OllamaSetOptions::TopK { top_k } => {
                     let mut ollama_settings = ollama_settings.lock().await;
                     ollama_settings.set_top_k(top_k);
+                    let settings = ollama_settings.clone();
                     drop(ollama_settings);
+                    self.users
+                        .update_ollama_settings(user_id, platform, settings)
+                        .await;
                     Ok(CommandResult::Text(format!(
                         "Set ollama top_k to {}",
                         top_k
@@ -346,7 +371,11 @@ impl<U: UserId> Funboy<U> {
                 OllamaSetOptions::TopP { top_p } => {
                     let mut ollama_settings = ollama_settings.lock().await;
                     ollama_settings.set_top_p(top_p);
+                    let settings = ollama_settings.clone();
                     drop(ollama_settings);
+                    self.users
+                        .update_ollama_settings(user_id, platform, settings)
+                        .await;
                     Ok(CommandResult::Text(format!(
                         "Set ollama top_p to {}",
                         top_p
@@ -355,7 +384,11 @@ impl<U: UserId> Funboy<U> {
                 OllamaSetOptions::RepeatPenalty { repeat_penalty } => {
                     let mut ollama_settings = ollama_settings.lock().await;
                     ollama_settings.set_repeat_penalty(repeat_penalty);
+                    let settings = ollama_settings.clone();
                     drop(ollama_settings);
+                    self.users
+                        .update_ollama_settings(user_id, platform, settings)
+                        .await;
                     Ok(CommandResult::Text(format!(
                         "Set ollama repeat penalty to {}",
                         repeat_penalty

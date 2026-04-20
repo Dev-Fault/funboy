@@ -306,7 +306,7 @@ pub async fn interpret_bot_commands<U: UserId>(
                 .await
                 .map(|r| r.into()),
             Command::Ollama { action } => funboy
-                .ollama_command(user_id, action)
+                .ollama_command(user_id, Platform::Cli, action)
                 .await
                 .map(|r| r.into()),
             Command::Copy {

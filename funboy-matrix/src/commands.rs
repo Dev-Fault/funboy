@@ -253,7 +253,11 @@ pub async fn interpret_matrix_commands(
                     .replace_command(user_id, template, substitute, with_substitute, id)
                     .await
             }
-            Command::Ollama { action } => funboy.ollama_command(user_id, action).await,
+            Command::Ollama { action } => {
+                funboy
+                    .ollama_command(user_id, Platform::Matrix, action)
+                    .await
+            }
             Command::Grant { user, permissions } => {
                 let receiver_id = find_user(&user, room).await?;
                 let receiver = MatrixUser::new(room_id, receiver_id);
