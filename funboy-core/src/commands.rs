@@ -55,7 +55,10 @@ pub enum OllamaSetOptions {
         system_prompt: Vec<String>,
     },
     #[command(name = "template")]
-    Template { template: String },
+    Template {
+        #[arg(trailing_var_arg = true)]
+        template: Vec<String>,
+    },
     #[command(name = "output_limit")]
     OutputLimit { limit: u16 },
     #[command(name = "temperature")]
@@ -305,6 +308,7 @@ impl<U: UserId> Funboy<U> {
                 }
                 OllamaSetOptions::Template { template } => {
                     let mut ollama_settings = ollama_settings.lock().await;
+                    let template = template.join(" ");
                     ollama_settings.set_template(&template);
                     drop(ollama_settings);
                     Ok(CommandResult::Text(format!(
