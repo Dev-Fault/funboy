@@ -1,6 +1,6 @@
 use std::{num::ParseIntError, str::FromStr, sync::Arc};
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use fsl_interpreter::FslInterpreter;
 use tokio::sync::Mutex;
 
@@ -35,7 +35,7 @@ impl From<String> for CommandError {
 #[derive(Parser, Debug, Clone)]
 pub enum OllamaAction {
     List {
-        #[arg(value_parser = clap::value_parser!(OllamaListOption))]
+        #[command(subcommand)]
         option: OllamaListOption,
     },
 
@@ -75,7 +75,7 @@ const MODEL: &str = "model";
 const MODELS: &str = "models";
 const SETTINGS: &str = "settings";
 
-#[derive(Parser, Debug, Copy, Clone)]
+#[derive(Parser, Debug, Copy, Clone, ValueEnum)]
 pub enum OllamaListOption {
     Model,
     Models,
