@@ -3,8 +3,9 @@ use std::sync::Arc;
 use fsl_interpreter::FslInterpreter;
 use funboy_core::{
     Funboy,
-    interpreter::{ASK, ASK_RULES, InterpreterContext, Messenger, SAY, SAY_RULES},
-    rate_limiter::RateLimit,
+    interpreter::{
+        ASK, ASK_RULES, InterpreterContext, InterpreterLimits, Messenger, SAY, SAY_RULES,
+    },
 };
 use rustyline::DefaultEditor;
 use tokio::sync::Mutex;
@@ -60,12 +61,7 @@ pub async fn create_interpreter(
 ) -> Arc<Mutex<FslInterpreter>> {
     let mut interpreter = FslInterpreter::new_unbounded();
     let cli_context = CliContext::new(rl);
-    let ictx = InterpreterContext::new(
-        Id(0),
-        funboy,
-        Arc::new(Mutex::new(RateLimit::none())),
-        cli_context,
-    );
+    let ictx = InterpreterContext::new(Id(0), funboy, cli_context, InterpreterLimits::none());
     interpreter.add_command(
         SAY,
         SAY_RULES,

@@ -4,8 +4,8 @@ use fsl_interpreter::{FslInterpreter, types::command::CommandError};
 use funboy_core::{
     format::{TWO_THOUSAND, split_message},
     interpreter::{
-        ASK, ASK_RULES, ASK_TO, ASK_TO_RULES, Interactor, InterpreterContext, Messenger, SAY,
-        SAY_RULES, SAY_TO, SAY_TO_RULES,
+        ASK, ASK_RULES, ASK_TO, ASK_TO_RULES, FIVE_HUNDRED_MS, Interactor, InterpreterContext,
+        InterpreterLimits, Messenger, SAY, SAY_RULES, SAY_TO, SAY_TO_RULES, TWO_THOUSAND_MESSAGES,
     },
 };
 use serenity::{
@@ -199,8 +199,8 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> Arc<tokio::sync::Mutex<Fs
     let ictx = InterpreterContext::new(
         DiscordUserId(ctx.author().id),
         ctx.data().funboy.clone(),
-        ctx.data().interpreter_rate_limit.clone(),
         dctx,
+        InterpreterLimits::default(),
     );
 
     interpreter.add_command(

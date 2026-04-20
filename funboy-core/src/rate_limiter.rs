@@ -61,16 +61,6 @@ impl<U: UserId> RateLimit<U> {
         }
     }
 
-    pub fn none() -> Self {
-        Self {
-            users: HashMap::new(),
-            uses_per_interval: usize::MAX,
-            interval: u64::MAX,
-            limits_before_timeout: u16::MAX,
-            timeout: 0,
-        }
-    }
-
     pub fn with_timeout(mut self, timeout: u64, limits_before_timeout: u16) -> Self {
         self.timeout = timeout;
         self.limits_before_timeout = limits_before_timeout;

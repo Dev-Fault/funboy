@@ -41,12 +41,51 @@ pub trait Interactor: Clone + Sync + Send + 'static {
 }
 
 #[derive(Clone)]
+pub struct InterpreterLimits<U: UserId> {
+    pub rate_limit: Option<Arc<Mutex<RateLimit<U>>>>,
+    pub message_limit: Option<u16>,
+    pub message_delay_ms: Option<u64>,
+}
+
+impl<U: UserId> InterpreterLimits<U> {
+    pub fn new(
+        rate_limit: Option<RateLimit<U>>,
+        message_limit: Option<u16>,
+        message_delay_ms: Option<u64>,
+    ) -> Self {
+        Self {
+            rate_limit: rate_limit.map(|r| Arc::new(Mutex::new(r))),
+            message_limit,
+            message_delay_ms,
+        }
+    }
+
+    pub fn none() -> Self {
+        Self {
+            rate_limit: None,
+            message_limit: None,
+            message_delay_ms: None,
+        }
+    }
+}
+
+impl<U: UserId> Default for InterpreterLimits<U> {
+    fn default() -> Self {
+        Self {
+            rate_limit: Some(Default::default()),
+            message_limit: Some(TWO_THOUSAND_MESSAGES),
+            message_delay_ms: Some(FIVE_HUNDRED_MS),
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct InterpreterContext<U: UserId, M: Messenger> {
     pub user_id: U,
     pub funboy: Arc<Funboy<U>>,
-    pub rate_limit: Arc<Mutex<RateLimit<U>>>,
     pub messages_sent: Arc<Mutex<u16>>,
     pub messenger: M,
+    pub limits: InterpreterLimits<U>,
     interpreter: Arc<Mutex<FslInterpreter>>,
 }
 
@@ -54,15 +93,15 @@ impl<U: UserId, M: Messenger> InterpreterContext<U, M> {
     pub fn new(
         user_id: U,
         funboy: Arc<Funboy<U>>,
-        rate_limit: Arc<Mutex<RateLimit<U>>>,
         messenger: M,
+        limits: InterpreterLimits<U>,
     ) -> Self {
         Self {
             user_id: user_id,
             funboy: funboy,
-            rate_limit: rate_limit,
             messages_sent: Arc::new(Mutex::new(0)),
             messenger,
+            limits,
             interpreter: Arc::new(Mutex::new(FslInterpreter::new())),
         }
     }
@@ -81,32 +120,38 @@ impl<U: UserId, M: Messenger> InterpreterContext<U, M> {
     }
 }
 
-const MAX_MESSAGES: u16 = 2000;
 async fn check_limits<U: UserId, M: Messenger>(
     ictx: InterpreterContext<U, M>,
 ) -> Result<(), CommandError> {
-    let mut rate_limit = ictx.rate_limit.lock().await;
-    let mut call_count = ictx.messages_sent.lock().await;
-    if *call_count >= MAX_MESSAGES {
-        *call_count = 0;
-        return Err(CommandError::Custom(format!("message limit exceeded",)));
-    }
-    *call_count = call_count.saturating_add(1);
-
-    match rate_limit.check(ictx.user_id) {
-        RateLimitResult::MaxLimitsReached => {
-            return Err(CommandError::Custom(format!(
-                "exceeded rate limit too many times, please wait a bit before trying again",
-            )));
+    if let Some(limit) = ictx.limits.message_limit {
+        let mut call_count = ictx.messages_sent.lock().await;
+        if *call_count >= limit {
+            *call_count = 0;
+            return Err(CommandError::Custom(format!("message limit exceeded",)));
         }
-        RateLimitResult::UsesPerIntervalreached => Ok(()),
-        RateLimitResult::Ok => Ok(()),
+        *call_count = call_count.saturating_add(1);
+    }
+
+    if let Some(rate_limit) = ictx.limits.rate_limit {
+        let mut rate_limit = rate_limit.lock().await;
+        match rate_limit.check(ictx.user_id) {
+            RateLimitResult::MaxLimitsReached => {
+                return Err(CommandError::Custom(format!(
+                    "exceeded rate limit too many times, please wait a bit before trying again",
+                )));
+            }
+            RateLimitResult::UsesPerIntervalreached => Ok(()),
+            RateLimitResult::Ok => Ok(()),
+        }
+    } else {
+        Ok(())
     }
 }
 
 pub const SAY: &str = "say";
 pub const SAY_RULES: &'static [ArgRule] = &[ArgRule::new(ArgPos::Index(0), TEXT_TYPES)];
-pub const SAY_DELAY_MS: u64 = 500;
+pub const FIVE_HUNDRED_MS: u64 = 500;
+pub const TWO_THOUSAND_MESSAGES: u16 = 2000;
 pub const SAY_MAX_OUTPUT_LENGTH: usize = 8000;
 pub fn create_say_command<U: UserId, M: Messenger>(ictx: InterpreterContext<U, M>) -> Executor {
     let say_command = {
@@ -129,7 +174,10 @@ pub fn create_say_command<U: UserId, M: Messenger>(ictx: InterpreterContext<U, M
                         ictx.messenger.say(m);
                     }
 
-                    sleep(Duration::from_millis(SAY_DELAY_MS)).await;
+                    if let Some(delay) = ictx.limits.message_delay_ms {
+                        sleep(Duration::from_millis(delay)).await;
+                    }
+
                     Ok(Value::None)
                 } else {
                     return Err(CommandError::Custom(format!(
@@ -173,7 +221,10 @@ pub fn create_say_to_command<U: UserId, M: Messenger + Interactor>(
                 let message = ictx.generate_message(&message).await?;
                 ictx.messenger.say_to_user(&user_name, &message).await?;
 
-                sleep(Duration::from_millis(SAY_DELAY_MS)).await;
+                if let Some(delay) = ictx.limits.message_delay_ms {
+                    sleep(Duration::from_millis(delay)).await;
+                }
+
                 Ok(Value::None)
             }
         }
@@ -211,7 +262,7 @@ pub fn create_ask_command<U: UserId, M: Messenger>(ictx: InterpreterContext<U, M
                 if question.len() < SAY_MAX_OUTPUT_LENGTH {
                     for m in split_message(&question, TWO_THOUSAND) {
                         ictx.messenger.say(&m);
-                        sleep(Duration::from_millis(SAY_DELAY_MS)).await;
+                        sleep(Duration::from_millis(FIVE_HUNDRED_MS)).await;
                     }
                 } else {
                     return Err(CommandError::Custom(format!(
@@ -252,7 +303,7 @@ pub fn create_ask_to_command<U: UserId, M: Messenger + Interactor>(
             async move {
                 check_limits(ictx.clone()).await?;
 
-                sleep(Duration::from_millis(SAY_DELAY_MS)).await;
+                sleep(Duration::from_millis(FIVE_HUNDRED_MS)).await;
 
                 let mut values = command.take_args();
 

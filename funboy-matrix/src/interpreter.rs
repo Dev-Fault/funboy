@@ -4,8 +4,8 @@ use fsl_interpreter::{FslInterpreter, types::command::CommandError};
 use funboy_core::{
     Funboy,
     interpreter::{
-        ASK, ASK_RULES, ASK_TO, ASK_TO_RULES, Interactor, InterpreterContext, Messenger, SAY,
-        SAY_RULES, SAY_TO, SAY_TO_RULES,
+        ASK, ASK_RULES, ASK_TO, ASK_TO_RULES, FIVE_HUNDRED_MS, Interactor, InterpreterContext,
+        InterpreterLimits, Messenger, SAY, SAY_RULES, SAY_TO, SAY_TO_RULES, TWO_THOUSAND_MESSAGES,
     },
     rate_limiter::RateLimit,
 };
@@ -162,9 +162,9 @@ pub async fn create_interpreter(
     let ictx = InterpreterContext::new(
         matrix_ctx.clone().sender,
         funboy.clone(),
-        // TODO give this a longer lifetime
-        Arc::new(Mutex::new(RateLimit::default())),
         matrix_ctx,
+        // TODO give this a longer lifetime
+        InterpreterLimits::default(),
     );
     interpreter.add_command(
         SAY,
