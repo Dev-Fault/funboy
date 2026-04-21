@@ -4,8 +4,8 @@ use crate::{Context, DiscordUserId, Error, context_extension::ContextExtension};
 
 use clap::ValueEnum;
 use funboy_core::{
-    Permission,
-    commands::{CommandError, CommandResult},
+    Permission, Role,
+    commands::CommandResult,
     format::{TWO_THOUSAND, extract_image_urls},
 };
 use poise::{
@@ -253,41 +253,71 @@ pub async fn age(
     Ok(())
 }
 
-struct PermissionChoice(Permission);
+macro_rules! impl_choice {
+    ($type:tt, $option:ty) => {
+        impl ChoiceParameter for $type {
+            fn list() -> Vec<poise::CommandParameterChoice> {
+                <$option>::value_variants()
+                    .iter()
+                    .map(|v| poise::CommandParameterChoice {
+                        name: v.to_string(),
+                        localizations: Default::default(),
+                        __non_exhaustive: (),
+                    })
+                    .collect()
+            }
 
-impl ChoiceParameter for PermissionChoice {
-    fn list() -> Vec<poise::CommandParameterChoice> {
-        Permission::value_variants()
-            .iter()
-            .map(|v| poise::CommandParameterChoice {
-                name: v.to_string(),
-                localizations: Default::default(),
-                __non_exhaustive: (),
-            })
-            .collect()
-    }
+            fn from_index(index: usize) -> Option<Self> {
+                <$option>::value_variants().get(index).copied().map($type)
+            }
 
-    fn from_index(index: usize) -> Option<Self> {
-        Permission::value_variants()
-            .get(index)
-            .copied()
-            .map(PermissionChoice)
-    }
+            fn from_name(name: &str) -> Option<Self> {
+                <$option>::from_str(name, true).ok().map($type)
+            }
 
-    fn from_name(name: &str) -> Option<Self> {
-        Permission::from_str(name, true).ok().map(PermissionChoice)
-    }
+            fn name(&self) -> &'static str {
+                self.0.as_str()
+            }
 
-    fn name(&self) -> &'static str {
-        self.0.as_str()
-    }
-
-    fn localized_name(&self, _locale: &str) -> Option<&'static str> {
-        None
-    }
+            fn localized_name(&self, _locale: &str) -> Option<&'static str> {
+                None
+            }
+        }
+    };
 }
 
-/// Grants user with permissions
+impl_choice! {PermissionChoice, Permission}
+struct PermissionChoice(Permission);
+impl_choice! {RoleChoice, Role}
+struct RoleChoice(Role);
+
+/// Sets a users role giving them specific permissions
+#[poise::command(slash_command, prefix_command, category = "Utility")]
+pub async fn set_role(
+    ctx: Context<'_>,
+    #[description = "Selected user"] user: serenity::User,
+    role: RoleChoice,
+) -> Result<(), Error> {
+    let funboy = ctx.data().funboy.clone();
+    let invoker = ctx.author().id;
+
+    let result = funboy
+        .set_role(DiscordUserId(invoker), DiscordUserId(user.id), role.0)
+        .await;
+
+    match result {
+        Ok(CommandResult::Text(result)) => {
+            ctx.say_ephemeral(&result).await?;
+        }
+        Err(e) => {
+            ctx.say_ephemeral(&e.to_string()).await?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Grants permissions to user
 #[poise::command(slash_command, prefix_command, category = "Utility")]
 pub async fn grant(
     ctx: Context<'_>,

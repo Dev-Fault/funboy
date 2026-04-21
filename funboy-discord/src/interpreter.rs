@@ -4,8 +4,8 @@ use fsl_interpreter::{FslInterpreter, types::command::CommandError};
 use funboy_core::{
     format::{TWO_THOUSAND, split_message},
     interpreter::{
-        ASK, ASK_RULES, ASK_TO, ASK_TO_RULES, FIVE_HUNDRED_MS, Interactor, InterpreterContext,
-        InterpreterLimits, Messenger, SAY, SAY_RULES, SAY_TO, SAY_TO_RULES, TWO_THOUSAND_MESSAGES,
+        ASK, ASK_RULES, ASK_TO, ASK_TO_RULES, Interactor, InterpreterContext, InterpreterLimits,
+        Messenger, SAY, SAY_RULES, SAY_TO, SAY_TO_RULES,
     },
 };
 use serenity::{

@@ -1,7 +1,7 @@
 use std::{collections::HashMap, env, str::FromStr, sync::Arc, time::Duration};
 
 use fsl_interpreter::FslInterpreter;
-use funboy_cli::{FunboyEnv, interpret_bot_commands};
+use funboy_cli::FunboyEnv;
 use funboy_core::{
     Funboy, Request, UserId,
     commands::{CommandError, CommandResult},

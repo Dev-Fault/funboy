@@ -277,7 +277,7 @@ pub async fn interpret_bot_commands<U: UserId>(
                 template,
                 substitutes,
                 single,
-                file,
+                file: _,
             } => {
                 let substitutes = substitutes.join(" ");
                 funboy

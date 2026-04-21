@@ -6,13 +6,13 @@ use strum_macros::Display;
 use tokio::sync::Mutex;
 
 use crate::{
-    Funboy, Permission, Permissions, UserId,
+    Funboy, Permission, Permissions, Role, UserId,
     database::{KeySize, Limit, OrderBy, Platform, SortOrder, SubstituteReceipt},
     format::{
         AsStrs, ListStyle, ONE_HUNDRED, SeperatedListOptions, TruncateEllipsize,
         format_as_item_seperated_list, format_item_list, parse_bot_args,
     },
-    ollama::{OllamaParameters, OllamaSettings},
+    ollama::OllamaParameters,
 };
 
 pub enum CommandResult {
@@ -780,6 +780,33 @@ impl<U: UserId> Funboy<U> {
             }
         } else {
             Err(CommandError::LackingPermission(Permission::Revoke))
+        }
+    }
+
+    pub async fn set_role(
+        &self,
+        invoker: U,
+        receiver: U,
+        role: Role,
+    ) -> Result<CommandResult, CommandError> {
+        let mut users = self.users.clone();
+        let invoker_permissions = self.users.get_permissions(invoker.clone()).await;
+
+        if !invoker_permissions.can_grant() {
+            Err(CommandError::LackingPermission(Permission::Grant))
+        } else if !invoker_permissions.can_revoke() {
+            Err(CommandError::LackingPermission(Permission::Revoke))
+        } else {
+            let result = users.set_role(receiver.clone(), role).await;
+
+            match result {
+                Ok(_) => Ok(CommandResult::Text(format!(
+                    "Set role to {} for {}",
+                    role,
+                    receiver.to_string()
+                ))),
+                Err(e) => Err(CommandError::ExecutionFailed(e.to_string())),
+            }
         }
     }
 }

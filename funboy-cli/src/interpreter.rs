@@ -30,7 +30,7 @@ impl Messenger for CliContext {
 
     fn await_response(
         &self,
-        timeout: f64,
+        _timeout: f64,
     ) -> impl std::future::Future<
         Output = Result<String, fsl_interpreter::types::command::CommandError>,
     > + Send {

@@ -3,7 +3,7 @@ use std::{str::FromStr, sync::Arc};
 use ::serenity::all::{FullEvent, Interaction, UserId};
 use dotenvy::dotenv;
 use funboy_cli::{FunboyEnv, get_funboy};
-use funboy_core::{Funboy, database::Platform, rate_limiter::RateLimit};
+use funboy_core::{Funboy, database::Platform};
 use poise::serenity_prelude as serenity;
 use reqwest::Client as HttpClient;
 use songbird::{SerenityInit, typemap::TypeMapKey};
@@ -36,7 +36,6 @@ struct Data {
     pub funboy: Arc<Funboy<DiscordUserId>>,
     pub track_list: Arc<Mutex<TrackList>>,
     pub track_player_lock: Arc<Mutex<()>>,
-    pub interpreter_rate_limit: Arc<Mutex<RateLimit<DiscordUserId>>>,
     yt_dlp_cookies_path: Option<String>,
 } // User data, which is stored and accessible in all command invocations
 
@@ -46,7 +45,6 @@ impl Data {
             funboy,
             track_list: Mutex::new(TrackList::new()).into(),
             track_player_lock: Default::default(),
-            interpreter_rate_limit: Arc::new(Mutex::new(RateLimit::default())),
             yt_dlp_cookies_path: None,
         }
     }
@@ -125,6 +123,7 @@ fn get_discord_commands()
         commands::utility::help_command(),
         commands::utility::move_bot_pins(),
         commands::utility::age(),
+        commands::utility::set_role(),
         commands::utility::grant(),
         commands::utility::revoke(),
         commands::ollama::list_ollama_models(),

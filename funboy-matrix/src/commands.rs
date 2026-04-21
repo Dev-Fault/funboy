@@ -3,7 +3,7 @@ use std::sync::Arc;
 use clap::Parser;
 use fsl_interpreter::FslInterpreter;
 use funboy_core::{
-    Funboy, Permission, Request,
+    Funboy, Permission, Request, Role,
     commands::{CommandError, CommandResult, OllamaAction, parse_command_args},
     database::Platform,
     format::{LIST_STYLE_NONE, ListStyle},
@@ -88,6 +88,10 @@ pub enum Command {
     Image {
         #[command(subcommand)]
         action: ImageAction,
+    },
+    SetRole {
+        user: String,
+        role: Role,
     },
     Grant {
         user: String,
@@ -269,6 +273,12 @@ pub async fn interpret_matrix_commands(
                 let receiver = MatrixUser::new(room_id, receiver_id);
 
                 funboy.revoke_command(user_id, receiver, permissions).await
+            }
+            Command::SetRole { user, role } => {
+                let receiver_id = find_user(&user, room).await?;
+                let receiver = MatrixUser::new(room_id, receiver_id);
+
+                funboy.set_role(user_id, receiver, role).await
             }
         },
         Err(e) => Err(CommandError::UnknownCommand(e.to_string())),

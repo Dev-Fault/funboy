@@ -10,6 +10,7 @@ pub const BOT_MAX_MESSAGE_SIZE: usize = TWO_THOUSAND * 4;
 pub const WARN_MESSAGE_SIZE_EXCEEDED: &str = "Message was too large to send.";
 pub const WARN_EMPTY_MESSAGE: &str = "Message was empty.";
 
+#[allow(dead_code)]
 pub trait ContextExtension {
     async fn say_list(&self, message: &[&str], ephemeral: bool) -> Result<(), Error>;
 
