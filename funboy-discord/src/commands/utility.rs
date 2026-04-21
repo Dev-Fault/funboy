@@ -254,7 +254,7 @@ pub async fn age(
 }
 
 macro_rules! impl_choice {
-    ($type:tt, $option:ty) => {
+    ($option:ty, $type:tt) => {
         impl ChoiceParameter for $type {
             fn list() -> Vec<poise::CommandParameterChoice> {
                 <$option>::value_variants()
@@ -286,9 +286,9 @@ macro_rules! impl_choice {
     };
 }
 
-impl_choice! {PermissionChoice, Permission}
+impl_choice! { Permission, PermissionChoice }
 struct PermissionChoice(Permission);
-impl_choice! {RoleChoice, Role}
+impl_choice! { Role, RoleChoice }
 struct RoleChoice(Role);
 
 /// Sets a users role giving them specific permissions
