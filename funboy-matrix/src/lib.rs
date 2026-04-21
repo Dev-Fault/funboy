@@ -331,7 +331,7 @@ async fn handle_command_result(result: CommandResult, room: Room) {
 
 async fn handle_command_err(err: CommandError, room: Room) {
     let e = err.to_string();
-    let content = RoomMessageEventContent::text_markdown(&e);
+    let content = RoomMessageEventContent::text_plain(&e);
     room.send(content).await.unwrap();
     return;
 }
