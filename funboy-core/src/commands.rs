@@ -2,6 +2,7 @@ use std::{num::ParseIntError, str::FromStr, sync::Arc};
 
 use clap::{Parser, ValueEnum};
 use fsl_interpreter::FslInterpreter;
+use strum_macros::Display;
 use tokio::sync::Mutex;
 
 use crate::{
@@ -11,6 +12,7 @@ use crate::{
         AsStrs, ListStyle, ONE_HUNDRED, SeperatedListOptions, TruncateEllipsize,
         format_as_item_seperated_list, format_item_list, parse_bot_args,
     },
+    ollama::{OllamaParameters, OllamaSettings},
 };
 
 pub enum CommandResult {
@@ -41,34 +43,61 @@ pub enum OllamaAction {
 
     Set {
         #[command(subcommand)]
-        option: OllamaSetOptions,
+        option: OllamaSetOption,
+    },
+
+    Reset {
+        #[command(subcommand)]
+        option: OllamaResetOption,
     },
 }
 
 #[derive(Parser, Debug, Clone)]
-pub enum OllamaSetOptions {
-    #[command(name = "model")]
-    Model { model: String },
-    #[command(name = "system_prompt")]
+pub enum OllamaSetOption {
+    Model {
+        model: String,
+    },
     SystemPrompt {
         #[arg(trailing_var_arg = true)]
         system_prompt: Vec<String>,
     },
-    #[command(name = "template")]
     Template {
         #[arg(trailing_var_arg = true)]
         template: Vec<String>,
     },
-    #[command(name = "output_limit")]
-    OutputLimit { limit: u16 },
-    #[command(name = "temperature")]
-    Temperature { temperature: f32 },
-    #[command(name = "top_k")]
-    TopK { top_k: u32 },
-    #[command(name = "top_p")]
-    TopP { top_p: f32 },
-    #[command(name = "repeat_penalty")]
-    RepeatPenalty { repeat_penalty: f32 },
+    OutputLimit {
+        limit: u16,
+    },
+    Temperature {
+        temperature: f32,
+    },
+    TopK {
+        top_k: u32,
+    },
+    TopP {
+        top_p: f32,
+    },
+    RepeatPenalty {
+        repeat_penalty: f32,
+    },
+    Parameters {
+        temperature: Option<f32>,
+        repeat_penalty: Option<f32>,
+        top_k: Option<u32>,
+        top_p: Option<f32>,
+    },
+}
+
+#[derive(Display, Parser, Debug, Clone, ValueEnum)]
+pub enum OllamaResetOption {
+    #[strum(to_string = "System Prompt")]
+    SystemPrompt,
+    #[strum(to_string = "Template")]
+    Template,
+    #[strum(to_string = "Output Limit")]
+    OutputLimit,
+    #[strum(to_string = "Parameters")]
+    Parameters,
 }
 
 const MODEL: &str = "model";
@@ -273,13 +302,11 @@ impl<U: UserId> Funboy<U> {
         match action {
             OllamaAction::List { option } => match option {
                 OllamaListOption::Model => {
-                    let model = self.get_ollama_model().await;
-                    match model {
-                        Some(model) => return Ok(CommandResult::Text(model)),
-                        None => {
-                            return Ok(CommandResult::Text("No model currently set".to_string()));
-                        }
-                    }
+                    let model = self
+                        .get_ollama_model()
+                        .await
+                        .unwrap_or("Model not set".to_string());
+                    Ok(CommandResult::Text(model))
                 }
                 OllamaListOption::Models => {
                     let models = self.get_ollama_models().await;
@@ -291,13 +318,21 @@ impl<U: UserId> Funboy<U> {
                     }
                 }
                 OllamaListOption::Settings => {
+                    let model = self
+                        .get_ollama_model()
+                        .await
+                        .map(|m| format!("Model: {}", m))
+                        .unwrap_or_default();
                     let ollama_settings = ollama_settings.lock().await;
                     let settings_string = ollama_settings.to_string();
-                    return Ok(CommandResult::Text(settings_string));
+                    return Ok(CommandResult::Text(format!(
+                        "{}\n{}",
+                        model, settings_string
+                    )));
                 }
             },
             OllamaAction::Set { option } => match option {
-                OllamaSetOptions::SystemPrompt { system_prompt } => {
+                OllamaSetOption::SystemPrompt { system_prompt } => {
                     let mut ollama_settings = ollama_settings.lock().await;
                     let system_prompt = system_prompt.join(" ");
                     ollama_settings.set_system_prompt(&system_prompt);
@@ -311,11 +346,11 @@ impl<U: UserId> Funboy<U> {
                         system_prompt
                     )))
                 }
-                OllamaSetOptions::Model { model } => {
+                OllamaSetOption::Model { model } => {
                     self.set_ollama_model(Some(model.to_string())).await;
                     return Ok(CommandResult::Text(format!("Set model to {}", model)));
                 }
-                OllamaSetOptions::Template { template } => {
+                OllamaSetOption::Template { template } => {
                     let mut ollama_settings = ollama_settings.lock().await;
                     let template = template.join(" ");
                     ollama_settings.set_template(&template);
@@ -329,7 +364,7 @@ impl<U: UserId> Funboy<U> {
                         template
                     )))
                 }
-                OllamaSetOptions::OutputLimit { limit } => {
+                OllamaSetOption::OutputLimit { limit } => {
                     let mut ollama_settings = ollama_settings.lock().await;
                     ollama_settings.set_output_limit(limit);
                     let settings = ollama_settings.clone();
@@ -342,7 +377,7 @@ impl<U: UserId> Funboy<U> {
                         limit
                     )))
                 }
-                OllamaSetOptions::Temperature { temperature } => {
+                OllamaSetOption::Temperature { temperature } => {
                     let mut ollama_settings = ollama_settings.lock().await;
                     ollama_settings.set_temperature(temperature);
                     let settings = ollama_settings.clone();
@@ -355,7 +390,7 @@ impl<U: UserId> Funboy<U> {
                         temperature
                     )))
                 }
-                OllamaSetOptions::TopK { top_k } => {
+                OllamaSetOption::TopK { top_k } => {
                     let mut ollama_settings = ollama_settings.lock().await;
                     ollama_settings.set_top_k(top_k);
                     let settings = ollama_settings.clone();
@@ -368,7 +403,7 @@ impl<U: UserId> Funboy<U> {
                         top_k
                     )))
                 }
-                OllamaSetOptions::TopP { top_p } => {
+                OllamaSetOption::TopP { top_p } => {
                     let mut ollama_settings = ollama_settings.lock().await;
                     ollama_settings.set_top_p(top_p);
                     let settings = ollama_settings.clone();
@@ -381,7 +416,7 @@ impl<U: UserId> Funboy<U> {
                         top_p
                     )))
                 }
-                OllamaSetOptions::RepeatPenalty { repeat_penalty } => {
+                OllamaSetOption::RepeatPenalty { repeat_penalty } => {
                     let mut ollama_settings = ollama_settings.lock().await;
                     ollama_settings.set_repeat_penalty(repeat_penalty);
                     let settings = ollama_settings.clone();
@@ -394,7 +429,37 @@ impl<U: UserId> Funboy<U> {
                         repeat_penalty
                     )))
                 }
+                OllamaSetOption::Parameters {
+                    temperature,
+                    top_k,
+                    top_p,
+                    repeat_penalty,
+                } => {
+                    let mut ollama_settings = ollama_settings.lock().await;
+                    let parameters =
+                        OllamaParameters::new(temperature, repeat_penalty, top_k, top_p);
+                    ollama_settings.set_parameters(parameters);
+                    let settings = ollama_settings.clone();
+                    drop(ollama_settings);
+                    self.users
+                        .update_ollama_settings(user_id, platform, settings)
+                        .await;
+                    Ok(CommandResult::Text(format!(
+                        "Set ollama parameters to:\n{}",
+                        parameters
+                    )))
+                }
             },
+            OllamaAction::Reset { option } => {
+                let mut ollama_settings = ollama_settings.lock().await;
+                match option {
+                    OllamaResetOption::SystemPrompt => ollama_settings.reset_system_prompt(),
+                    OllamaResetOption::Template => ollama_settings.reset_template(),
+                    OllamaResetOption::OutputLimit => ollama_settings.reset_output_limit(),
+                    OllamaResetOption::Parameters => ollama_settings.reset_parameters(),
+                }
+                Ok(CommandResult::Text(format!("Reset {option}")))
+            }
         }
     }
 

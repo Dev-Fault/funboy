@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use ollama_rs::{
     Ollama,
     error::OllamaError,
@@ -21,18 +23,41 @@ pub struct OllamaParameters {
     pub top_p: Option<f32>,
 }
 
+impl Display for OllamaParameters {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut parts = Vec::new();
+        if let Some(temperature) = self.temperature {
+            parts.push(format!("Temperature: {temperature}"));
+        }
+        if let Some(repeat_penalty) = self.repeat_penalty {
+            parts.push(format!("Repeat Penalty: {repeat_penalty}"));
+        }
+        if let Some(top_k) = self.top_k {
+            parts.push(format!("Top k: {top_k}"));
+        }
+        if let Some(top_p) = self.top_p {
+            parts.push(format!("Top p: {top_p}"));
+        }
+        if parts.is_empty() {
+            write!(f, "No parameters set")
+        } else {
+            write!(f, "{}", parts.join("\n"))
+        }
+    }
+}
+
 impl OllamaParameters {
     pub fn new(
-        temperature: Option<f32>,
-        repeat_penalty: Option<f32>,
-        top_k: Option<u32>,
-        top_p: Option<f32>,
+        temperature: impl Into<Option<f32>>,
+        repeat_penalty: impl Into<Option<f32>>,
+        top_k: impl Into<Option<u32>>,
+        top_p: impl Into<Option<f32>>,
     ) -> Self {
         Self {
-            temperature,
-            repeat_penalty,
-            top_k,
-            top_p,
+            temperature: temperature.into(),
+            repeat_penalty: repeat_penalty.into(),
+            top_k: top_k.into(),
+            top_p: top_p.into(),
         }
     }
 
@@ -112,6 +137,10 @@ impl OllamaSettings {
             self.output_limit = limit;
             true
         }
+    }
+
+    pub fn reset_output_limit(&mut self) {
+        self.output_limit = DEFAULT_MAX_PREDICT;
     }
 
     pub fn set_parameters(&mut self, parameters: OllamaParameters) {

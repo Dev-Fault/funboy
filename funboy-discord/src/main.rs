@@ -130,7 +130,7 @@ fn get_discord_commands()
         commands::ollama::list_ollama_models(),
         commands::ollama::set_ollama_model(),
         commands::ollama::list_ollama_settings(),
-        commands::ollama::set_ollama_word_limit(),
+        commands::ollama::set_ollama_output_limit(),
         commands::ollama::set_ollama_parameters(),
         commands::ollama::set_ollama_system_prompt(),
         commands::ollama::reset_ollama_system_prompt(),

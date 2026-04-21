@@ -17,6 +17,68 @@ use crate::{
     interpreter::create_custom_interpreter,
 };
 
+pub async fn generate_message(
+    ctx: Context<'_>,
+    message: String,
+    ollama: bool,
+) -> Result<(), Error> {
+    let start = std::time::Instant::now();
+    let user_id = ctx.author().id;
+    let http = ctx.http();
+    let channel_id = ctx.channel_id();
+    let funboy = ctx.data().funboy.clone();
+    let interpreter = create_custom_interpreter(&ctx);
+
+    ctx.defer().await?;
+
+    let result = funboy
+        .generate_command(
+            Platform::Discord,
+            DiscordUserId(user_id),
+            interpreter,
+            vec![message],
+            false,
+            ollama,
+        )
+        .await;
+
+    // Don't use ctx if the webhook token expired or is close to expiring
+    let ctx_window_over = start.elapsed() > std::time::Duration::from_secs(60 * 10);
+
+    match result {
+        Ok(result) => match result {
+            commands::CommandResult::Text(output) => {
+                if !output.trim().is_empty() {
+                    if ctx_window_over {
+                        for m in split_message(&output, TWO_THOUSAND) {
+                            channel_id.say(&http, m).await?;
+                        }
+                    } else {
+                        ctx.say_long(&output, false).await?;
+                    }
+                } else {
+                    if ctx_window_over {
+                        return Ok(());
+                    } else {
+                        ctx.say_ephemeral("Generation Complete").await?;
+                    }
+                }
+            }
+            commands::CommandResult::None => {}
+        },
+        Err(e) => {
+            eprintln!("{:?}", e);
+            if ctx_window_over {
+                channel_id.say(&http, &e.to_string()).await?;
+            } else {
+                ctx.say_ephemeral(&e.to_string()).await?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Generates text by preforming template substitution and interpreting fsl code
 ///
 /// ## Templates
@@ -50,63 +112,7 @@ use crate::{
 /// For more FSL information, use `/help_fsl`
 #[poise::command(slash_command, prefix_command, category = "Templates")]
 pub async fn generate(ctx: Context<'_>, input: String) -> Result<(), Error> {
-    let start = std::time::Instant::now();
-    let user_id = ctx.author().id;
-    let http = ctx.http();
-    let channel_id = ctx.channel_id();
-    let funboy = ctx.data().funboy.clone();
-    let interpreter = create_custom_interpreter(&ctx);
-
-    let original_message = ctx.say("Generating...").await?;
-
-    let result = funboy
-        .generate_command(
-            Platform::Discord,
-            DiscordUserId(user_id),
-            interpreter,
-            vec![input],
-            false,
-            false,
-        )
-        .await;
-
-    // Don't use ctx if the webhook token expired or is close to expiring
-    let ctx_window_over = start.elapsed() > std::time::Duration::from_secs(60 * 10);
-
-    match result {
-        Ok(result) => match result {
-            commands::CommandResult::Text(output) => {
-                if !output.trim().is_empty() {
-                    if ctx_window_over {
-                        for m in split_message(&output, TWO_THOUSAND) {
-                            channel_id.say(&http, m).await?;
-                        }
-                    } else {
-                        ctx.edit_long(original_message, &output, false).await?;
-                    }
-                } else {
-                    if ctx_window_over {
-                        return Ok(());
-                    } else {
-                        original_message
-                            .edit(ctx, CreateReply::default().content("Generation complete."))
-                            .await?;
-                    }
-                }
-            }
-            commands::CommandResult::None => {}
-        },
-        Err(e) => {
-            eprintln!("{:?}", e);
-            if ctx_window_over {
-                channel_id.say(&http, &e.to_string()).await?;
-            } else {
-                ctx.say_ephemeral(&e.to_string()).await?;
-            }
-        }
-    }
-
-    Ok(())
+    generate_message(ctx, input, false).await
 }
 
 /// Generates text by preforming template substitution and intepreting fsl code from a file
@@ -126,29 +132,7 @@ pub async fn generate_file(ctx: Context<'_>, file: Attachment) -> Result<(), Err
         }
     };
 
-    let original_message = ctx.say("Generating...").await?;
-
-    let output = ctx
-        .data()
-        .funboy
-        .generate(&input, create_custom_interpreter(&ctx))
-        .await;
-
-    match output {
-        Ok(output) => {
-            if !output.trim().is_empty() {
-                ctx.edit_long(original_message, &output, false).await?;
-            } else {
-                original_message
-                    .edit(ctx, CreateReply::default().content("Generation complete."))
-                    .await?;
-            }
-        }
-        Err(e) => {
-            ctx.say_ephemeral(&e.to_string()).await?;
-        }
-    };
-    Ok(())
+    generate_message(ctx, input, false).await
 }
 
 /// Adds substitutes to a template
