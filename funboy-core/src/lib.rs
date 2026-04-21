@@ -203,7 +203,7 @@ impl Permissions {
         self.0.contains(&permission)
     }
 
-    pub fn is_host(&self) -> bool {
+    pub fn is_owner(&self) -> bool {
         self.0.contains(&Permission::Owner)
     }
 
@@ -223,14 +223,14 @@ pub enum PermissionError {
     CannotGrantOwnerPermission,
     CannotRevokeOwnerPermission,
     CannotRevokePermissionsFromOwner,
-    CannotSetOwnerPermissions,
+    CannotChangeOwnersRole,
 }
 
 impl ToString for PermissionError {
     fn to_string(&self) -> String {
         match self {
             PermissionError::CannotGrantOwnerPermission => "owner permission cannot be granted",
-            PermissionError::CannotSetOwnerPermissions => "owner permissions cannot be set",
+            PermissionError::CannotChangeOwnersRole => "Owners role cannot be changed",
             PermissionError::CannotRevokeOwnerPermission => "owner permission cannot be revoked",
             PermissionError::CannotRevokePermissionsFromOwner => {
                 "permissions cannot be revoked from owner"
@@ -454,13 +454,14 @@ impl<U: UserId> UserMap<U> {
         user_id: U,
         permissions: Permissions,
     ) -> Result<(), PermissionError> {
-        if permissions.has_permission(Permission::Owner) {
-            return Err(PermissionError::CannotGrantOwnerPermission);
-        }
-
         let user_ctx = self.get_or_insert(user_id.clone()).await;
 
         let mut current_permissions = user_ctx.permissions.lock().await;
+
+        if current_permissions.is_owner() {
+            return Err(PermissionError::CannotChangeOwnersRole);
+        }
+
         *current_permissions = permissions;
 
         let result = self
@@ -515,7 +516,7 @@ impl<U: UserId> UserMap<U> {
         let user_ctx = self.get_or_insert(user_id.clone()).await;
         let mut current_permissions = user_ctx.permissions.lock().await;
 
-        if current_permissions.is_host() {
+        if current_permissions.is_owner() {
             return Err(PermissionError::CannotRevokePermissionsFromOwner);
         }
 
