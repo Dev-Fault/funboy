@@ -15,6 +15,11 @@ const DEFAULT_MAX_PREDICT: u16 = 200;
 const PARAMETER_NOT_SET_TEXT: &str = "Unset";
 pub const MAX_PREDICT: u16 = 2000;
 
+pub struct OllamaResponse {
+    pub prompt: String,
+    pub generated_text: String,
+}
+
 #[derive(Debug, Copy, Clone)]
 pub struct OllamaParameters {
     pub temperature: Option<f32>,

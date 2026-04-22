@@ -3,10 +3,11 @@ use std::sync::Arc;
 use clap::Parser;
 use fsl_interpreter::FslInterpreter;
 use funboy_core::{
-    Funboy, Permission, Request, Role,
+    Funboy, Request,
     commands::{CommandError, CommandResult, OllamaAction, parse_command_args},
     database::Platform,
     format::{LIST_STYLE_NONE, ListStyle},
+    permissions::{Permission, Role},
 };
 use matrix_sdk::{Room, attachment::AttachmentConfig, ruma::OwnedUserId};
 use tokio::sync::Mutex;

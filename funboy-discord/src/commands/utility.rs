@@ -4,9 +4,9 @@ use crate::{Context, DiscordUserId, Error, context_extension::ContextExtension};
 
 use clap::ValueEnum;
 use funboy_core::{
-    Permission, Role,
     commands::CommandResult,
     format::{TWO_THOUSAND, extract_image_urls},
+    permissions::{Permission, Role},
 };
 use poise::{
     ChoiceParameter, CreateReply,
