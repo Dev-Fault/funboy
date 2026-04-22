@@ -4,10 +4,11 @@ use clap::{Parser, ValueEnum};
 use dotenvy::dotenv;
 use fsl_interpreter::FslInterpreter;
 use funboy_core::{
-    Funboy, UserId,
+    Funboy,
     commands::{CommandError, CommandResult, OllamaAction, parse_command_args},
     database::{FunboyDatabase, Platform},
     format::{LIST_STYLE_NONE, ListStyle},
+    user::FunboyUserId,
 };
 use rustyline::DefaultEditor;
 use sqlx::postgres::PgPoolOptions;
@@ -81,7 +82,7 @@ pub async fn enter_interpreter(
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct Id(pub u64);
-impl UserId for Id {}
+impl FunboyUserId for Id {}
 
 impl ToString for Id {
     fn to_string(&self) -> String {
@@ -122,7 +123,7 @@ impl FunboyEnv {
     }
 }
 
-pub async fn get_funboy<U: UserId>(env: &FunboyEnv, platform: Platform) -> Funboy<U> {
+pub async fn get_funboy<U: FunboyUserId>(env: &FunboyEnv, platform: Platform) -> Funboy<U> {
     let pool = Arc::new(
         PgPoolOptions::new()
             .max_connections(15)
@@ -249,7 +250,7 @@ impl Into<CliCommandResult> for CommandResult {
     }
 }
 
-pub async fn interpret_bot_commands<U: UserId>(
+pub async fn interpret_bot_commands<U: FunboyUserId>(
     user_id: U,
     funboy: &Funboy<U>,
     interpreter: Arc<Mutex<FslInterpreter>>,

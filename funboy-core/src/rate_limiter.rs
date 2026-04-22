@@ -4,7 +4,7 @@ use std::{
     usize,
 };
 
-use crate::UserId;
+use crate::user::FunboyUserId;
 
 #[derive(Debug, Clone)]
 pub struct Uses {
@@ -24,7 +24,7 @@ impl Uses {
 }
 
 #[derive(Debug, Clone)]
-pub struct RateLimit<U: UserId> {
+pub struct RateLimit<U: FunboyUserId> {
     users: HashMap<U, Uses>,
     uses_per_interval: usize,
     interval: u64,
@@ -32,7 +32,7 @@ pub struct RateLimit<U: UserId> {
     timeout: u64,
 }
 
-impl<U: UserId> Default for RateLimit<U> {
+impl<U: FunboyUserId> Default for RateLimit<U> {
     fn default() -> Self {
         Self {
             users: Default::default(),
@@ -50,7 +50,7 @@ pub enum RateLimitResult {
     Ok,
 }
 
-impl<U: UserId> RateLimit<U> {
+impl<U: FunboyUserId> RateLimit<U> {
     pub fn new(uses_per_interval: usize, interval: u64) -> Self {
         Self {
             users: HashMap::new(),

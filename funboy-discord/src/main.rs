@@ -3,7 +3,7 @@ use std::{str::FromStr, sync::Arc};
 use ::serenity::all::{FullEvent, Interaction, UserId};
 use dotenvy::dotenv;
 use funboy_cli::{FunboyEnv, get_funboy};
-use funboy_core::{Funboy, database::Platform, interpreter::InterpreterLimits};
+use funboy_core::{Funboy, database::Platform, interpreter::InterpreterLimits, user::FunboyUserId};
 use poise::serenity_prelude as serenity;
 use reqwest::Client as HttpClient;
 use songbird::{SerenityInit, typemap::TypeMapKey};
@@ -24,7 +24,7 @@ type Context<'a> = poise::Context<'a, Data, Error>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DiscordUserId(UserId);
-impl funboy_core::UserId for DiscordUserId {}
+impl FunboyUserId for DiscordUserId {}
 
 impl ToString for DiscordUserId {
     fn to_string(&self) -> String {

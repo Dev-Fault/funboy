@@ -11,11 +11,12 @@ use fsl_interpreter::{
 use tokio::{sync::Mutex, time::sleep};
 
 use crate::{
-    Funboy, UserId,
+    Funboy,
     format::{TWO_THOUSAND, split_message},
     ollama::{OllamaGenerator, OllamaSettings},
     rate_limiter::{RateLimit, RateLimitResult},
     template_substitutor::TemplateDelimiter,
+    user::FunboyUserId,
 };
 
 pub trait Messenger: Clone + Sync + Send + 'static {
@@ -41,13 +42,13 @@ pub trait Interactor: Clone + Sync + Send + 'static {
 }
 
 #[derive(Clone)]
-pub struct InterpreterLimits<U: UserId> {
+pub struct InterpreterLimits<U: FunboyUserId> {
     pub rate_limit: Option<Arc<Mutex<RateLimit<U>>>>,
     pub message_limit: Option<u16>,
     pub message_delay_ms: Option<u64>,
 }
 
-impl<U: UserId> InterpreterLimits<U> {
+impl<U: FunboyUserId> InterpreterLimits<U> {
     pub fn new(
         rate_limit: Option<RateLimit<U>>,
         message_limit: Option<u16>,
@@ -69,7 +70,7 @@ impl<U: UserId> InterpreterLimits<U> {
     }
 }
 
-impl<U: UserId> Default for InterpreterLimits<U> {
+impl<U: FunboyUserId> Default for InterpreterLimits<U> {
     fn default() -> Self {
         Self {
             rate_limit: Some(Default::default()),
@@ -80,7 +81,7 @@ impl<U: UserId> Default for InterpreterLimits<U> {
 }
 
 #[derive(Clone)]
-pub struct InterpreterContext<U: UserId, M: Messenger> {
+pub struct InterpreterContext<U: FunboyUserId, M: Messenger> {
     pub user_id: U,
     pub funboy: Arc<Funboy<U>>,
     pub messages_sent: Arc<Mutex<u16>>,
@@ -89,7 +90,7 @@ pub struct InterpreterContext<U: UserId, M: Messenger> {
     interpreter: Arc<Mutex<FslInterpreter>>,
 }
 
-impl<U: UserId, M: Messenger> InterpreterContext<U, M> {
+impl<U: FunboyUserId, M: Messenger> InterpreterContext<U, M> {
     pub fn new(
         user_id: U,
         funboy: Arc<Funboy<U>>,
@@ -120,7 +121,7 @@ impl<U: UserId, M: Messenger> InterpreterContext<U, M> {
     }
 }
 
-async fn check_limits<U: UserId, M: Messenger>(
+async fn check_limits<U: FunboyUserId, M: Messenger>(
     ictx: InterpreterContext<U, M>,
 ) -> Result<(), CommandError> {
     if let Some(limit) = ictx.limits.message_limit {
@@ -153,7 +154,9 @@ pub const SAY_RULES: &'static [ArgRule] = &[ArgRule::new(ArgPos::Index(0), TEXT_
 pub const FIVE_HUNDRED_MS: u64 = 500;
 pub const TWO_THOUSAND_MESSAGES: u16 = 2000;
 pub const SAY_MAX_OUTPUT_LENGTH: usize = 8000;
-pub fn create_say_command<U: UserId, M: Messenger>(ictx: InterpreterContext<U, M>) -> Executor {
+pub fn create_say_command<U: FunboyUserId, M: Messenger>(
+    ictx: InterpreterContext<U, M>,
+) -> Executor {
     let say_command = {
         let ictx = ictx.clone();
         move |command: Command, interpreter_data| {
@@ -196,7 +199,7 @@ pub const SAY_TO_RULES: &'static [ArgRule] = &[
     ArgRule::new(ArgPos::Index(0), TEXT_TYPES),
     ArgRule::new(ArgPos::Index(1), TEXT_TYPES),
 ];
-pub fn create_say_to_command<U: UserId, M: Messenger + Interactor>(
+pub fn create_say_to_command<U: FunboyUserId, M: Messenger + Interactor>(
     ictx: InterpreterContext<U, M>,
 ) -> Executor {
     let say_command = {
@@ -241,7 +244,9 @@ pub const ASK_RULES: &'static [ArgRule] = &[
 const MAX_TIMEOUT_SECS: f64 = 60.0 * 60.0;
 const STOP: &str = "-STOP-";
 
-pub fn create_ask_command<U: UserId, M: Messenger>(ictx: InterpreterContext<U, M>) -> Executor {
+pub fn create_ask_command<U: FunboyUserId, M: Messenger>(
+    ictx: InterpreterContext<U, M>,
+) -> Executor {
     let ask_command = {
         move |command: Command, data: Arc<InterpreterData>| {
             let ictx = ictx.clone();
@@ -294,7 +299,7 @@ pub const ASK_TO_RULES: &'static [ArgRule] = &[
     ArgRule::new(ArgPos::OptionalIndex(2), NUMERIC_TYPES),
 ];
 
-pub fn create_ask_to_command<U: UserId, M: Messenger + Interactor>(
+pub fn create_ask_to_command<U: FunboyUserId, M: Messenger + Interactor>(
     ictx: InterpreterContext<U, M>,
 ) -> Executor {
     let ask_command = {
@@ -356,7 +361,7 @@ pub fn validate_time_out(time_out: f64, max: f64) -> Result<(), CommandError> {
 
 pub const GET_SUB: &str = "get_sub";
 pub const GET_SUB_RULES: &[ArgRule] = &[ArgRule::new(ArgPos::Index(0), TEXT_TYPES)];
-pub fn create_get_sub_command<U: UserId>(funboy: Arc<Funboy<U>>) -> Executor {
+pub fn create_get_sub_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Executor {
     let get_sub_command = {
         move |command: Command, data: Arc<InterpreterData>| {
             let funboy = funboy.clone();
@@ -389,7 +394,7 @@ pub const ASK_AI_RULES: &[ArgRule] = &[
     ArgRule::new(ArgPos::Index(1), WHOLE_NUMBER_TYPES),
 ];
 pub const MAX_WORD_LIMIT: i64 = 500;
-pub fn create_ask_ai_command<U: UserId>(funboy: Arc<Funboy<U>>) -> Executor {
+pub fn create_ask_ai_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Executor {
     let get_sub_command = {
         move |command: Command, data: Arc<InterpreterData>| {
             let funboy = funboy.clone();

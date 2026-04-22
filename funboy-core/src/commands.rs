@@ -6,13 +6,14 @@ use strum_macros::Display;
 use tokio::sync::Mutex;
 
 use crate::{
-    Funboy, Permission, Permissions, Role, UserId,
+    Funboy, Permission, Permissions, Role,
     database::{KeySize, Limit, OrderBy, Platform, SortOrder, SubstituteReceipt},
     format::{
         AsStrs, ListStyle, ONE_HUNDRED, SeperatedListOptions, TruncateEllipsize,
         format_as_item_seperated_list, format_item_list, parse_bot_args,
     },
     ollama::OllamaParameters,
+    user::FunboyUserId,
 };
 
 pub enum CommandResult {
@@ -149,7 +150,7 @@ pub fn parse_command_args<'a>(input: &'a str) -> Vec<&'a str> {
     full_args
 }
 
-impl<U: UserId> Funboy<U> {
+impl<U: FunboyUserId> Funboy<U> {
     pub async fn replace_command(
         &self,
         user_id: U,

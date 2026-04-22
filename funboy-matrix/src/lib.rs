@@ -3,8 +3,9 @@ use std::{collections::HashMap, env, str::FromStr, sync::Arc, time::Duration};
 use fsl_interpreter::FslInterpreter;
 use funboy_cli::FunboyEnv;
 use funboy_core::{
-    Funboy, Request, UserId,
+    Funboy, Request,
     commands::{CommandError, CommandResult},
+    user::FunboyUserId,
 };
 use matrix_sdk::{
     Client, Room, RoomState,
@@ -82,7 +83,7 @@ impl MatrixUser {
     }
 }
 
-impl UserId for MatrixUser {}
+impl FunboyUserId for MatrixUser {}
 
 impl ToString for MatrixUser {
     fn to_string(&self) -> String {
