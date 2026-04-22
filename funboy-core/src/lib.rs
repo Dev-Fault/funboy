@@ -351,7 +351,7 @@ pub trait UserId: Debug + Eq + Hash + Send + Sync + Clone + ToString + 'static {
 pub struct UserMap<U: UserId> {
     platform: Platform,
     db: FunboyDatabase,
-    users: Arc<Mutex<HashMap<U, UserCtx>>>,
+    users: Cache<U, UserCtx>,
 }
 
 impl<U: UserId> UserMap<U> {
@@ -359,17 +359,16 @@ impl<U: UserId> UserMap<U> {
         Self {
             platform,
             db,
-            users: Arc::new(Mutex::new(HashMap::new())),
+            users: CacheBuilder::new(100_000)
+                .time_to_idle(Duration::from_secs(60 * 60 * 24))
+                .build(),
         }
     }
 
     pub async fn get_or_insert(&self, user_id: U) -> UserCtx {
-        let users = self.users.lock().await;
-        if let Some(user_ctx) = users.get(&user_id) {
-            user_ctx.clone()
+        if let Some(user_ctx) = self.users.get(&user_id).await {
+            user_ctx
         } else {
-            drop(users);
-
             let user = match self
                 .db
                 .create_user(self.platform, user_id.to_string())
@@ -402,8 +401,7 @@ impl<U: UserId> UserMap<U> {
                 .with_permissions(permissions)
                 .with_ollama_settings(ollama_settings);
 
-            let mut users = self.users.lock().await;
-            users.entry(user_id).or_insert(user_ctx).clone()
+            self.users.get_with(user_id, async { user_ctx }).await
         }
     }
 
@@ -550,11 +548,11 @@ impl<U: UserId> UserMap<U> {
 pub const MAX_TEMPLATE_LENGTH: usize = 255;
 #[derive(Debug, Clone)]
 pub struct Funboy<U: UserId> {
+    pub users: UserMap<U>,
     funboy_db: FunboyDatabase,
     ollama_model: Arc<Mutex<Option<String>>>,
     ollama_generator: OllamaGenerator,
     valid_template_regex: Regex,
-    pub users: UserMap<U>,
     random_sub_cache: Arc<Cache<String, Vec<Substitute>>>,
 }
 
@@ -562,10 +560,10 @@ impl<U: UserId> Funboy<U> {
     pub fn new(funboy_db: FunboyDatabase, platform: Platform) -> Self {
         Self {
             funboy_db: funboy_db.clone(),
-            ollama_generator: OllamaGenerator::default(),
-            ollama_model: Arc::new(Mutex::new(None)),
-            valid_template_regex: Regex::new(&format!("^[{}]+$", VALID_TEMPLATE_CHARS)).unwrap(),
             users: UserMap::new(platform, funboy_db),
+            ollama_model: Arc::new(Mutex::new(None)),
+            ollama_generator: OllamaGenerator::default(),
+            valid_template_regex: Regex::new(&format!("^[{}]+$", VALID_TEMPLATE_CHARS)).unwrap(),
             random_sub_cache: Arc::new(
                 CacheBuilder::new(20)
                     .time_to_live(Duration::from_secs(60))
@@ -771,13 +769,9 @@ impl<U: UserId> Funboy<U> {
             None => {
                 let subs = self.get_substitutes(template, None, OrderBy::Random, Limit::Count(200));
                 let subs = subs.await?;
+                let random_index = random_range(0..subs.len());
 
-                if !subs.is_empty() {
-                    let rnd_range = random_range(0..subs.len());
-                    let sub = subs
-                        .get(rnd_range)
-                        .cloned()
-                        .expect("subs cannot be empty due to explicit check");
+                if let Some(sub) = subs.get(random_index).cloned() {
                     self.random_sub_cache
                         .insert(template.to_string(), subs)
                         .await;
@@ -900,8 +894,7 @@ impl<U: UserId> Funboy<U> {
         modified_interpreter.add_command(ASK_AI, ASK_AI_RULES, create_ask_ai_command(funboy));
         drop(modified_interpreter);
 
-        const MAX_GENERATIONS: u8 = 255;
-        for _ in 0..MAX_GENERATIONS {
+        for _ in 0..u8::MAX {
             let mut hasher = DefaultHasher::new();
             output.hash(&mut hasher);
             let hash = hasher.finish();
