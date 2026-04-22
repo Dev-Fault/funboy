@@ -233,13 +233,6 @@ pub struct FunboyDatabase {
     pool: Arc<Pool<Postgres>>,
 }
 
-const UPSERT_USER_QUERY: &str = "
-    INSERT INTO users (platform, platform_user_id) VALUES ($1, $2)
-    ON CONFLICT (platform, platform_user_id) DO UPDATE
-    SET platform = EXCLUDED.platform
-    RETURNING *
-";
-
 impl FunboyDatabase {
     /// Creates a wrapper around pool to handle Template and Substitute queries
     pub fn new(pool: Arc<PgPool>) -> Self {
@@ -251,13 +244,33 @@ impl FunboyDatabase {
         Ok(())
     }
 
-    pub async fn create_user(&self, platform: Platform, user_id: String) -> Result<User, Error> {
-        let user = sqlx::query_as::<_, User>(UPSERT_USER_QUERY)
+    /// Inserts or gets a user from the database, if the user is new returns true
+    pub async fn insert_user(
+        &self,
+        platform: Platform,
+        user_id: String,
+    ) -> Result<(User, bool), Error> {
+        const INSERT_QUERY: &str = "
+            INSERT INTO users (platform, platform_user_id) VALUES ($1, $2)
+            ON CONFLICT (platform, platform_user_id) DO NOTHING
+        ";
+        const SELECT_QUERY: &str = "
+            SELECT * FROM users WHERE platform_user_id = $1
+        ";
+
+        let rows_affected = sqlx::query(INSERT_QUERY)
             .bind(platform.to_string())
-            .bind(user_id)
+            .bind(&user_id)
+            .execute(self.pool.as_ref())
+            .await?
+            .rows_affected();
+
+        let user = sqlx::query_as::<_, User>(SELECT_QUERY)
+            .bind(&user_id)
             .fetch_one(self.pool.as_ref())
             .await?;
-        Ok(user)
+
+        Ok((user, rows_affected == 1))
     }
 
     pub async fn get_permissions(&self, user_id: KeySize) -> Result<Permissions, Error> {
@@ -364,6 +377,12 @@ impl FunboyDatabase {
         ";
         const INSERT_PERMISSION: &str = "
             INSERT INTO user_permissions (user_id, permission) VALUES ($1, $2)
+        ";
+        const UPSERT_USER_QUERY: &str = "
+            INSERT INTO users (platform, platform_user_id) VALUES ($1, $2)
+            ON CONFLICT (platform, platform_user_id) DO UPDATE
+            SET platform = EXCLUDED.platform
+            RETURNING *
         ";
 
         let mut tx = self.pool.begin().await?;

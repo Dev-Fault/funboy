@@ -152,8 +152,10 @@ pub async fn grant_host_permissions(env: &DiscordEnv, funboy: Arc<Funboy<Discord
             }
         };
         let user_id = DiscordUserId(user_id);
-        let mut users = funboy.users.clone();
-        users.grant_all_permissions(user_id).await;
+        let users = funboy.users.clone();
+        if let Err(e) = users.grant_all_permissions(user_id).await {
+            eprintln!("{e}");
+        }
     }
 }
 

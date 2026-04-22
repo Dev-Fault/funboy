@@ -6,7 +6,7 @@ use strum_macros::Display;
 use tokio::sync::Mutex;
 
 use crate::{
-    Funboy, Permission, Permissions, Role,
+    Funboy, FunboyError, Permission, Permissions, Role,
     database::{KeySize, Limit, OrderBy, Platform, SortOrder, SubstituteReceipt},
     format::{
         AsStrs, ListStyle, ONE_HUNDRED, SeperatedListOptions, TruncateEllipsize,
@@ -27,6 +27,12 @@ pub enum CommandError {
     LackingPermission(Permission),
     LackingPermissions(Permissions),
     UnknownCommand(String),
+}
+
+impl From<FunboyError> for CommandError {
+    fn from(value: FunboyError) -> Self {
+        CommandError::ExecutionFailed(value.to_string())
+    }
 }
 
 impl From<String> for CommandError {
@@ -159,7 +165,7 @@ impl<U: FunboyUserId> Funboy<U> {
         with_substitute: String,
         id: bool,
     ) -> Result<CommandResult, CommandError> {
-        let permissions = self.users.get_permissions(user_id.clone()).await;
+        let permissions = self.users.get_permissions(user_id.clone()).await?;
         if !permissions.can_update() {
             return Err(CommandError::LackingPermission(Permission::Update).into());
         }
@@ -232,7 +238,7 @@ impl<U: FunboyUserId> Funboy<U> {
         from_template: String,
         to_template: String,
     ) -> Result<CommandResult, CommandError> {
-        let permissions = self.users.get_permissions(user_id.clone()).await;
+        let permissions = self.users.get_permissions(user_id.clone()).await?;
         if !permissions.can_update() {
             return Err(CommandError::LackingPermission(Permission::Update).into());
         }
@@ -266,7 +272,7 @@ impl<U: FunboyUserId> Funboy<U> {
         from_template: String,
         to_template: String,
     ) -> Result<CommandResult, CommandError> {
-        let permissions = self.users.get_permissions(user_id.clone()).await;
+        let permissions = self.users.get_permissions(user_id.clone()).await?;
         if !permissions.can_update() {
             return Err(CommandError::LackingPermission(Permission::Update).into());
         }
@@ -291,7 +297,7 @@ impl<U: FunboyUserId> Funboy<U> {
         platform: Platform,
         action: OllamaAction,
     ) -> Result<CommandResult, CommandError> {
-        let permissions = self.users.get_permissions(user_id.clone()).await;
+        let permissions = self.users.get_permissions(user_id.clone()).await?;
         if !permissions.can_use_ollama() {
             return Err(CommandError::LackingPermission(Permission::Ollama).into());
         }
@@ -299,7 +305,7 @@ impl<U: FunboyUserId> Funboy<U> {
         let ollama_settings = self
             .users
             .get_or_insert(user_id.clone())
-            .await
+            .await?
             .ollama_settings;
         match action {
             OllamaAction::List { option } => match option {
@@ -342,7 +348,7 @@ impl<U: FunboyUserId> Funboy<U> {
                     drop(ollama_settings);
                     self.users
                         .update_ollama_settings(user_id, platform, settings)
-                        .await;
+                        .await?;
                     Ok(CommandResult::Text(format!(
                         "Set ollama system prompt to {}",
                         system_prompt
@@ -360,7 +366,7 @@ impl<U: FunboyUserId> Funboy<U> {
                     drop(ollama_settings);
                     self.users
                         .update_ollama_settings(user_id, platform, settings)
-                        .await;
+                        .await?;
                     Ok(CommandResult::Text(format!(
                         "Set ollama template to {}",
                         template
@@ -373,7 +379,7 @@ impl<U: FunboyUserId> Funboy<U> {
                     drop(ollama_settings);
                     self.users
                         .update_ollama_settings(user_id, platform, settings)
-                        .await;
+                        .await?;
                     Ok(CommandResult::Text(format!(
                         "Set ollama output limit to {}",
                         limit
@@ -386,7 +392,7 @@ impl<U: FunboyUserId> Funboy<U> {
                     drop(ollama_settings);
                     self.users
                         .update_ollama_settings(user_id, platform, settings)
-                        .await;
+                        .await?;
                     Ok(CommandResult::Text(format!(
                         "Set ollama temperature limit to {}",
                         temperature
@@ -399,7 +405,7 @@ impl<U: FunboyUserId> Funboy<U> {
                     drop(ollama_settings);
                     self.users
                         .update_ollama_settings(user_id, platform, settings)
-                        .await;
+                        .await?;
                     Ok(CommandResult::Text(format!(
                         "Set ollama top_k to {}",
                         top_k
@@ -412,7 +418,7 @@ impl<U: FunboyUserId> Funboy<U> {
                     drop(ollama_settings);
                     self.users
                         .update_ollama_settings(user_id, platform, settings)
-                        .await;
+                        .await?;
                     Ok(CommandResult::Text(format!(
                         "Set ollama top_p to {}",
                         top_p
@@ -425,7 +431,7 @@ impl<U: FunboyUserId> Funboy<U> {
                     drop(ollama_settings);
                     self.users
                         .update_ollama_settings(user_id, platform, settings)
-                        .await;
+                        .await?;
                     Ok(CommandResult::Text(format!(
                         "Set ollama repeat penalty to {}",
                         repeat_penalty
@@ -445,7 +451,7 @@ impl<U: FunboyUserId> Funboy<U> {
                     drop(ollama_settings);
                     self.users
                         .update_ollama_settings(user_id, platform, settings)
-                        .await;
+                        .await?;
                     Ok(CommandResult::Text(format!(
                         "Set ollama parameters to:\n{}",
                         parameters
@@ -556,7 +562,7 @@ impl<U: FunboyUserId> Funboy<U> {
         single: bool,
         id: bool,
     ) -> Result<CommandResult, CommandError> {
-        let permissions = self.users.get_permissions(user_id.clone()).await;
+        let permissions = self.users.get_permissions(user_id.clone()).await?;
         if !permissions.can_update() {
             return Err(CommandError::LackingPermission(Permission::Update).into());
         }
@@ -633,7 +639,7 @@ impl<U: FunboyUserId> Funboy<U> {
         substitutes: String,
         single: bool,
     ) -> Result<CommandResult, CommandError> {
-        let permissions = self.users.get_permissions(user_id.clone()).await;
+        let permissions = self.users.get_permissions(user_id.clone()).await?;
         if !permissions.can_create() {
             return Err(CommandError::LackingPermission(Permission::Create).into());
         }
@@ -685,7 +691,7 @@ impl<U: FunboyUserId> Funboy<U> {
         file: bool,
         ollama: bool,
     ) -> Result<CommandResult, CommandError> {
-        let permissions = self.users.get_permissions(user_id.clone()).await;
+        let permissions = self.users.get_permissions(user_id.clone()).await?;
         if !permissions.can_generate() {
             return Err(CommandError::LackingPermission(Permission::Generate).into());
         } else if file && !permissions.has_permission(Permission::Owner) {
@@ -729,8 +735,8 @@ impl<U: FunboyUserId> Funboy<U> {
         receiver: U,
         permissions: Vec<Permission>,
     ) -> Result<CommandResult, CommandError> {
-        let mut users = self.users.clone();
-        let invoker_permissions = self.users.get_permissions(invoker.clone()).await;
+        let users = self.users.clone();
+        let invoker_permissions = self.users.get_permissions(invoker.clone()).await?;
 
         if invoker_permissions.can_grant() {
             let result = users
@@ -760,8 +766,8 @@ impl<U: FunboyUserId> Funboy<U> {
         receiver: U,
         permissions: Vec<Permission>,
     ) -> Result<CommandResult, CommandError> {
-        let mut users = self.users.clone();
-        let invoker_permissions = self.users.get_permissions(invoker.clone()).await;
+        let users = self.users.clone();
+        let invoker_permissions = self.users.get_permissions(invoker.clone()).await?;
 
         if invoker_permissions.can_revoke() {
             let result = users
@@ -791,8 +797,8 @@ impl<U: FunboyUserId> Funboy<U> {
         receiver: U,
         role: Role,
     ) -> Result<CommandResult, CommandError> {
-        let mut users = self.users.clone();
-        let invoker_permissions = self.users.get_permissions(invoker.clone()).await;
+        let users = self.users.clone();
+        let invoker_permissions = self.users.get_permissions(invoker.clone()).await?;
 
         if !invoker_permissions.can_grant() {
             Err(CommandError::LackingPermission(Permission::Grant))

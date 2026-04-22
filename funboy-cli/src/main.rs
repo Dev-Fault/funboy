@@ -17,8 +17,10 @@ async fn main() -> rustyline::Result<()> {
     let env = FunboyEnv::new();
     let funboy = Arc::new(get_funboy::<Id>(&env, Platform::Cli).await);
 
-    let mut users = funboy.users.clone();
-    users.grant_all_permissions(Id(0)).await;
+    let users = funboy.users.clone();
+    if let Err(e) = users.grant_all_permissions(Id(0)).await {
+        eprintln!("{e}");
+    }
 
     funboy.set_ollama_model(env.default_ollama_model).await;
     let rl = Arc::new(Mutex::new(DefaultEditor::new()?));

@@ -11,7 +11,7 @@ use moka::future::{Cache, CacheBuilder};
 use tokio::sync::Mutex;
 
 use crate::{
-    Request,
+    FunboyError, Request,
     database::{FunboyDatabase, Platform},
     ollama::OllamaSettings,
     permissions::{Permission, PermissionError, Permissions, Role},
@@ -96,44 +96,41 @@ impl<U: FunboyUserId> UserMap<U> {
         }
     }
 
-    pub async fn get_or_insert(&self, user_id: U) -> UserCtx {
-        if let Some(user_ctx) = self.users.get(&user_id).await {
-            user_ctx
-        } else {
-            let user = match self
-                .db
-                .create_user(self.platform, user_id.to_string())
-                .await
-            {
-                Ok(user) => user,
-                Err(e) => {
-                    eprintln!("{e}");
-                    return UserCtx::default();
+    pub async fn get_or_insert(&self, user_id: U) -> Result<UserCtx, FunboyError> {
+        self.users
+            .try_get_with(user_id.clone(), async move {
+                match self
+                    .db
+                    .insert_user(self.platform, user_id.to_string())
+                    .await?
+                {
+                    (user, true) => {
+                        self.db
+                            .update_permissions(
+                                self.platform,
+                                user_id.to_string(),
+                                &Permissions::default(),
+                            )
+                            .await?;
+                        self.db
+                            .update_ollama_settings(user.id, OllamaSettings::default())
+                            .await?;
+                        Ok(UserCtx::default())
+                    }
+                    (user, false) => {
+                        let permissions = self.db.get_permissions(user.id).await?;
+                        let ollama_settings = self.db.get_ollama_settings(user.id).await?;
+
+                        let user_ctx = UserCtx::default()
+                            .with_permissions(permissions)
+                            .with_ollama_settings(ollama_settings);
+
+                        Ok(user_ctx)
+                    }
                 }
-            };
-
-            let permissions = match self.db.get_permissions(user.id).await {
-                Ok(permissions) => permissions,
-                Err(e) => {
-                    eprintln!("{e}");
-                    return UserCtx::default();
-                }
-            };
-
-            let ollama_settings = match self.db.get_ollama_settings(user.id).await {
-                Ok(ollama_settings) => ollama_settings,
-                Err(e) => {
-                    eprintln!("{e}");
-                    return UserCtx::default();
-                }
-            };
-
-            let user_ctx = UserCtx::default()
-                .with_permissions(permissions)
-                .with_ollama_settings(ollama_settings);
-
-            self.users.get_with(user_id, async { user_ctx }).await
-        }
+            })
+            .await
+            .map_err(|e: Arc<FunboyError>| (*e).clone())
     }
 
     pub async fn update_ollama_settings(
@@ -141,54 +138,42 @@ impl<U: FunboyUserId> UserMap<U> {
         user_id: U,
         platform: Platform,
         settings: OllamaSettings,
-    ) {
-        let user_ctx = self.get_or_insert(user_id.clone()).await;
+    ) -> Result<(), FunboyError> {
+        let user_ctx = self.get_or_insert(user_id.clone()).await?;
         let mut ollama_settings = user_ctx.ollama_settings.lock().await;
         *ollama_settings = settings;
 
-        match self.db.get_user_id(&user_id.to_string(), platform).await {
-            Ok(user_id) => {
-                let result = self
-                    .db
-                    .update_ollama_settings(user_id, ollama_settings.clone())
-                    .await;
-                if let Err(e) = result {
-                    eprintln!("{}", e.to_string())
-                }
-            }
-            Err(e) => {
-                eprintln!("{}", e.to_string())
-            }
-        }
+        let user_id = self.db.get_user_id(&user_id.to_string(), platform).await?;
+        self.db
+            .update_ollama_settings(user_id, ollama_settings.clone())
+            .await?;
+        Ok(())
     }
 
-    pub async fn grant_all_permissions(&mut self, user_id: U) {
-        let user_ctx = self.get_or_insert(user_id.clone()).await;
+    pub async fn grant_all_permissions(&self, user_id: U) -> Result<(), FunboyError> {
+        let user_ctx = self.get_or_insert(user_id.clone()).await?;
 
         let mut permissions = user_ctx.permissions.lock().await;
         permissions.0 = Permissions::owner().0;
 
-        let result = self
-            .db
+        self.db
             .update_permissions(self.platform, user_id.to_string(), &Permissions::owner())
-            .await;
+            .await?;
 
-        if let Err(e) = result {
-            eprintln!("{}", e.to_string())
-        }
+        Ok(())
     }
 
     pub async fn set_permissions(
-        &mut self,
+        &self,
         user_id: U,
         permissions: Permissions,
-    ) -> Result<(), PermissionError> {
-        let user_ctx = self.get_or_insert(user_id.clone()).await;
+    ) -> Result<(), FunboyError> {
+        let user_ctx = self.get_or_insert(user_id.clone()).await?;
 
         let mut current_permissions = user_ctx.permissions.lock().await;
 
         if current_permissions.is_owner() {
-            return Err(PermissionError::CannotChangeOwnersRole);
+            return Err(PermissionError::CannotChangeOwnersRole.into());
         }
 
         *current_permissions = permissions;
@@ -206,15 +191,15 @@ impl<U: FunboyUserId> UserMap<U> {
     }
 
     pub async fn grant_permissions(
-        &mut self,
+        &self,
         user_id: U,
         permissions: &[Permission],
-    ) -> Result<(), PermissionError> {
+    ) -> Result<(), FunboyError> {
         if permissions.contains(&Permission::Owner) {
-            return Err(PermissionError::CannotGrantOwnerPermission);
+            return Err(PermissionError::CannotGrantOwnerPermission.into());
         }
 
-        let user_ctx = self.get_or_insert(user_id.clone()).await;
+        let user_ctx = self.get_or_insert(user_id.clone()).await?;
 
         let mut current_permissions = user_ctx.permissions.lock().await;
         for permission in permissions {
@@ -234,19 +219,19 @@ impl<U: FunboyUserId> UserMap<U> {
     }
 
     pub async fn revoke_permissions(
-        &mut self,
+        &self,
         user_id: U,
         permissions: &[Permission],
-    ) -> Result<(), PermissionError> {
+    ) -> Result<(), FunboyError> {
         if permissions.contains(&Permission::Owner) {
-            return Err(PermissionError::CannotRevokeOwnerPermission);
+            return Err(PermissionError::CannotRevokeOwnerPermission.into());
         }
 
-        let user_ctx = self.get_or_insert(user_id.clone()).await;
+        let user_ctx = self.get_or_insert(user_id.clone()).await?;
         let mut current_permissions = user_ctx.permissions.lock().await;
 
         if current_permissions.is_owner() {
-            return Err(PermissionError::CannotRevokePermissionsFromOwner);
+            return Err(PermissionError::CannotRevokePermissionsFromOwner.into());
         }
 
         for permission in permissions {
@@ -265,13 +250,13 @@ impl<U: FunboyUserId> UserMap<U> {
         Ok(())
     }
 
-    pub async fn set_role(&mut self, user_id: U, role: Role) -> Result<(), PermissionError> {
+    pub async fn set_role(&self, user_id: U, role: Role) -> Result<(), FunboyError> {
         self.set_permissions(user_id, role.into()).await
     }
 
-    pub async fn get_permissions(&self, user_id: U) -> Permissions {
-        let user_ctx = self.get_or_insert(user_id.clone()).await;
+    pub async fn get_permissions(&self, user_id: U) -> Result<Permissions, FunboyError> {
+        let user_ctx = self.get_or_insert(user_id.clone()).await?;
         let permissions = user_ctx.permissions.lock().await;
-        permissions.clone()
+        Ok(permissions.clone())
     }
 }

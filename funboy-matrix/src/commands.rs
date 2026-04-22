@@ -115,8 +115,8 @@ pub async fn interpret_matrix_commands(
     room: Room,
     input: &str,
 ) -> Result<CommandResult, CommandError> {
-    let user_ctx = funboy.users.get_or_insert(matrix_user.clone()).await;
-    let user_permissions = funboy.users.get_permissions(matrix_user.clone()).await;
+    let user_ctx = funboy.users.get_or_insert(matrix_user.clone()).await?;
+    let user_permissions = funboy.users.get_permissions(matrix_user.clone()).await?;
     let room_id = room.room_id().to_owned();
     let user_id = matrix_user.clone();
 

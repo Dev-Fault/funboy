@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    fmt::Debug,
+    fmt::{Debug, Display},
     hash::{DefaultHasher, Hash, Hasher},
     str::FromStr,
     sync::Arc,
@@ -49,9 +49,9 @@ pub enum FunboyError {
     Permission(PermissionError),
 }
 
-impl ToString for FunboyError {
-    fn to_string(&self) -> String {
-        match self {
+impl Display for FunboyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let text = match self {
             FunboyError::Interpreter(e) => {
                 format!("FSL interpreter error:\n{}", e)
             }
@@ -66,7 +66,8 @@ impl ToString for FunboyError {
             }
             FunboyError::UsageLimit(e) => e.clone(),
             FunboyError::Permission(permission_error) => permission_error.to_string(),
-        }
+        };
+        write!(f, "{}", text)
     }
 }
 
@@ -489,7 +490,7 @@ impl<U: FunboyUserId> Funboy<U> {
         input: &str,
         interpreter: Arc<Mutex<FslInterpreter>>,
     ) -> Result<String, FunboyError> {
-        let user_ctx = self.users.get_or_insert(user_id).await;
+        let user_ctx = self.users.get_or_insert(user_id).await?;
         let Some(_guard) = FlagGuard::new(user_ctx.is_generating.clone()) else {
             return Err(FunboyError::UsageLimit(
                 "You're already generating something, please wait until it's finished.".to_string(),
@@ -506,7 +507,7 @@ impl<U: FunboyUserId> Funboy<U> {
         prompt: &str,
         interpreter: Arc<Mutex<FslInterpreter>>,
     ) -> Result<OllamaResponse, FunboyError> {
-        let user_ctx = self.users.get_or_insert(user_id).await;
+        let user_ctx = self.users.get_or_insert(user_id).await?;
         let Some(_guard) = FlagGuard::new(user_ctx.is_generating.clone()) else {
             return Err(FunboyError::UsageLimit(
                 "You're already generating something, please wait until it's finished.".to_string(),

@@ -106,7 +106,9 @@ pub async fn grant_host_permissions(
         };
         let user = MatrixUser::new(room_id.clone(), user_id);
         let mut users = funboy.users.clone();
-        users.grant_all_permissions(user).await;
+        if let Err(e) = users.grant_all_permissions(user).await {
+            eprintln!("{e}");
+        };
     }
 }
 
@@ -160,7 +162,13 @@ pub async fn on_room_message(
     }
 
     let matrix_user = MatrixUser::new(room.room_id().to_owned(), event.sender.clone());
-    let user_ctx = funboy.users.get_or_insert(matrix_user.clone()).await;
+    let user_ctx = match funboy.users.get_or_insert(matrix_user.clone()).await {
+        Ok(user_ctx) => user_ctx,
+        Err(e) => {
+            room.send(RoomMessageEventContent::text_plain(e.to_string()));
+            return;
+        }
+    };
     let mut pending_requests = user_ctx.pending_requests.lock().await;
     let interpreter = create_interpreter(
         funboy.clone(),

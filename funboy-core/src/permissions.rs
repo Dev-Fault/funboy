@@ -3,6 +3,8 @@ use std::collections::HashSet;
 use clap::ValueEnum;
 use strum_macros::EnumString;
 
+use crate::FunboyError;
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, ValueEnum, strum_macros::Display, EnumString)]
 pub enum Permission {
     Owner,
@@ -187,6 +189,12 @@ pub enum PermissionError {
     CannotRevokeOwnerPermission,
     CannotRevokePermissionsFromOwner,
     CannotChangeOwnersRole,
+}
+
+impl Into<FunboyError> for PermissionError {
+    fn into(self) -> FunboyError {
+        FunboyError::Permission(self)
+    }
 }
 
 impl ToString for PermissionError {
