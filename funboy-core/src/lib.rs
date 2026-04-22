@@ -82,6 +82,7 @@ impl From<sqlx::Error> for FunboyError {
 pub enum Request {
     GenerateFile,
     UploadSub(String),
+    DeleteTemplate(String),
 }
 
 pub const MAX_TEMPLATE_LENGTH: usize = 255;
@@ -308,7 +309,11 @@ impl<U: FunboyUserId> Funboy<U> {
             None => {
                 let subs = self.get_substitutes(template, None, OrderBy::Random, Limit::Count(200));
                 let subs = subs.await?;
-                let random_index = random_range(0..subs.len());
+                let random_index = if subs.len() > 0 {
+                    random_range(0..subs.len())
+                } else {
+                    0
+                };
 
                 if let Some(sub) = subs.get(random_index).cloned() {
                     self.random_sub_cache

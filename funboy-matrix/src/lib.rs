@@ -5,6 +5,7 @@ use funboy_cli::FunboyEnv;
 use funboy_core::{
     Funboy, Request,
     commands::{CommandError, CommandResult},
+    database::Platform,
     user::FunboyUserId,
 };
 use matrix_sdk::{
@@ -105,7 +106,7 @@ pub async fn grant_host_permissions(
             }
         };
         let user = MatrixUser::new(room_id.clone(), user_id);
-        let mut users = funboy.users.clone();
+        let users = funboy.users.clone();
         if let Err(e) = users.grant_all_permissions(user).await {
             eprintln!("{e}");
         };
@@ -288,6 +289,26 @@ pub async fn handle_request(
                     "Only text files are allowed (must be valid UTF-8).",
                 );
                 room.send(content).await.unwrap();
+            }
+        }
+        Request::DeleteTemplate(template) => {
+            if let MessageType::Text(response) = event.content.msgtype
+                && response.body.to_lowercase() == "yes"
+            {
+                let result = funboy
+                    .delete_command(
+                        user_id,
+                        Platform::Matrix,
+                        template,
+                        String::new(),
+                        false,
+                        false,
+                    )
+                    .await;
+                match result {
+                    Ok(result) => handle_command_result(result, room).await,
+                    Err(e) => handle_command_err(e, room).await,
+                };
             }
         }
     }

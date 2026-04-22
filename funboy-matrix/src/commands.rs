@@ -222,10 +222,26 @@ pub async fn interpret_matrix_commands(
                 id,
                 substitutes,
             } => {
-                let substitutes = substitutes.join(" ");
-                funboy
-                    .delete_command(user_id, Platform::Matrix, template, substitutes, single, id)
-                    .await
+                if substitutes.len() == 0 {
+                    let mut pending_requests = user_ctx.pending_requests.lock().await;
+                    pending_requests.push(Request::DeleteTemplate(template.clone()));
+                    return Ok(CommandResult::Text(format!(
+                        "Are you sure you want to delete {} (yes/no)? All of it's substitutes will also be deleted.",
+                        template
+                    )));
+                } else {
+                    let substitutes = substitutes.join(" ");
+                    funboy
+                        .delete_command(
+                            user_id,
+                            Platform::Matrix,
+                            template,
+                            substitutes,
+                            single,
+                            id,
+                        )
+                        .await
+                }
             }
             Command::List {
                 template,
