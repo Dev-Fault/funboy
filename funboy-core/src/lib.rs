@@ -345,7 +345,7 @@ impl Drop for FlagGuard {
     }
 }
 
-pub trait UserId: Eq + Hash + Send + Sync + Clone + ToString + 'static {}
+pub trait UserId: Debug + Eq + Hash + Send + Sync + Clone + ToString + 'static {}
 
 #[derive(Debug, Clone)]
 pub struct UserMap<U: UserId> {

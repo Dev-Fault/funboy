@@ -79,7 +79,7 @@ pub async fn enter_interpreter(
     Ok(())
 }
 
-#[derive(Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct Id(pub u64);
 impl UserId for Id {}
 

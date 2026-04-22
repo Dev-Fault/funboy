@@ -320,7 +320,7 @@ pub async fn handle_bot_command(
 async fn handle_command_result(result: CommandResult, room: Room) {
     match result {
         CommandResult::Text(message) => {
-            if !message.is_empty() {
+            if !message.trim().is_empty() {
                 let content = RoomMessageEventContent::text_markdown(&message);
                 room.send(content).await.unwrap();
             }

@@ -3,7 +3,7 @@ use std::{str::FromStr, sync::Arc};
 use ::serenity::all::{FullEvent, Interaction, UserId};
 use dotenvy::dotenv;
 use funboy_cli::{FunboyEnv, get_funboy};
-use funboy_core::{Funboy, database::Platform};
+use funboy_core::{Funboy, database::Platform, interpreter::InterpreterLimits};
 use poise::serenity_prelude as serenity;
 use reqwest::Client as HttpClient;
 use songbird::{SerenityInit, typemap::TypeMapKey};
@@ -22,7 +22,7 @@ mod interpreter;
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type Context<'a> = poise::Context<'a, Data, Error>;
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DiscordUserId(UserId);
 impl funboy_core::UserId for DiscordUserId {}
 
@@ -36,6 +36,7 @@ struct Data {
     pub funboy: Arc<Funboy<DiscordUserId>>,
     pub track_list: Arc<Mutex<TrackList>>,
     pub track_player_lock: Arc<Mutex<()>>,
+    pub interpreter_limits: InterpreterLimits<DiscordUserId>,
     yt_dlp_cookies_path: Option<String>,
 } // User data, which is stored and accessible in all command invocations
 
@@ -45,6 +46,7 @@ impl Data {
             funboy,
             track_list: Mutex::new(TrackList::new()).into(),
             track_player_lock: Default::default(),
+            interpreter_limits: InterpreterLimits::default(),
             yt_dlp_cookies_path: None,
         }
     }

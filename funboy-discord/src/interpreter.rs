@@ -200,7 +200,7 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> Arc<tokio::sync::Mutex<Fs
         DiscordUserId(ctx.author().id),
         ctx.data().funboy.clone(),
         dctx,
-        InterpreterLimits::default(),
+        ctx.data().interpreter_limits.clone(),
     );
 
     interpreter.add_command(

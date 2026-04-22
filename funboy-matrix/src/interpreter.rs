@@ -30,6 +30,7 @@ pub struct MatrixCtx {
     pub room: Room,
     pub pending_asks: Arc<Mutex<HashMap<MatrixUser, oneshot::Sender<String>>>>,
     pub sender: MatrixUser,
+    pub interpreter_limits: InterpreterLimits<MatrixUser>,
 }
 
 impl MatrixCtx {
@@ -42,6 +43,7 @@ impl MatrixCtx {
             room,
             pending_asks,
             sender,
+            interpreter_limits: InterpreterLimits::default(),
         }
     }
 
@@ -78,8 +80,10 @@ impl Messenger for MatrixCtx {
         let room = self.room.clone();
         let message = message.to_owned();
         tokio::spawn(async move {
-            let content = RoomMessageEventContent::text_markdown(message);
-            room.send(content).await.unwrap();
+            if !message.trim().is_empty() {
+                let content = RoomMessageEventContent::text_markdown(message);
+                room.send(content).await.unwrap();
+            }
         });
     }
 
@@ -109,7 +113,7 @@ impl Interactor for MatrixCtx {
         async move {
             let user = user_name_to_id(&user_name, room.clone()).await?;
 
-            if !message.is_empty() {
+            if !message.trim().is_empty() {
                 let message =
                     RoomMessageEventContent::text_markdown(format!("{}\n\n{}", user, &message));
                 let message = message.add_mentions(Mentions::with_user_ids([user]));
@@ -161,9 +165,8 @@ pub async fn create_interpreter(
     let ictx = InterpreterContext::new(
         matrix_ctx.clone().sender,
         funboy.clone(),
-        matrix_ctx,
-        // TODO give this a longer lifetime
-        InterpreterLimits::default(),
+        matrix_ctx.clone(),
+        matrix_ctx.interpreter_limits,
     );
     interpreter.add_command(
         SAY,
