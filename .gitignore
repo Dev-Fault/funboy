@@ -3,3 +3,4 @@ target/
 **/*.rs.bk
 *.pdb
 *.db
+.cargo/config.toml
