@@ -140,6 +140,7 @@ impl ToString for CommandError {
 }
 
 pub fn parse_command_args<'a>(input: &'a str) -> Vec<&'a str> {
+    let input = input.trim();
     let args: Vec<&str> = input.split(' ').collect();
 
     let mut full_args = vec!["funboy"];
