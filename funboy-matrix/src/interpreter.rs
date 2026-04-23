@@ -10,10 +10,7 @@ use funboy_core::{
 };
 use matrix_sdk::{
     Room,
-    ruma::{
-        OwnedUserId,
-        events::{Mentions, room::message::RoomMessageEventContent},
-    },
+    ruma::{OwnedUserId, events::room::message::RoomMessageEventContent},
 };
 use tokio::{
     sync::{
@@ -23,10 +20,11 @@ use tokio::{
     time::{Instant, timeout_at},
 };
 
-use crate::MatrixUser;
+use crate::{MatrixUser, commands::send_msg_with_mixed_content};
 
 #[derive(Clone)]
 pub struct MatrixCtx {
+    pub funboy: Arc<Funboy<MatrixUser>>,
     pub room: Room,
     pub pending_asks: Arc<Mutex<HashMap<MatrixUser, oneshot::Sender<String>>>>,
     pub sender: MatrixUser,
@@ -35,11 +33,13 @@ pub struct MatrixCtx {
 
 impl MatrixCtx {
     pub fn new(
+        funboy: Arc<Funboy<MatrixUser>>,
         room: Room,
         pending_asks: Arc<Mutex<HashMap<MatrixUser, oneshot::Sender<String>>>>,
         sender: MatrixUser,
     ) -> Self {
         Self {
+            funboy,
             room,
             pending_asks,
             sender,
@@ -79,11 +79,17 @@ impl Messenger for MatrixCtx {
     fn say(&self, message: &str) {
         let room = self.room.clone();
         let message = message.to_owned();
+        let funboy = self.funboy.clone();
+        let user_id = self.sender.clone();
         tokio::spawn(async move {
-            if !message.trim().is_empty() {
-                let content = RoomMessageEventContent::text_markdown(message);
-                room.send(content).await.unwrap();
-            }
+            match funboy.users.get_permissions(user_id).await {
+                Ok(permissions) => send_msg_with_mixed_content(&message, &permissions, room).await,
+                Err(e) => {
+                    room.send(RoomMessageEventContent::text_plain(e.to_string()))
+                        .await
+                        .unwrap();
+                }
+            };
         });
     }
 
@@ -110,14 +116,23 @@ impl Interactor for MatrixCtx {
     ) -> impl std::future::Future<Output = Result<(), CommandError>> + Send {
         let room = self.room.clone();
         let message = message.to_owned();
+        let funboy = self.funboy.clone();
+        let user_id = self.sender.clone();
         async move {
             let user = user_name_to_id(&user_name, room.clone()).await?;
 
             if !message.trim().is_empty() {
-                let message =
-                    RoomMessageEventContent::text_markdown(format!("{}\n\n{}", user, &message));
-                let message = message.add_mentions(Mentions::with_user_ids([user]));
-                room.send(message).await.unwrap();
+                let message = format!("{}\n\n{}", user, &message);
+                match funboy.users.get_permissions(user_id).await {
+                    Ok(permissions) => {
+                        send_msg_with_mixed_content(&message, &permissions, room).await
+                    }
+                    Err(e) => {
+                        room.send(RoomMessageEventContent::text_plain(e.to_string()))
+                            .await
+                            .unwrap();
+                    }
+                };
             }
 
             Ok(())

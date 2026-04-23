@@ -7,10 +7,15 @@ use funboy_core::{
     commands::{CommandError, CommandResult, OllamaAction, parse_command_args},
     database::Platform,
     format::{LIST_STYLE_NONE, ListStyle},
-    permissions::{Permission, Role},
+    permissions::{Permission, Permissions, Role},
 };
-use matrix_sdk::{Room, attachment::AttachmentConfig, ruma::OwnedUserId};
+use matrix_sdk::{
+    Room,
+    attachment::AttachmentConfig,
+    ruma::{OwnedUserId, events::room::message::RoomMessageEventContent},
+};
 use tokio::sync::Mutex;
+use url::Url;
 
 use crate::MatrixUser;
 
@@ -109,6 +114,78 @@ pub enum Command {
     Cancel,
 }
 
+pub async fn embed_url(
+    url: &str,
+    user_permissions: &Permissions,
+    room: Room,
+) -> Result<CommandResult, CommandError> {
+    if user_permissions.can_use_files() {
+        let Ok(bytes) = reqwest::get(url).await else {
+            return Err(CommandError::ExecutionFailed(
+                "invalid image url".to_string(),
+            ));
+        };
+        let Ok(bytes) = bytes.bytes().await else {
+            return Err(CommandError::ExecutionFailed(
+                "invalid image url".to_string(),
+            ));
+        };
+        let (mime, extension) = if url.contains("png") {
+            ("image/png", "png")
+        } else if url.contains("gif") {
+            ("image/gif", "gif")
+        } else if url.contains("webp") {
+            ("image/webp", "webp")
+        } else {
+            ("image/jpeg", "jpeg")
+        };
+        let mime = mime.parse::<mime::Mime>().unwrap();
+        match room
+            .send_attachment(
+                &format!("image.{}", extension),
+                &mime,
+                bytes.to_vec(),
+                AttachmentConfig::new(),
+            )
+            .await
+        {
+            Ok(_) => Ok(CommandResult::None),
+            Err(_) => Err(CommandError::ExecutionFailed(
+                "failed to upload image".to_string(),
+            )),
+        }
+    } else {
+        Err(CommandError::LackingPermission(Permission::File))
+    }
+}
+
+pub async fn send_msg_with_mixed_content(input: &str, user_permissions: &Permissions, room: Room) {
+    let mut buf = String::with_capacity(input.len());
+    for item in input.split_inclusive(' ') {
+        if let Ok(url) = Url::parse(item)
+            && !url.cannot_be_a_base()
+        {
+            if !buf.is_empty() {
+                room.send(RoomMessageEventContent::text_markdown(&buf))
+                    .await
+                    .unwrap();
+                buf.clear();
+            }
+            if let Err(_) = embed_url(url.as_str(), &user_permissions, room.clone()).await {
+                buf.push_str(item);
+            };
+        } else {
+            buf.push_str(item);
+        }
+    }
+
+    if !buf.is_empty() {
+        room.send(RoomMessageEventContent::text_markdown(&buf))
+            .await
+            .unwrap();
+    }
+}
+
 pub async fn interpret_matrix_commands(
     funboy: &Funboy<MatrixUser>,
     interpreter: Arc<Mutex<FslInterpreter>>,
@@ -126,55 +203,27 @@ pub async fn interpret_matrix_commands(
     match Command::try_parse_from(args) {
         Ok(command) => match command {
             Command::Image { action } => match action {
-                ImageAction::Embed { url } => {
-                    if user_permissions.can_use_files() {
-                        let Ok(bytes) = reqwest::get(&url).await else {
-                            return Err(CommandError::ExecutionFailed(
-                                "invalid image url".to_string(),
-                            ));
-                        };
-                        let Ok(bytes) = bytes.bytes().await else {
-                            return Err(CommandError::ExecutionFailed(
-                                "invalid image url".to_string(),
-                            ));
-                        };
-                        let (mime, extension) = if url.contains("png") {
-                            ("image/png", "png")
-                        } else if url.contains("gif") {
-                            ("image/gif", "gif")
-                        } else if url.contains("webp") {
-                            ("image/webp", "webp")
-                        } else {
-                            ("image/jpeg", "jpeg")
-                        };
-                        let mime = mime.parse::<mime::Mime>().unwrap();
-                        match room
-                            .send_attachment(
-                                &format!("image.{}", extension),
-                                &mime,
-                                bytes.to_vec(),
-                                AttachmentConfig::new(),
-                            )
-                            .await
-                        {
-                            Ok(_) => Ok(CommandResult::None),
-                            Err(_) => Err(CommandError::ExecutionFailed(
-                                "failed to upload image".to_string(),
-                            )),
-                        }
-                    } else {
-                        Err(CommandError::LackingPermission(Permission::File))
-                    }
-                }
+                ImageAction::Embed { url } => embed_url(&url, &user_permissions, room).await,
             },
             Command::Generate {
                 file: false,
                 input,
                 ollama,
             } => {
-                funboy
+                let result = funboy
                     .generate_command(Platform::Matrix, user_id, interpreter, input, false, ollama)
-                    .await
+                    .await;
+
+                match result {
+                    Ok(output) => match output {
+                        CommandResult::Text(output) => {
+                            send_msg_with_mixed_content(&output, &user_permissions, room).await;
+                            Ok(CommandResult::None)
+                        }
+                        _ => Ok(CommandResult::None),
+                    },
+                    Err(e) => Err(e),
+                }
             }
             Command::Generate { file: true, .. } => {
                 if user_permissions.can_use_files() && user_permissions.can_generate() {

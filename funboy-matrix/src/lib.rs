@@ -173,7 +173,12 @@ pub async fn on_room_message(
     let mut pending_requests = user_ctx.pending_requests.lock().await;
     let interpreter = create_interpreter(
         funboy.clone(),
-        MatrixCtx::new(room.clone(), pending_asks.clone(), matrix_user.clone()),
+        MatrixCtx::new(
+            funboy.clone(),
+            room.clone(),
+            pending_asks.clone(),
+            matrix_user.clone(),
+        ),
     )
     .await;
 
@@ -297,7 +302,7 @@ pub async fn handle_request(
             {
                 let result = funboy
                     .delete_command(
-                        user_id,
+                        user_id.clone(),
                         Platform::Matrix,
                         template,
                         String::new(),
@@ -324,7 +329,7 @@ pub async fn handle_bot_command(
     let user_id = MatrixUser::new(room.room_id().to_owned(), event.sender.clone());
     let interpreter = create_interpreter(
         funboy.clone(),
-        MatrixCtx::new(room.clone(), pending_asks, user_id.clone()),
+        MatrixCtx::new(funboy.clone(), room.clone(), pending_asks, user_id.clone()),
     )
     .await;
 
@@ -338,9 +343,7 @@ pub async fn handle_bot_command(
     .await;
 
     match result {
-        Ok(result) => {
-            handle_command_result(result, room).await;
-        }
+        Ok(result) => handle_command_result(result, room).await,
         Err(e) => {
             handle_command_err(e, room).await;
         }
