@@ -14,6 +14,7 @@ use ollama_rs::models::ModelInfo;
 use rand::{Rng, distr::uniform::SampleUniform, random_range};
 use regex::Regex;
 use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     database::{
@@ -47,6 +48,7 @@ pub enum FunboyError {
     UserInput(String),
     UsageLimit(String),
     Permission(PermissionError),
+    GenerationCancelled,
 }
 
 impl Display for FunboyError {
@@ -66,6 +68,7 @@ impl Display for FunboyError {
             }
             FunboyError::UsageLimit(e) => e.clone(),
             FunboyError::Permission(permission_error) => permission_error.to_string(),
+            FunboyError::GenerationCancelled => format!("Generation was cancelled"),
         };
         write!(f, "{}", text)
     }
@@ -502,7 +505,21 @@ impl<U: FunboyUserId> Funboy<U> {
             ));
         };
 
-        let output = self.generate(input, interpreter).await;
+        let cancel_token = {
+            let mut cancel_token = user_ctx.cancel_generation.lock().await;
+            *cancel_token = CancellationToken::new();
+            cancel_token.clone()
+        };
+
+        let generate = self.generate(input, interpreter);
+
+        let output = tokio::select! {
+            result = generate => result,
+            _ = cancel_token.cancelled() => {
+                Err(FunboyError::GenerationCancelled)
+            }
+        };
+
         output
     }
 
@@ -518,15 +535,28 @@ impl<U: FunboyUserId> Funboy<U> {
                 "You're already generating something, please wait until it's finished.".to_string(),
             ));
         };
+
+        let cancel_token = {
+            let mut cancel_token = user_ctx.cancel_generation.lock().await;
+            *cancel_token = CancellationToken::new();
+            cancel_token.clone()
+        };
+
         let ollama_settings = user_ctx.ollama_settings.lock().await.clone();
-        let output = self
-            .generate_ollama(
-                self.get_ollama_model().await,
-                &ollama_settings,
-                prompt,
-                interpreter,
-            )
-            .await;
+        let generate = self.generate_ollama(
+            self.get_ollama_model().await,
+            &ollama_settings,
+            prompt,
+            interpreter,
+        );
+
+        let output = tokio::select! {
+            result = generate => result,
+            _ = cancel_token.cancelled() => {
+                Err(FunboyError::GenerationCancelled)
+            }
+        };
+
         output
     }
 }

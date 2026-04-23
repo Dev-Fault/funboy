@@ -106,6 +106,7 @@ pub enum Command {
         #[arg(trailing_var_arg = true)]
         permissions: Vec<Permission>,
     },
+    Cancel,
 }
 
 pub async fn interpret_matrix_commands(
@@ -297,6 +298,7 @@ pub async fn interpret_matrix_commands(
 
                 funboy.set_role(user_id, receiver, role).await
             }
+            Command::Cancel => funboy.cancel_command(user_id).await,
         },
         Err(e) => Err(CommandError::UnknownCommand(e.to_string())),
     }

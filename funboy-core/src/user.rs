@@ -9,6 +9,7 @@ use std::{
 
 use moka::future::{Cache, CacheBuilder};
 use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     FunboyError, Request,
@@ -17,33 +18,16 @@ use crate::{
     permissions::{Permission, PermissionError, Permissions, Role},
 };
 
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 pub struct UserCtx {
     pub is_generating: Arc<AtomicBool>,
     pub ollama_settings: Arc<Mutex<OllamaSettings>>,
     pub pending_requests: Arc<Mutex<Vec<Request>>>,
+    pub cancel_generation: Arc<Mutex<CancellationToken>>,
     permissions: Arc<Mutex<Permissions>>,
 }
 
-impl Default for UserCtx {
-    fn default() -> Self {
-        Self {
-            is_generating: Default::default(),
-            ollama_settings: Default::default(),
-            pending_requests: Default::default(),
-            permissions: Default::default(),
-        }
-    }
-}
-
 impl UserCtx {
-    pub fn new() -> UserCtx {
-        Self {
-            is_generating: Arc::new(AtomicBool::new(false)),
-            ..Default::default()
-        }
-    }
-
     pub fn with_permissions(mut self, permissions: Permissions) -> UserCtx {
         self.permissions = Arc::new(Mutex::new(permissions));
         self

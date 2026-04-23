@@ -235,6 +235,7 @@ pub enum Command {
         #[arg(value_parser = clap::value_parser!(Mode))]
         mode: Mode,
     },
+    Cancel,
     Exit,
 }
 
@@ -334,6 +335,7 @@ pub async fn interpret_bot_commands<U: FunboyUserId>(
                 .await
                 .map(|r| r.into()),
             Command::Exit => Ok(CliCommandResult::Exit),
+            Command::Cancel => funboy.cancel_command(user_id).await.map(|r| r.into()),
         },
         Err(e) => Err(CommandError::UnknownCommand(e.to_string())),
     }

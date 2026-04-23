@@ -372,3 +372,19 @@ pub async fn revoke(
     }
     Ok(())
 }
+
+/// Cancels ongoing generations
+#[poise::command(slash_command, prefix_command, category = "Utility")]
+pub async fn cancel(ctx: Context<'_>) -> Result<(), Error> {
+    let funboy = ctx.data().funboy.clone();
+    let user_id = DiscordUserId(ctx.author().id);
+    ctx.say_ephemeral("Cancelling ongoing generations").await?;
+
+    match funboy.cancel_command(user_id).await {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            ctx.say_ephemeral(&e.to_string()).await?;
+            Ok(())
+        }
+    }
+}

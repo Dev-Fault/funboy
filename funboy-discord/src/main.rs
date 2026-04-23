@@ -128,6 +128,7 @@ fn get_discord_commands()
         commands::utility::set_role(),
         commands::utility::grant(),
         commands::utility::revoke(),
+        commands::utility::cancel(),
         commands::ollama::list_ollama_models(),
         commands::ollama::set_ollama_model(),
         commands::ollama::list_ollama_settings(),

@@ -817,4 +817,10 @@ impl<U: FunboyUserId> Funboy<U> {
             }
         }
     }
+
+    pub async fn cancel_command(&self, user_id: U) -> Result<CommandResult, CommandError> {
+        let user_ctx = self.users.get_or_insert(user_id).await?;
+        user_ctx.cancel_generation.lock().await.cancel();
+        Ok(CommandResult::None)
+    }
 }
