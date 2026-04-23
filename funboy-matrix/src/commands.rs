@@ -9,15 +9,10 @@ use funboy_core::{
     format::{LIST_STYLE_NONE, ListStyle},
     permissions::{Permission, Permissions, Role},
 };
-use matrix_sdk::{
-    Room,
-    attachment::AttachmentConfig,
-    ruma::{OwnedUserId, events::room::message::RoomMessageEventContent},
-};
+use matrix_sdk::{Room, attachment::AttachmentConfig, ruma::OwnedUserId};
 use tokio::sync::Mutex;
-use url::Url;
 
-use crate::MatrixUser;
+use crate::{MatrixUser, send_msg_with_mixed_content};
 
 #[derive(Parser, Debug, Clone)]
 pub enum ImageAction {
@@ -156,33 +151,6 @@ pub async fn embed_url(
         }
     } else {
         Err(CommandError::LackingPermission(Permission::File))
-    }
-}
-
-pub async fn send_msg_with_mixed_content(input: &str, user_permissions: &Permissions, room: Room) {
-    let mut buf = String::with_capacity(input.len());
-    for item in input.split_inclusive(' ') {
-        if let Ok(url) = Url::parse(item)
-            && !url.cannot_be_a_base()
-        {
-            if !buf.is_empty() {
-                room.send(RoomMessageEventContent::text_markdown(&buf))
-                    .await
-                    .unwrap();
-                buf.clear();
-            }
-            if let Err(_) = embed_url(url.as_str(), &user_permissions, room.clone()).await {
-                buf.push_str(item);
-            };
-        } else {
-            buf.push_str(item);
-        }
-    }
-
-    if !buf.is_empty() {
-        room.send(RoomMessageEventContent::text_markdown(&buf))
-            .await
-            .unwrap();
     }
 }
 

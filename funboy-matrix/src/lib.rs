@@ -6,6 +6,7 @@ use funboy_core::{
     Funboy, Request,
     commands::{CommandError, CommandResult},
     database::Platform,
+    permissions::Permissions,
     user::FunboyUserId,
 };
 use matrix_sdk::{
@@ -22,9 +23,10 @@ use tokio::{
     sync::{Mutex, oneshot},
     time::sleep,
 };
+use url::Url;
 
 use crate::{
-    commands::interpret_matrix_commands,
+    commands::{embed_url, interpret_matrix_commands},
     interpreter::{MatrixCtx, create_interpreter},
 };
 
@@ -347,6 +349,33 @@ pub async fn handle_bot_command(
         Err(e) => {
             handle_command_err(e, room).await;
         }
+    }
+}
+
+pub async fn send_msg_with_mixed_content(input: &str, user_permissions: &Permissions, room: Room) {
+    let mut buf = String::with_capacity(input.len());
+    for item in input.split_inclusive(' ') {
+        if let Ok(url) = Url::parse(item)
+            && !url.cannot_be_a_base()
+        {
+            if !buf.trim().is_empty() {
+                room.send(RoomMessageEventContent::text_markdown(&buf))
+                    .await
+                    .unwrap();
+                buf.clear();
+            }
+            if let Err(_) = embed_url(url.as_str(), &user_permissions, room.clone()).await {
+                buf.push_str(item);
+            };
+        } else {
+            buf.push_str(item);
+        }
+    }
+
+    if !buf.trim().is_empty() {
+        room.send(RoomMessageEventContent::text_markdown(&buf))
+            .await
+            .unwrap();
     }
 }
 

@@ -20,7 +20,7 @@ use tokio::{
     time::{Instant, timeout_at},
 };
 
-use crate::{MatrixUser, commands::send_msg_with_mixed_content};
+use crate::{MatrixUser, send_msg_with_mixed_content};
 
 #[derive(Clone)]
 pub struct MatrixCtx {
