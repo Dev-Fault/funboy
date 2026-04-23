@@ -109,7 +109,7 @@ impl<U: FunboyUserId> Funboy<U> {
             valid_template_regex: Regex::new(&format!("^[{}]+$", VALID_TEMPLATE_CHARS)).unwrap(),
             random_sub_cache: Arc::new(
                 CacheBuilder::new(20)
-                    .time_to_live(Duration::from_secs(60))
+                    .time_to_idle(Duration::from_secs(60))
                     .build(),
             ),
         }
