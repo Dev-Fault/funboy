@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 
 use clap::Parser;
 use fsl_interpreter::FslInterpreter;
@@ -9,7 +9,10 @@ use funboy_core::{
     format::{LIST_STYLE_NONE, ListStyle},
     permissions::{Permission, Permissions, Role},
 };
-use matrix_sdk::{Room, attachment::AttachmentConfig, ruma::OwnedUserId};
+use matrix_sdk::{
+    Room, attachment::AttachmentConfig, reqwest::header::CONTENT_TYPE, ruma::OwnedUserId,
+};
+use mime::Mime;
 use tokio::sync::Mutex;
 
 use crate::{MatrixUser, send_msg_with_mixed_content};
@@ -86,9 +89,8 @@ pub enum Command {
         #[command(subcommand)]
         action: OllamaAction,
     },
-    Image {
-        #[command(subcommand)]
-        action: ImageAction,
+    Attach {
+        url: String,
     },
     SetRole {
         user: String,
@@ -109,45 +111,56 @@ pub enum Command {
     Cancel,
 }
 
-pub async fn embed_url(
+pub async fn attach_url(
     url: &str,
     user_permissions: &Permissions,
     room: Room,
 ) -> Result<CommandResult, CommandError> {
     if user_permissions.can_use_files() {
-        let Ok(bytes) = reqwest::get(url).await else {
-            return Err(CommandError::ExecutionFailed(
-                "invalid image url".to_string(),
-            ));
+        let Ok(response) = matrix_sdk::reqwest::get(url).await else {
+            return Err(CommandError::ExecutionFailed("invalid url".to_string()));
         };
-        let Ok(bytes) = bytes.bytes().await else {
-            return Err(CommandError::ExecutionFailed(
-                "invalid image url".to_string(),
-            ));
-        };
-        let (mime, extension) = if url.contains("png") {
-            ("image/png", "png")
-        } else if url.contains("gif") {
-            ("image/gif", "gif")
-        } else if url.contains("webp") {
-            ("image/webp", "webp")
-        } else {
-            ("image/jpeg", "jpeg")
-        };
-        let mime = mime.parse::<mime::Mime>().unwrap();
-        match room
-            .send_attachment(
-                &format!("image.{}", extension),
-                &mime,
-                bytes.to_vec(),
-                AttachmentConfig::new(),
-            )
-            .await
-        {
-            Ok(_) => Ok(CommandResult::None),
-            Err(_) => Err(CommandError::ExecutionFailed(
-                "failed to upload image".to_string(),
-            )),
+        let headers = response.headers();
+
+        match headers.get(CONTENT_TYPE) {
+            Some(content_type) => {
+                let Ok(content_type) = content_type.to_str() else {
+                    return Err(CommandError::ExecutionFailed(format!(
+                        "couldn't get content type of url"
+                    )));
+                };
+                let Ok(content_type) = Mime::from_str(content_type) else {
+                    return Err(CommandError::ExecutionFailed(format!(
+                        "couldn't get content type of url"
+                    )));
+                };
+                match content_type.type_() {
+                    mime::AUDIO | mime::VIDEO | mime::IMAGE | mime::TEXT => {
+                        let bytes = response.bytes().await.unwrap();
+
+                        match room
+                            .send_attachment(
+                                &format!("{}", url),
+                                &content_type,
+                                bytes.to_vec(),
+                                AttachmentConfig::new(),
+                            )
+                            .await
+                        {
+                            Ok(_) => Ok(CommandResult::None),
+                            Err(_) => Err(CommandError::ExecutionFailed(
+                                "failed to send attachment".to_string(),
+                            )),
+                        }
+                    }
+                    _ => Err(CommandError::ExecutionFailed(format!(
+                        "invalid attachment type"
+                    ))),
+                }
+            }
+            None => Err(CommandError::ExecutionFailed(format!(
+                "couldn't get content type of url"
+            ))),
         }
     } else {
         Err(CommandError::LackingPermission(Permission::File))
@@ -170,9 +183,7 @@ pub async fn interpret_matrix_commands(
 
     match Command::try_parse_from(args) {
         Ok(command) => match command {
-            Command::Image { action } => match action {
-                ImageAction::Embed { url } => embed_url(&url, &user_permissions, room).await,
-            },
+            Command::Attach { url } => attach_url(&url, &user_permissions, room).await,
             Command::Generate {
                 file: false,
                 input,

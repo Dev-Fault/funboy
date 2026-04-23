@@ -26,7 +26,7 @@ use tokio::{
 use url::Url;
 
 use crate::{
-    commands::{embed_url, interpret_matrix_commands},
+    commands::{attach_url, interpret_matrix_commands},
     interpreter::{MatrixCtx, create_interpreter},
 };
 
@@ -364,7 +364,7 @@ pub async fn send_msg_with_mixed_content(input: &str, user_permissions: &Permiss
                     .unwrap();
                 buf.clear();
             }
-            if let Err(_) = embed_url(url.as_str(), &user_permissions, room.clone()).await {
+            if let Err(_) = attach_url(url.as_str(), &user_permissions, room.clone()).await {
                 buf.push_str(item);
             };
         } else {
