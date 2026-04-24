@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, path::Path, sync::Arc};
 
 use funboy_cli::{FunboyEnv, get_funboy};
 use funboy_core::database::Platform;
@@ -7,8 +7,12 @@ use funboy_matrix::{
 };
 use matrix_sdk::{
     Client, Room,
+    authentication::matrix::MatrixSession,
     config::SyncSettings,
-    ruma::events::room::{member::StrippedRoomMemberEvent, message::OriginalSyncRoomMessageEvent},
+    ruma::events::{
+        key::verification::request::ToDeviceKeyVerificationRequestEvent,
+        room::{member::StrippedRoomMemberEvent, message::OriginalSyncRoomMessageEvent},
+    },
 };
 use tokio::sync::{Mutex, oneshot};
 
@@ -19,15 +23,40 @@ async fn main() {
 
     let client = Client::builder()
         .homeserver_url(&env.homeserver)
+        .sqlite_store("./bot_state", None)
         .build()
         .await
         .expect("couldn't connect to home server");
 
-    client
-        .matrix_auth()
-        .login_username(&env.username, &env.password)
-        .await
-        .expect("couldn't login");
+    let session_file = Path::new("./bot_state/session.json");
+
+    if session_file.exists() {
+        let session_json = std::fs::read_to_string(session_file).unwrap();
+        let session: MatrixSession = serde_json::from_str(&session_json).unwrap();
+        client.restore_session(session).await.unwrap();
+        println!(
+            "Restored previous session, device ID: {}",
+            client.session().expect("").meta().device_id
+        )
+    } else {
+        client
+            .matrix_auth()
+            .login_username(&env.username, &env.password)
+            .await
+            .expect("couldn't login");
+
+        let session = client.matrix_auth().session().unwrap();
+        let session_json = serde_json::to_string(&session).unwrap();
+        std::fs::write(session_file, session_json).unwrap();
+        println!("New login, device ID: {}", client.device_id().unwrap());
+
+        client
+            .encryption()
+            .recovery()
+            .recover(&env.recovery_key)
+            .await
+            .expect("invalid recovery key");
+    }
 
     let funboy = Arc::new(get_funboy(&funboy_env, Platform::Matrix).await);
 
@@ -44,6 +73,12 @@ async fn main() {
         .await
         .unwrap()
         .next_batch;
+
+    client.add_event_handler(
+        |_ev: ToDeviceKeyVerificationRequestEvent, _client: Client| async move {
+            // ignore verification requests, prefer bootstrap
+        },
+    );
 
     let pending_asks: Arc<Mutex<HashMap<MatrixUser, oneshot::Sender<String>>>> =
         Arc::new(Mutex::new(HashMap::new()));

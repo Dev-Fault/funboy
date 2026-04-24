@@ -38,6 +38,7 @@ pub struct MatrixEnv {
     pub homeserver: String,
     pub username: String,
     pub password: String,
+    pub recovery_key: String,
     pub host_ids: Vec<String>,
 }
 
@@ -58,6 +59,8 @@ impl MatrixEnv {
             )
         };
 
+        let recovery_key = env::var("RECOVERY_KEY").expect(".env file should contain recovery key");
+
         let host_ids: Vec<String> = env::var("HOSTS")
             .unwrap_or_default()
             .split(",")
@@ -69,6 +72,7 @@ impl MatrixEnv {
             homeserver,
             username,
             password,
+            recovery_key,
             host_ids,
         }
     }

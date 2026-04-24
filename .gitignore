@@ -4,3 +4,4 @@ target/
 *.pdb
 *.db
 .cargo/config.toml
+**/bot_state/
