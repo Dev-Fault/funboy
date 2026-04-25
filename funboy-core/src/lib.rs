@@ -21,9 +21,7 @@ use crate::{
         FunboyDatabase, KeySize, Limit, OrderBy, Platform, Substitute, SubstituteReceipt, Template,
         TemplateReceipt,
     },
-    interpreter::{
-        ASK_AI, ASK_AI_RULES, GET_SUB, GET_SUB_RULES, create_ask_ai_command, create_get_sub_command,
-    },
+    interpreter::{ASK_AI, ASK_AI_RULES, GET_SUB, GET_SUB_RULES, ask_ai_command, get_sub_command},
     ollama::{OllamaGenerator, OllamaResponse, OllamaSettings},
     permissions::{Permission, PermissionError, Permissions, Role},
     template_substitutor::{TemplateDelimiter, TemplateSubstitutor, VALID_TEMPLATE_CHARS},
@@ -433,12 +431,8 @@ impl<U: FunboyUserId> Funboy<U> {
 
         let mut modified_interpreter = interpreter.lock().await;
         let funboy = Arc::new(self.clone());
-        modified_interpreter.add_command(
-            GET_SUB,
-            GET_SUB_RULES,
-            create_get_sub_command(funboy.clone()),
-        );
-        modified_interpreter.add_command(ASK_AI, ASK_AI_RULES, create_ask_ai_command(funboy));
+        modified_interpreter.register(GET_SUB, GET_SUB_RULES, get_sub_command(funboy.clone()));
+        modified_interpreter.register(ASK_AI, ASK_AI_RULES, ask_ai_command(funboy));
         drop(modified_interpreter);
 
         for _ in 0..u8::MAX {

@@ -62,15 +62,15 @@ pub async fn create_interpreter(
     let mut interpreter = FslInterpreter::new_unbounded();
     let cli_context = CliContext::new(rl);
     let ictx = InterpreterContext::new(Id(0), funboy, cli_context, InterpreterLimits::none());
-    interpreter.add_command(
+    interpreter.register(
         SAY,
         SAY_RULES,
-        funboy_core::interpreter::create_say_command(ictx.clone()),
+        funboy_core::interpreter::say_command(ictx.clone()),
     );
-    interpreter.add_command(
+    interpreter.register(
         ASK,
         ASK_RULES,
-        funboy_core::interpreter::create_ask_command(ictx.clone()),
+        funboy_core::interpreter::ask_command(ictx.clone()),
     );
     Arc::new(Mutex::new(interpreter))
 }

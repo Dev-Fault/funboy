@@ -4,7 +4,7 @@ use fsl_interpreter::{
     FslInterpreter, InterpreterData,
     commands::{NUMERIC_TYPES, TEXT_TYPES, WHOLE_NUMBER_TYPES},
     types::{
-        command::{ArgPos, ArgRule, Command, CommandError, Executor},
+        command::{ArgPos, ArgRule, Command, CommandError, Handler},
         value::Value,
     },
 };
@@ -154,10 +154,8 @@ pub const SAY_RULES: &'static [ArgRule] = &[ArgRule::new(ArgPos::Index(0), TEXT_
 pub const FIVE_HUNDRED_MS: u64 = 500;
 pub const TWO_THOUSAND_MESSAGES: u16 = 2000;
 pub const SAY_MAX_OUTPUT_LENGTH: usize = 8000;
-pub fn create_say_command<U: FunboyUserId, M: Messenger>(
-    ictx: InterpreterContext<U, M>,
-) -> Executor {
-    let say_command = {
+pub fn say_command<U: FunboyUserId, M: Messenger>(ictx: InterpreterContext<U, M>) -> Handler {
+    Handler::from({
         let ictx = ictx.clone();
         move |command: Command, interpreter_data| {
             let ictx = ictx.clone();
@@ -190,8 +188,7 @@ pub fn create_say_command<U: FunboyUserId, M: Messenger>(
                 }
             }
         }
-    };
-    Some(Arc::new(say_command))
+    })
 }
 
 pub const SAY_TO: &str = "say_to";
@@ -199,10 +196,10 @@ pub const SAY_TO_RULES: &'static [ArgRule] = &[
     ArgRule::new(ArgPos::Index(0), TEXT_TYPES),
     ArgRule::new(ArgPos::Index(1), TEXT_TYPES),
 ];
-pub fn create_say_to_command<U: FunboyUserId, M: Messenger + Interactor>(
+pub fn say_to_command<U: FunboyUserId, M: Messenger + Interactor>(
     ictx: InterpreterContext<U, M>,
-) -> Executor {
-    let say_command = {
+) -> Handler {
+    Handler::from({
         let ictx = ictx.clone();
         move |command: Command, interpreter_data: Arc<InterpreterData>| {
             let ictx = ictx.clone();
@@ -231,8 +228,7 @@ pub fn create_say_to_command<U: FunboyUserId, M: Messenger + Interactor>(
                 Ok(Value::None)
             }
         }
-    };
-    Some(Arc::new(say_command))
+    })
 }
 
 pub const DEFAULT_TIMEOUT_SECS: f64 = 60.0 * 30.0;
@@ -244,10 +240,8 @@ pub const ASK_RULES: &'static [ArgRule] = &[
 const MAX_TIMEOUT_SECS: f64 = 60.0 * 60.0;
 const STOP: &str = "-STOP-";
 
-pub fn create_ask_command<U: FunboyUserId, M: Messenger>(
-    ictx: InterpreterContext<U, M>,
-) -> Executor {
-    let ask_command = {
+pub fn ask_command<U: FunboyUserId, M: Messenger>(ictx: InterpreterContext<U, M>) -> Handler {
+    Handler::from({
         move |command: Command, data: Arc<InterpreterData>| {
             let ictx = ictx.clone();
             async move {
@@ -288,8 +282,7 @@ pub fn create_ask_command<U: FunboyUserId, M: Messenger>(
                 Ok(Value::Text(response))
             }
         }
-    };
-    Some(Arc::new(ask_command))
+    })
 }
 
 pub const ASK_TO: &str = "ask_to";
@@ -299,10 +292,10 @@ pub const ASK_TO_RULES: &'static [ArgRule] = &[
     ArgRule::new(ArgPos::OptionalIndex(2), NUMERIC_TYPES),
 ];
 
-pub fn create_ask_to_command<U: FunboyUserId, M: Messenger + Interactor>(
+pub fn ask_to_command<U: FunboyUserId, M: Messenger + Interactor>(
     ictx: InterpreterContext<U, M>,
-) -> Executor {
-    let ask_command = {
+) -> Handler {
+    Handler::from({
         move |command: Command, data: Arc<InterpreterData>| {
             let ictx = ictx.clone();
             async move {
@@ -339,8 +332,7 @@ pub fn create_ask_to_command<U: FunboyUserId, M: Messenger + Interactor>(
                 Ok(Value::Text(response))
             }
         }
-    };
-    Some(Arc::new(ask_command))
+    })
 }
 
 pub fn validate_time_out(time_out: f64, max: f64) -> Result<(), CommandError> {
@@ -361,8 +353,8 @@ pub fn validate_time_out(time_out: f64, max: f64) -> Result<(), CommandError> {
 
 pub const GET_SUB: &str = "get_sub";
 pub const GET_SUB_RULES: &[ArgRule] = &[ArgRule::new(ArgPos::Index(0), TEXT_TYPES)];
-pub fn create_get_sub_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Executor {
-    let get_sub_command = {
+pub fn get_sub_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
+    Handler::from({
         move |command: Command, data: Arc<InterpreterData>| {
             let funboy = funboy.clone();
             async move {
@@ -384,8 +376,7 @@ pub fn create_get_sub_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Execut
                 }
             }
         }
-    };
-    Some(Arc::new(get_sub_command))
+    })
 }
 
 pub const ASK_AI: &str = "ask_ai";
@@ -394,8 +385,8 @@ pub const ASK_AI_RULES: &[ArgRule] = &[
     ArgRule::new(ArgPos::Index(1), WHOLE_NUMBER_TYPES),
 ];
 pub const MAX_WORD_LIMIT: i64 = 500;
-pub fn create_ask_ai_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Executor {
-    let get_sub_command = {
+pub fn ask_ai_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
+    Handler::from({
         move |command: Command, data: Arc<InterpreterData>| {
             let funboy = funboy.clone();
             async move {
@@ -431,6 +422,5 @@ pub fn create_ask_ai_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Executo
                 }
             }
         }
-    };
-    Some(Arc::new(get_sub_command))
+    })
 }

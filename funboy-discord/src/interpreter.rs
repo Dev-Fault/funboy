@@ -203,25 +203,25 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> Arc<tokio::sync::Mutex<Fs
         ctx.data().interpreter_limits.clone(),
     );
 
-    interpreter.add_command(
+    interpreter.register(
         SAY,
         SAY_RULES,
-        funboy_core::interpreter::create_say_command(ictx.clone()),
+        funboy_core::interpreter::say_command(ictx.clone()),
     );
-    interpreter.add_command(
+    interpreter.register(
         SAY_TO,
         SAY_TO_RULES,
-        funboy_core::interpreter::create_say_to_command(ictx.clone()),
+        funboy_core::interpreter::say_to_command(ictx.clone()),
     );
-    interpreter.add_command(
+    interpreter.register(
         ASK,
         ASK_RULES,
-        funboy_core::interpreter::create_ask_command(ictx.clone()),
+        funboy_core::interpreter::ask_command(ictx.clone()),
     );
-    interpreter.add_command(
+    interpreter.register(
         ASK_TO,
         ASK_TO_RULES,
-        funboy_core::interpreter::create_ask_to_command(ictx.clone()),
+        funboy_core::interpreter::ask_to_command(ictx.clone()),
     );
 
     Arc::new(tokio::sync::Mutex::new(interpreter))
