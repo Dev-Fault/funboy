@@ -501,7 +501,7 @@ impl<U: FunboyUserId> Funboy<U> {
             OllamaAction::Clear => {
                 let user_ctx = self.users.get_or_insert(user_id).await?;
                 user_ctx.clear_ollama_history();
-                Ok(CommandResult::None)
+                Ok(CommandResult::Text("Cleared ollama chat history".into()))
             }
         }
     }

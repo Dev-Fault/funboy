@@ -172,10 +172,13 @@ pub async fn on_room_message(
     let user_ctx = match funboy.users.get_or_insert(matrix_user.clone()).await {
         Ok(user_ctx) => user_ctx,
         Err(e) => {
-            room.send(RoomMessageEventContent::text_plain(e.to_string()));
+            room.send(RoomMessageEventContent::text_plain(e.to_string()))
+                .await
+                .unwrap();
             return;
         }
     };
+
     let mut pending_requests = user_ctx.pending_requests.lock().await;
     let interpreter = create_interpreter(
         funboy.clone(),
@@ -187,6 +190,8 @@ pub async fn on_room_message(
         ),
     )
     .await;
+
+    let bot_user_id = client.user_id().unwrap().localpart().to_owned();
 
     if let Some(request) = pending_requests.pop() {
         tokio::spawn(async move {
@@ -215,6 +220,21 @@ pub async fn on_room_message(
                     text_content.body.trim_start_matches("!"),
                 )
                 .await;
+            } else if text_content.body.starts_with(&bot_user_id) {
+                let input = text_content.body.trim_start_matches(&bot_user_id);
+                let result = funboy.user_chat(matrix_user, input, interpreter).await;
+                match result {
+                    Ok(response) => {
+                        room.send(RoomMessageEventContent::text_markdown(response))
+                            .await
+                            .unwrap();
+                    }
+                    Err(e) => {
+                        room.send(RoomMessageEventContent::text_plain(e.to_string()))
+                            .await
+                            .unwrap();
+                    }
+                }
             }
         });
     }
