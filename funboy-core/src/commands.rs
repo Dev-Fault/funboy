@@ -478,6 +478,11 @@ impl<U: FunboyUserId> Funboy<U> {
                     OllamaResetOption::OutputLimit => ollama_settings.reset_output_limit(),
                     OllamaResetOption::Parameters => ollama_settings.reset_parameters(),
                 }
+                let settings = ollama_settings.clone();
+                drop(ollama_settings);
+                self.users
+                    .update_ollama_settings(user_id, platform, settings)
+                    .await?;
                 Ok(CommandResult::Text(format!("Reset {option}")))
             }
             OllamaAction::Toggle { tool } => {
@@ -751,7 +756,7 @@ impl<U: FunboyUserId> Funboy<U> {
         let result = if ollama {
             self.user_generate_ollama(user_id, input, interpreter.clone())
                 .await
-                .map(|o| format!("{}{}", o.prompt, o.generated_text))
+                .map(|o| format!("{} {}", o.prompt, o.generated_text))
         } else {
             self.user_generate(user_id, input, interpreter.clone())
                 .await
