@@ -557,7 +557,7 @@ impl<U: FunboyUserId> Funboy<U> {
     pub async fn user_chat(
         &self,
         user_id: U,
-        input: impl Into<String>,
+        input: String,
         interpreter: Arc<Mutex<FslInterpreter>>,
     ) -> Result<String, FunboyError> {
         let user_ctx = self.users.get_or_insert(user_id).await?;
@@ -573,7 +573,12 @@ impl<U: FunboyUserId> Funboy<U> {
             cancel_token.clone()
         };
 
-        let input = self.generate(input, interpreter).await?;
+        let result = self.generate(&input, interpreter).await;
+        let input = if let Ok(result) = result {
+            result
+        } else {
+            input
+        };
 
         let ollama_settings = user_ctx.ollama_settings.lock().await.clone();
         let model = self.get_ollama_model().await;

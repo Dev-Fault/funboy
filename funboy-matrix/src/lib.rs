@@ -221,7 +221,10 @@ pub async fn on_room_message(
                 )
                 .await;
             } else if text_content.body.starts_with(&bot_user_id) {
-                let input = text_content.body.trim_start_matches(&bot_user_id);
+                let input = text_content
+                    .body
+                    .trim_start_matches(&bot_user_id)
+                    .to_owned();
                 let result = funboy.user_chat(matrix_user, input, interpreter).await;
                 match result {
                     Ok(response) => {
