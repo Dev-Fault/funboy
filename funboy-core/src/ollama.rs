@@ -1,12 +1,19 @@
-use std::fmt::Display;
+use std::{
+    collections::VecDeque,
+    fmt::Display,
+    sync::{Arc, Mutex},
+};
 
 use ollama_rs::{
     Ollama,
+    coordinator::Coordinator,
     error::OllamaError,
     generation::{
         chat::{ChatMessage, ChatMessageResponse},
         completion::{GenerationResponse, request::GenerationRequest},
+        tools::implementations::{DDGSearcher, Scraper},
     },
+    history::ChatHistory,
     models::{LocalModel, ModelInfo, ModelOptions},
 };
 
@@ -96,12 +103,26 @@ impl Default for OllamaParameters {
     }
 }
 
+#[derive(Default, Debug, Clone)]
+pub struct OllamaTools {
+    web_search: bool,
+}
+
+impl OllamaTools {
+    /// Returns value after toggle
+    pub fn toggle_web_search(&mut self) -> bool {
+        self.web_search = !self.web_search;
+        self.web_search
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct OllamaSettings {
     pub system_prompt: String,
     pub template: String,
     pub output_limit: u16,
     pub parameters: OllamaParameters,
+    pub tools: OllamaTools,
 }
 
 impl From<OllamaSettingsRow> for OllamaSettings {
@@ -117,6 +138,7 @@ impl From<OllamaSettingsRow> for OllamaSettings {
             template: value.template.unwrap_or(Default::default()),
             output_limit: value.output_limit as u16,
             parameters: parameters,
+            tools: OllamaTools::default(),
         }
     }
 }
@@ -183,6 +205,7 @@ impl Default for OllamaSettings {
             template: DEFAULT_TEMPLATE.to_string(),
             output_limit: DEFAULT_MAX_PREDICT,
             parameters: OllamaParameters::default(),
+            tools: OllamaTools::default(),
         }
     }
 }
@@ -290,11 +313,17 @@ impl OllamaGenerator {
             }
         };
 
+        let mut coordinator = Coordinator::new(self.ollama.clone(), model, user_ctx.ollama_history)
+            .options(override_options);
+
+        if ollama_settings.tools.web_search {
+            coordinator = coordinator
+                .add_tool(DDGSearcher::new())
+                .add_tool(Scraper::new());
+        }
+
         let user_message = ChatMessage::user(input);
-        user_ctx
-            .ollama_coordinator
-            .chat(&self.ollama, model, vec![user_message])
-            .await
+        coordinator.chat(vec![user_message]).await
     }
 }
 
@@ -303,5 +332,38 @@ impl Default for OllamaGenerator {
         Self {
             ollama: Ollama::default(),
         }
+    }
+}
+
+#[derive(Default, Debug, Clone)]
+pub struct OllamaHistory {
+    history: Arc<Mutex<VecDeque<ChatMessage>>>,
+}
+
+impl OllamaHistory {
+    pub fn clear(&self) {
+        let mut history = self.history.lock().unwrap();
+        history.clear();
+    }
+}
+
+impl ChatHistory for OllamaHistory {
+    fn push(&mut self, message: ChatMessage) {
+        let mut history = self.history.lock().unwrap();
+        history.push_back(message);
+        if history.len() > 100 {
+            history.pop_front();
+        }
+    }
+
+    fn messages(&self) -> std::borrow::Cow<'_, [ChatMessage]> {
+        let history: Vec<ChatMessage> = self
+            .history
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|m| m.clone())
+            .collect();
+        std::borrow::Cow::Owned(history)
     }
 }

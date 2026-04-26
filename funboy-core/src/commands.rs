@@ -53,10 +53,22 @@ pub enum OllamaAction {
         option: OllamaSetOption,
     },
 
+    Toggle {
+        #[command(subcommand)]
+        tool: OllamaEnableTool,
+    },
+
     Reset {
         #[command(subcommand)]
         option: OllamaResetOption,
     },
+
+    Clear,
+}
+
+#[derive(Parser, Debug, Copy, Clone, ValueEnum)]
+pub enum OllamaEnableTool {
+    WebSearch,
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -467,6 +479,29 @@ impl<U: FunboyUserId> Funboy<U> {
                     OllamaResetOption::Parameters => ollama_settings.reset_parameters(),
                 }
                 Ok(CommandResult::Text(format!("Reset {option}")))
+            }
+            OllamaAction::Toggle { tool } => {
+                let mut ollama_settings = ollama_settings.lock().await;
+                let result = match tool {
+                    OllamaEnableTool::WebSearch => {
+                        if ollama_settings.tools.toggle_web_search() {
+                            "Enabled web search tool"
+                        } else {
+                            "Disabled web search tool"
+                        }
+                    }
+                };
+                let settings = ollama_settings.clone();
+                drop(ollama_settings);
+                self.users
+                    .update_ollama_settings(user_id, platform, settings)
+                    .await?;
+                Ok(CommandResult::Text(result.into()))
+            }
+            OllamaAction::Clear => {
+                let user_ctx = self.users.get_or_insert(user_id).await?;
+                user_ctx.clear_ollama_history();
+                Ok(CommandResult::None)
             }
         }
     }

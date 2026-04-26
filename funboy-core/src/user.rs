@@ -8,65 +8,15 @@ use std::{
 };
 
 use moka::future::{Cache, CacheBuilder};
-use ollama_rs::{
-    Ollama,
-    coordinator::Coordinator,
-    error::OllamaError,
-    generation::{
-        chat::{ChatMessage, ChatMessageResponse},
-        tools::implementations::{Calculator, DDGSearcher, Scraper},
-    },
-    models::ModelOptions,
-};
-use tokio::sync::{Mutex, OnceCell};
+use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
     FunboyError, Request,
     database::{FunboyDatabase, Platform},
-    ollama::OllamaSettings,
+    ollama::{OllamaHistory, OllamaSettings},
     permissions::{Permission, PermissionError, Permissions, Role},
 };
-
-#[derive(Default, Clone)]
-pub struct OllamaCoordinator(Arc<OnceCell<Mutex<Coordinator<Vec<ChatMessage>>>>>);
-
-impl OllamaCoordinator {
-    pub async fn get_or_init(
-        &self,
-        ollama: &Ollama,
-        model: String,
-    ) -> &Mutex<Coordinator<Vec<ChatMessage>>> {
-        self.0
-            .get_or_init(|| async {
-                Mutex::new(
-                    Coordinator::new(ollama.clone(), model, vec![])
-                        .options(ModelOptions::default())
-                        .add_tool(DDGSearcher::new())
-                        .add_tool(Scraper::default())
-                        .add_tool(Calculator::default()),
-                )
-            })
-            .await
-    }
-
-    pub async fn chat(
-        &self,
-        ollama: &Ollama,
-        model: String,
-        messages: Vec<ChatMessage>,
-    ) -> Result<ChatMessageResponse, OllamaError> {
-        let coordinator = self.get_or_init(ollama, model).await;
-        let mut coordinator = coordinator.lock().await;
-        coordinator.chat(messages).await
-    }
-}
-
-impl std::fmt::Debug for OllamaCoordinator {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("OllamaCoordinator").finish()
-    }
-}
 
 #[derive(Default, Debug, Clone)]
 pub struct UserCtx {
@@ -74,7 +24,7 @@ pub struct UserCtx {
     pub ollama_settings: Arc<Mutex<OllamaSettings>>,
     pub pending_requests: Arc<Mutex<Vec<Request>>>,
     pub cancel_generation: Arc<Mutex<CancellationToken>>,
-    pub ollama_coordinator: OllamaCoordinator,
+    pub ollama_history: OllamaHistory,
     permissions: Arc<Mutex<Permissions>>,
 }
 
@@ -87,6 +37,10 @@ impl UserCtx {
     pub fn with_ollama_settings(mut self, settings: OllamaSettings) -> UserCtx {
         self.ollama_settings = Arc::new(Mutex::new(settings));
         self
+    }
+
+    pub fn clear_ollama_history(&self) {
+        self.ollama_history.clear();
     }
 }
 

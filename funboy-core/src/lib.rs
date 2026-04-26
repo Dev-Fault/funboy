@@ -574,7 +574,6 @@ impl<U: FunboyUserId> Funboy<U> {
         };
 
         let input = self.generate(input, interpreter).await?;
-        dbg!(&input);
 
         let ollama_settings = user_ctx.ollama_settings.lock().await.clone();
         let model = self.get_ollama_model().await;
