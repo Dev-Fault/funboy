@@ -191,7 +191,13 @@ pub async fn on_room_message(
     )
     .await;
 
-    let bot_user_id = client.user_id().unwrap().localpart().to_owned();
+    let bot_user_id = client.user_id().unwrap().to_owned();
+    let bot_local_name = client.user_id().unwrap().localpart().to_owned();
+    let bot_mentioned = event
+        .content
+        .mentions
+        .as_ref()
+        .is_some_and(|m| m.user_ids.contains(&bot_user_id));
 
     if let Some(request) = pending_requests.pop() {
         tokio::spawn(async move {
@@ -220,10 +226,10 @@ pub async fn on_room_message(
                     text_content.body.trim_start_matches("!"),
                 )
                 .await;
-            } else if text_content.body.starts_with(&bot_user_id) {
+            } else if bot_mentioned && text_content.body.starts_with(&bot_local_name) {
                 let input = text_content
                     .body
-                    .trim_start_matches(&bot_user_id)
+                    .trim_start_matches(&bot_local_name)
                     .to_owned();
                 let result = funboy.user_chat(matrix_user, input, interpreter).await;
                 match result {
