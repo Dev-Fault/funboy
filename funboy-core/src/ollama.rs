@@ -108,6 +108,12 @@ pub struct OllamaTools {
     web_search: bool,
 }
 
+impl Display for OllamaTools {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Web Search: {}", self.web_search)
+    }
+}
+
 impl OllamaTools {
     /// Returns value after toggle
     pub fn toggle_web_search(&mut self) -> bool {
@@ -210,18 +216,13 @@ impl Default for OllamaSettings {
     }
 }
 
-impl ToString for OllamaSettings {
-    fn to_string(&self) -> String {
-        format!(
-            "System Prompt: {}\nTemplate: {}\nOutput Limit: {}\nTemperature: {}\nRepeat Penalty: {}\nTop_k: {}\nTop_p: {}",
-            self.system_prompt,
-            self.template,
-            self.output_limit,
-            OllamaParameters::param_to_string(self.parameters.temperature),
-            OllamaParameters::param_to_string(self.parameters.repeat_penalty),
-            OllamaParameters::param_to_string(self.parameters.top_k),
-            OllamaParameters::param_to_string(self.parameters.top_p),
-        )
+impl Display for OllamaSettings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "System Prompt: {}", self.system_prompt)?;
+        writeln!(f, "Template: {}", self.template)?;
+        writeln!(f, "Output limit: {}", self.output_limit)?;
+        writeln!(f, "{}", self.parameters)?;
+        writeln!(f, "{}", self.tools)
     }
 }
 
@@ -357,13 +358,8 @@ impl ChatHistory for OllamaHistory {
     }
 
     fn messages(&self) -> std::borrow::Cow<'_, [ChatMessage]> {
-        let history: Vec<ChatMessage> = self
-            .history
-            .lock()
-            .unwrap()
-            .iter()
-            .map(|m| m.clone())
-            .collect();
+        let history = self.history.lock().unwrap();
+        let history = history.iter().map(|m| m.clone()).collect();
         std::borrow::Cow::Owned(history)
     }
 }
