@@ -237,7 +237,7 @@ pub async fn handle_request(
                         let file_data = file_data.unwrap_or_default();
                         let contents = String::from_utf8(file_data);
                         if let Ok(contents) = contents {
-                            let msg = funboy.user_generate(user_id, &contents, interpreter).await;
+                            let msg = funboy.user_generate(user_id, contents, interpreter).await;
                             let msg = match msg {
                                 Ok(msg) => RoomMessageEventContent::text_markdown(msg),
                                 Err(e) => RoomMessageEventContent::text_markdown(e.to_string()),

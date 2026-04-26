@@ -385,7 +385,7 @@ impl<U: FunboyUserId> Funboy<U> {
                         let template_before_dash = split.get(0).unwrap_or(&"");
                         match self.get_random_substitute(&template_before_dash).await {
                             Ok(sub) => {
-                                let sub = match self.generate(&sub.name, interpreter).await {
+                                let sub = match self.generate(sub.name, interpreter).await {
                                     Ok(interpreted_sub) => interpreted_sub,
                                     Err(e) => {
                                         let _ = funboy_error.lock().await.insert(e);
@@ -423,10 +423,10 @@ impl<U: FunboyUserId> Funboy<U> {
     /// Resolves templates and fsl code until output is complete or depth limit is reached
     pub async fn generate(
         &self,
-        input: &str,
+        input: impl Into<String>,
         interpreter: Arc<Mutex<FslInterpreter>>,
     ) -> Result<String, FunboyError> {
-        let mut output = input.to_string();
+        let mut output: String = input.into();
         let mut prev_hashes = HashSet::new();
 
         let mut modified_interpreter = interpreter.lock().await;
@@ -469,7 +469,7 @@ impl<U: FunboyUserId> Funboy<U> {
         &self,
         model: Option<String>,
         ollama_settings: &OllamaSettings,
-        prompt: &str,
+        prompt: impl Into<String>,
         interpreter: Arc<Mutex<FslInterpreter>>,
     ) -> Result<OllamaResponse, FunboyError> {
         let prompt = self.generate(prompt, interpreter).await?;
@@ -489,7 +489,7 @@ impl<U: FunboyUserId> Funboy<U> {
     pub async fn user_generate(
         &self,
         user_id: U,
-        input: &str,
+        input: impl Into<String>,
         interpreter: Arc<Mutex<FslInterpreter>>,
     ) -> Result<String, FunboyError> {
         let user_ctx = self.users.get_or_insert(user_id).await?;
@@ -520,7 +520,7 @@ impl<U: FunboyUserId> Funboy<U> {
     pub async fn user_generate_ollama(
         &self,
         user_id: U,
-        prompt: &str,
+        prompt: impl Into<String>,
         interpreter: Arc<Mutex<FslInterpreter>>,
     ) -> Result<OllamaResponse, FunboyError> {
         let user_ctx = self.users.get_or_insert(user_id).await?;
@@ -546,6 +546,51 @@ impl<U: FunboyUserId> Funboy<U> {
 
         let output = tokio::select! {
             result = generate => result,
+            _ = cancel_token.cancelled() => {
+                Err(FunboyError::GenerationCancelled)
+            }
+        };
+
+        output
+    }
+
+    pub async fn user_chat(
+        &self,
+        user_id: U,
+        input: impl Into<String>,
+        interpreter: Arc<Mutex<FslInterpreter>>,
+    ) -> Result<String, FunboyError> {
+        let user_ctx = self.users.get_or_insert(user_id).await?;
+        let Some(_guard) = FlagGuard::new(user_ctx.is_generating.clone()) else {
+            return Err(FunboyError::UsageLimit(
+                "You're already generating something, please wait until it's finished.".to_string(),
+            ));
+        };
+
+        let cancel_token = {
+            let mut cancel_token = user_ctx.cancel_generation.lock().await;
+            *cancel_token = CancellationToken::new();
+            cancel_token.clone()
+        };
+
+        let input = self.generate(input, interpreter).await?;
+        dbg!(&input);
+
+        let ollama_settings = user_ctx.ollama_settings.lock().await.clone();
+        let model = self.get_ollama_model().await;
+        let result = self
+            .ollama_generator
+            .chat(input, &ollama_settings, model, user_ctx);
+
+        let output = tokio::select! {
+            result = result => {
+                 match result {
+                    Ok(response) => Ok(response.message.content),
+                    Err(e) => {
+                        Err(FunboyError::Ollama(e.to_string()))
+                    }
+                }
+            },
             _ = cancel_token.cancelled() => {
                 Err(FunboyError::GenerationCancelled)
             }

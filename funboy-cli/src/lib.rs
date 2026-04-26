@@ -80,6 +80,36 @@ pub async fn enter_interpreter(
     Ok(())
 }
 
+pub async fn enter_chat(
+    funboy: Arc<Funboy<Id>>,
+    rl: Arc<Mutex<DefaultEditor>>,
+) -> rustyline::Result<()> {
+    let interpreter = create_interpreter(funboy.clone(), rl.clone()).await;
+    loop {
+        let mut rl = rl.lock().await;
+        let readline = rl.readline("C> ");
+
+        match readline {
+            Ok(input) => {
+                rl.add_history_entry(&input)?;
+                match funboy.user_chat(Id(0), input, interpreter.clone()).await {
+                    Ok(response) => {
+                        println!("{response}");
+                    }
+                    Err(e) => eprintln!("{e}"),
+                };
+                drop(rl);
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                drop(rl);
+                break;
+            }
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct Id(pub u64);
 impl FunboyUserId for Id {}
@@ -150,6 +180,7 @@ const FSL: &str = "fsl";
 pub enum Mode {
     Generate,
     FSL,
+    Chat,
 }
 
 impl FromStr for Mode {

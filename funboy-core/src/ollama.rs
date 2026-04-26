@@ -3,11 +3,14 @@ use std::fmt::Display;
 use ollama_rs::{
     Ollama,
     error::OllamaError,
-    generation::completion::{GenerationResponse, request::GenerationRequest},
+    generation::{
+        chat::{ChatMessage, ChatMessageResponse},
+        completion::{GenerationResponse, request::GenerationRequest},
+    },
     models::{LocalModel, ModelInfo, ModelOptions},
 };
 
-use crate::database::OllamaSettingsRow;
+use crate::{database::OllamaSettingsRow, user::UserCtx};
 
 const DEFAULT_SYSTEM_PROMPT: &str = "";
 const DEFAULT_TEMPLATE: &str = "{{ .Prompt }}";
@@ -264,6 +267,34 @@ impl OllamaGenerator {
         request = request.system(ollama_settings.system_prompt.clone());
         request = request.template(ollama_settings.template.clone());
         self.ollama.generate(request).await
+    }
+
+    pub async fn chat(
+        &self,
+        input: String,
+        ollama_settings: &OllamaSettings,
+        model: Option<String>,
+        user_ctx: UserCtx,
+    ) -> Result<ChatMessageResponse, OllamaError> {
+        let override_options = self.generate_options(&ollama_settings);
+        let model = match model {
+            Some(name) => name.to_string(),
+            None => {
+                let available_models = self.get_models().await;
+                match available_models {
+                    Ok(models) => models[0].name.clone(),
+                    Err(e) => {
+                        return Err(e);
+                    }
+                }
+            }
+        };
+
+        let user_message = ChatMessage::user(input);
+        user_ctx
+            .ollama_coordinator
+            .chat(&self.ollama, model, vec![user_message])
+            .await
     }
 }
 

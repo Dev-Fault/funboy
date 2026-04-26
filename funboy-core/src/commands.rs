@@ -714,11 +714,11 @@ impl<U: FunboyUserId> Funboy<U> {
             input
         };
         let result = if ollama {
-            self.user_generate_ollama(user_id, &input, interpreter.clone())
+            self.user_generate_ollama(user_id, input, interpreter.clone())
                 .await
                 .map(|o| format!("{}{}", o.prompt, o.generated_text))
         } else {
-            self.user_generate(user_id, &input, interpreter.clone())
+            self.user_generate(user_id, input, interpreter.clone())
                 .await
         };
         match result {

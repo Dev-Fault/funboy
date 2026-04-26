@@ -8,7 +8,17 @@ use std::{
 };
 
 use moka::future::{Cache, CacheBuilder};
-use tokio::sync::Mutex;
+use ollama_rs::{
+    Ollama,
+    coordinator::Coordinator,
+    error::OllamaError,
+    generation::{
+        chat::{ChatMessage, ChatMessageResponse},
+        tools::implementations::{Calculator, DDGSearcher, Scraper},
+    },
+    models::ModelOptions,
+};
+use tokio::sync::{Mutex, OnceCell};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -18,12 +28,53 @@ use crate::{
     permissions::{Permission, PermissionError, Permissions, Role},
 };
 
+#[derive(Default, Clone)]
+pub struct OllamaCoordinator(Arc<OnceCell<Mutex<Coordinator<Vec<ChatMessage>>>>>);
+
+impl OllamaCoordinator {
+    pub async fn get_or_init(
+        &self,
+        ollama: &Ollama,
+        model: String,
+    ) -> &Mutex<Coordinator<Vec<ChatMessage>>> {
+        self.0
+            .get_or_init(|| async {
+                Mutex::new(
+                    Coordinator::new(ollama.clone(), model, vec![])
+                        .options(ModelOptions::default())
+                        .add_tool(DDGSearcher::new())
+                        .add_tool(Scraper::default())
+                        .add_tool(Calculator::default()),
+                )
+            })
+            .await
+    }
+
+    pub async fn chat(
+        &self,
+        ollama: &Ollama,
+        model: String,
+        messages: Vec<ChatMessage>,
+    ) -> Result<ChatMessageResponse, OllamaError> {
+        let coordinator = self.get_or_init(ollama, model).await;
+        let mut coordinator = coordinator.lock().await;
+        coordinator.chat(messages).await
+    }
+}
+
+impl std::fmt::Debug for OllamaCoordinator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("OllamaCoordinator").finish()
+    }
+}
+
 #[derive(Default, Debug, Clone)]
 pub struct UserCtx {
     pub is_generating: Arc<AtomicBool>,
     pub ollama_settings: Arc<Mutex<OllamaSettings>>,
     pub pending_requests: Arc<Mutex<Vec<Request>>>,
     pub cancel_generation: Arc<Mutex<CancellationToken>>,
+    pub ollama_coordinator: OllamaCoordinator,
     permissions: Arc<Mutex<Permissions>>,
 }
 

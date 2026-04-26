@@ -110,7 +110,7 @@ impl<U: FunboyUserId, M: Messenger> InterpreterContext<U, M> {
     pub async fn generate_message(&self, message: &str) -> Result<String, CommandError> {
         match self
             .funboy
-            .generate(&message, self.interpreter.clone())
+            .generate(message, self.interpreter.clone())
             .await
         {
             Ok(gen_msg) => Ok(gen_msg),

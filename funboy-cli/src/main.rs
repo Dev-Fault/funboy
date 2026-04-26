@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use funboy_cli::{
-    CliCommandResult, FunboyEnv, Id, Mode, enter_interactive_generation, enter_interpreter,
-    get_funboy, interpret_bot_commands, interpreter::create_interpreter,
+    CliCommandResult, FunboyEnv, Id, Mode, enter_chat, enter_interactive_generation,
+    enter_interpreter, get_funboy, interpret_bot_commands, interpreter::create_interpreter,
 };
 use funboy_core::{
     commands::CommandResult,
@@ -52,6 +52,9 @@ async fn main() -> rustyline::Result<()> {
                             }
                             Mode::FSL => {
                                 enter_interpreter(funboy.clone(), rl.clone()).await?;
+                            }
+                            Mode::Chat => {
+                                enter_chat(funboy.clone(), rl.clone()).await?;
                             }
                         },
                         CliCommandResult::CommandResult(CommandResult::None) => {
