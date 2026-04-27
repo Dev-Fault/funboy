@@ -2,7 +2,6 @@ use std::{str::FromStr, sync::Arc};
 
 use ::serenity::all::{FullEvent, Interaction, UserId};
 use dotenvy::dotenv;
-use fsl_interpreter::FslInterpreter;
 use funboy_cli::{FunboyEnv, get_funboy};
 use funboy_core::{
     Funboy, commands::CommandResult, database::Platform, interpreter::InterpreterLimits,
@@ -173,6 +172,7 @@ async fn main() {
         .options(poise::FrameworkOptions {
             commands: get_discord_commands(),
             prefix_options: poise::PrefixFrameworkOptions {
+                prefix: Some("!".into()),
                 mention_as_prefix: false,
                 ..Default::default()
             },

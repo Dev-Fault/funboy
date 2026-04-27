@@ -8,7 +8,7 @@ use funboy_core::{
     database::Platform,
     permissions::{Permission, Role},
 };
-use serenity::all::{Member, Message, UserId};
+use serenity::all::{Message, UserId};
 
 use crate::{Data, DiscordUserId, interpreter::interpreter_from_serenity};
 
@@ -62,6 +62,7 @@ pub enum DiscordCommand {
         #[arg(trailing_var_arg = true)]
         permissions: Vec<Permission>,
     },
+    Register,
     Cancel,
 }
 
@@ -226,6 +227,10 @@ pub async fn handle_prefix_commands(
                 funboy.set_role(user_id, receiver, role).await
             }
             DiscordCommand::Cancel => funboy.cancel_command(user_id).await,
+            DiscordCommand::Register => {
+                // register already handled by poise
+                Ok(CommandResult::None)
+            }
         },
         Err(e) => Err(CommandError::UnknownCommand(e.to_string())),
     }
