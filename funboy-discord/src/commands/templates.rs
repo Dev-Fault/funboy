@@ -14,7 +14,7 @@ use crate::{
         CANCEL_BUTTON_ID, CONFIRM_BUTTON_ID, create_confirmation_interaction, edit_interaction,
     },
     context_extension::ContextExtension,
-    interpreter::create_custom_interpreter,
+    interpreter::interpreter_from_poise,
 };
 
 pub async fn generate_message(
@@ -27,7 +27,7 @@ pub async fn generate_message(
     let http = ctx.http();
     let channel_id = ctx.channel_id();
     let funboy = ctx.data().funboy.clone();
-    let interpreter = create_custom_interpreter(&ctx);
+    let interpreter = interpreter_from_poise(&ctx);
 
     ctx.defer().await?;
 
@@ -110,13 +110,13 @@ pub async fn generate_message(
 /// - Output: "The following text is reversed: desrever"
 ///
 /// For more FSL information, use `/help_fsl`
-#[poise::command(slash_command, prefix_command, category = "Templates")]
+#[poise::command(slash_command, category = "Templates")]
 pub async fn generate(ctx: Context<'_>, input: String) -> Result<(), Error> {
     generate_message(ctx, input, false).await
 }
 
 /// Generates text like the generate command but sends the text as a prompt to ollama
-#[poise::command(slash_command, prefix_command, category = "Templates")]
+#[poise::command(slash_command, category = "Templates")]
 pub async fn generate_ollama(ctx: Context<'_>, input: String) -> Result<(), Error> {
     generate_message(ctx, input, true).await
 }
@@ -124,7 +124,7 @@ pub async fn generate_ollama(ctx: Context<'_>, input: String) -> Result<(), Erro
 /// Generates text by preforming template substitution and intepreting fsl code from a file
 ///  
 /// See /generate command for more info
-#[poise::command(slash_command, prefix_command, category = "Templates")]
+#[poise::command(slash_command, category = "Templates")]
 pub async fn generate_file(ctx: Context<'_>, file: Attachment) -> Result<(), Error> {
     let bytes = file.download().await?;
     let input = String::from_utf8(bytes);
@@ -156,7 +156,7 @@ pub async fn generate_file(ctx: Context<'_>, file: Attachment) -> Result<(), Err
 /// **Example:** `/add_subs | template: quote | subs: this substitute contains "a quote" in it | single: true` - adds a single substitute with quotes inside
 ///
 /// This treats the entire input as a single substitute allowing spaces and quotes inside the substitute.
-#[poise::command(slash_command, prefix_command, category = "Templates")]
+#[poise::command(slash_command, category = "Templates")]
 pub async fn add(
     ctx: Context<'_>,
     template: String,
@@ -191,7 +191,7 @@ pub async fn add(
 /// Adds a single substitute from a file
 ///
 /// **Example:** `/upload_sub essay [essay.txt]` — uploads file `essay.txt` and adds it as a single substitute to the `essay`
-#[poise::command(slash_command, prefix_command, category = "Templates")]
+#[poise::command(slash_command, category = "Templates")]
 pub async fn add_file(
     ctx: Context<'_>,
     template: String,
@@ -247,7 +247,7 @@ pub async fn add_file(
 /// Useful for complex substitute names containing spaces or quotes.
 ///
 /// **Example:** `/delete_subs template: sentence | subs: This is one substitute containing "spaces and quotes inside it" | single: true`
-#[poise::command(slash_command, prefix_command, category = "Templates")]
+#[poise::command(slash_command, category = "Templates")]
 pub async fn delete(
     ctx: Context<'_>,
     template: String,
@@ -286,7 +286,7 @@ pub async fn delete(
 /// Copies all substitutes from one template to another
 ///
 /// **Example:** `/copy_subs food noun` — copies all substitutes from `food` to `noun`
-#[poise::command(slash_command, prefix_command, category = "Templates")]
+#[poise::command(slash_command, category = "Templates")]
 pub async fn copy(
     ctx: Context<'_>,
     from_template: String,
@@ -320,7 +320,7 @@ pub async fn copy(
 /// ## Replace by ID
 /// - **Example:** `/replace_sub noun 0 "new substitute" id: true` — replaces the substitute with id 0
 /// Note: ID's of substitutes can be obtained by using the `/list_subs` command with the ID list style.
-#[poise::command(slash_command, prefix_command, category = "Templates")]
+#[poise::command(slash_command, category = "Templates")]
 pub async fn replace(
     ctx: Context<'_>,
     template: Option<String>,
@@ -444,7 +444,7 @@ async fn delete_single_template(
 /// **Example:** `/delete_templates noun verb adjective` — deletes all three templates
 ///
 /// This action cannot be undone.
-#[poise::command(slash_command, prefix_command, category = "Templates")]
+#[poise::command(slash_command, category = "Templates")]
 pub async fn delete_templates(ctx: Context<'_>, names: String) -> Result<(), Error> {
     let templates = parse_bot_args(&names);
     let templates = match templates {
@@ -513,7 +513,7 @@ pub async fn delete_templates(ctx: Context<'_>, names: String) -> Result<(), Err
 /// **Example:** `/rename_template noun thing` — renames the `noun` template to `thing`
 ///
 /// All substitutes under the previous name will now be under the new name
-#[poise::command(slash_command, prefix_command, category = "Templates")]
+#[poise::command(slash_command, category = "Templates")]
 pub async fn rename_template(ctx: Context<'_>, from: String, to: String) -> Result<(), Error> {
     let funboy = ctx.data().funboy.clone();
     let result = funboy
@@ -567,7 +567,7 @@ impl Into<ListStyle> for DiscordListStyle {
 /// - `File` — uploads text file containing substitutes and their IDs
 ///
 /// **Example:** `/list_subs noun list_style: ID` — displays substitutes with their IDs
-#[poise::command(slash_command, prefix_command, category = "Templates")]
+#[poise::command(slash_command, category = "Templates")]
 pub async fn list_subs(
     ctx: Context<'_>,
     template: String,
@@ -616,7 +616,7 @@ pub async fn list_subs(
 /// - `File` — uploads text file containing substitutes and their IDs
 ///
 /// **Example:** `/list_templates list_style: ID` — displays templates with their IDs
-#[poise::command(slash_command, prefix_command, category = "Templates")]
+#[poise::command(slash_command, category = "Templates")]
 pub async fn list_templates(
     ctx: Context<'_>,
     search_term: Option<String>,

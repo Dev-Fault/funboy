@@ -4,15 +4,19 @@ use ::serenity::all::{FullEvent, Interaction, UserId};
 use dotenvy::dotenv;
 use fsl_interpreter::FslInterpreter;
 use funboy_cli::{FunboyEnv, get_funboy};
-use funboy_core::{Funboy, database::Platform, interpreter::InterpreterLimits, user::FunboyUserId};
+use funboy_core::{
+    Funboy, commands::CommandResult, database::Platform, interpreter::InterpreterLimits,
+    user::FunboyUserId,
+};
 use poise::serenity_prelude as serenity;
 use reqwest::Client as HttpClient;
 use songbird::{SerenityInit, typemap::TypeMapKey};
 use tokio::sync::Mutex;
 
 use crate::{
-    commands::sound::TrackList,
+    commands::{prefix_commands::handle_prefix_commands, sound::TrackList},
     components::{CustomComponent, TrackComponent},
+    interpreter::interpreter_from_serenity,
 };
 
 mod commands;
@@ -169,7 +173,6 @@ async fn main() {
         .options(poise::FrameworkOptions {
             commands: get_discord_commands(),
             prefix_options: poise::PrefixFrameworkOptions {
-                prefix: Some("!".into()),
                 mention_as_prefix: false,
                 ..Default::default()
             },
@@ -177,20 +180,34 @@ async fn main() {
                 Box::pin(async move {
                     match event {
                         FullEvent::Message { new_message } => {
-                            if new_message
+                            let mentions_bot = new_message
                                 .mentions_me(ctx)
                                 .await
-                                .is_ok_and(|is_true| is_true)
-                            {
+                                .is_ok_and(|is_true| is_true);
+                            let mentions_bot = mentions_bot && new_message.content.starts_with("@");
+                            if mentions_bot {
                                 let user_id = DiscordUserId(new_message.author.id);
                                 let msg = new_message.content.to_owned();
-                                let interpreter = Arc::new(Mutex::new(FslInterpreter::new()));
+                                let interpreter = interpreter_from_serenity(ctx, data, new_message);
                                 let result = data.funboy.user_chat(user_id, msg, interpreter).await;
 
                                 match result {
                                     Ok(response) => {
                                         let _ = new_message.reply(&ctx.http, response).await;
                                     }
+                                    Err(e) => {
+                                        let _ = new_message.reply(&ctx.http, e.to_string()).await;
+                                    }
+                                }
+                            } else if new_message.content.starts_with("!") {
+                                let result = handle_prefix_commands(&ctx, data, &new_message).await;
+                                match result {
+                                    Ok(result) => match result {
+                                        CommandResult::Text(response) => {
+                                            let _ = new_message.reply(&ctx.http, response).await;
+                                        }
+                                        CommandResult::None => {}
+                                    },
                                     Err(e) => {
                                         let _ = new_message.reply(&ctx.http, e.to_string()).await;
                                     }

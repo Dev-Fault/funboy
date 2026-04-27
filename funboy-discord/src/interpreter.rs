@@ -9,11 +9,11 @@ use funboy_core::{
     },
 };
 use serenity::{
-    all::{Cache, ChannelId, GuildId, Http, Member, Mentionable, ShardMessenger, UserId},
+    all::{Cache, ChannelId, GuildId, Http, Member, Mentionable, Message, ShardMessenger, UserId},
     futures::StreamExt,
 };
 
-use crate::{Context, DiscordUserId, context_extension::BOT_MAX_MESSAGE_SIZE};
+use crate::{Context, Data, DiscordUserId, context_extension::BOT_MAX_MESSAGE_SIZE};
 
 #[derive(Clone)]
 pub struct DiscordContext {
@@ -159,6 +159,17 @@ impl DiscordContext {
         }
     }
 
+    pub fn from_serenity(ctx: &serenity::prelude::Context, message: &Message) -> Self {
+        Self {
+            http: ctx.http.clone(),
+            cache: ctx.cache.clone(),
+            shard: ctx.shard.clone(),
+            guild_id: message.guild_id,
+            channel_id: message.channel_id,
+            author_id: message.author.id,
+        }
+    }
+
     pub async fn get_guild_members(&self) -> Result<Vec<Member>, CommandError> {
         if let Some(guild_id) = self.guild_id {
             if let Ok(members) = guild_id.members(self.http.clone(), None, None).await {
@@ -192,7 +203,7 @@ impl DiscordContext {
     }
 }
 
-pub fn create_custom_interpreter(ctx: &Context<'_>) -> Arc<tokio::sync::Mutex<FslInterpreter>> {
+pub fn interpreter_from_poise(ctx: &Context<'_>) -> Arc<tokio::sync::Mutex<FslInterpreter>> {
     let mut interpreter = FslInterpreter::new();
 
     let dctx = DiscordContext::from_poise(ctx);
@@ -201,6 +212,45 @@ pub fn create_custom_interpreter(ctx: &Context<'_>) -> Arc<tokio::sync::Mutex<Fs
         ctx.data().funboy.clone(),
         dctx,
         ctx.data().interpreter_limits.clone(),
+    );
+
+    interpreter.register(
+        SAY,
+        SAY_RULES,
+        funboy_core::interpreter::say_command(ictx.clone()),
+    );
+    interpreter.register(
+        SAY_TO,
+        SAY_TO_RULES,
+        funboy_core::interpreter::say_to_command(ictx.clone()),
+    );
+    interpreter.register(
+        ASK,
+        ASK_RULES,
+        funboy_core::interpreter::ask_command(ictx.clone()),
+    );
+    interpreter.register(
+        ASK_TO,
+        ASK_TO_RULES,
+        funboy_core::interpreter::ask_to_command(ictx.clone()),
+    );
+
+    Arc::new(tokio::sync::Mutex::new(interpreter))
+}
+
+pub fn interpreter_from_serenity(
+    ctx: &serenity::prelude::Context,
+    data: &Data,
+    message: &Message,
+) -> Arc<tokio::sync::Mutex<FslInterpreter>> {
+    let mut interpreter = FslInterpreter::new();
+
+    let dctx = DiscordContext::from_serenity(ctx, message);
+    let ictx = InterpreterContext::new(
+        DiscordUserId(message.author.id),
+        data.funboy.clone(),
+        dctx,
+        data.interpreter_limits.clone(),
     );
 
     interpreter.register(

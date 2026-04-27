@@ -41,7 +41,6 @@ pub struct OllamaResetChoice(OllamaResetOption);
 
 #[poise::command(
     slash_command,
-    prefix_command,
     category = "Ollama",
     subcommands(
         "ollama_clear",

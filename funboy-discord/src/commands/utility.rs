@@ -94,7 +94,7 @@ async fn generate_help_messages<'a>(ctx: Context<'_>, show_descriptions: bool) -
 }
 
 /// Lists out all available commands optionally showing their descriptions
-#[poise::command(slash_command, prefix_command, category = "Utility")]
+#[poise::command(slash_command, category = "Utility")]
 pub async fn help(ctx: Context<'_>, show_descriptions: Option<bool>) -> Result<(), Error> {
     let show_descriptions = show_descriptions.unwrap_or(false);
     let help_messages = if show_descriptions {
@@ -118,7 +118,7 @@ pub async fn help(ctx: Context<'_>, show_descriptions: Option<bool>) -> Result<(
 }
 
 /// Get detailed information on an individual command
-#[poise::command(slash_command, prefix_command, category = "Utility")]
+#[poise::command(slash_command, category = "Utility")]
 pub async fn help_command(ctx: Context<'_>, command: String) -> Result<(), Error> {
     let commands = &ctx.framework().options().commands;
     match commands.iter().find(|c| c.name == command) {
@@ -164,7 +164,7 @@ pub async fn help_command(ctx: Context<'_>, command: String) -> Result<(), Error
 /// Moves pinned bot messages to the selected channel and creates an embed for them
 ///
 /// Example usage: **/move_bot_pins** to_channel: **my-channel**
-#[poise::command(slash_command, prefix_command, category = "Utility")]
+#[poise::command(slash_command, category = "Utility")]
 pub async fn move_bot_pins(ctx: Context<'_>, to_channel: String) -> Result<(), Error> {
     if let Some(to_id) = get_channel_id(ctx, &to_channel).await? {
         let pins = ctx.channel_id().pins(ctx.http()).await?;
@@ -236,7 +236,7 @@ async fn get_channel_id(ctx: Context<'_>, channel_name: &str) -> Result<Option<C
 }
 
 /// Display the age of a users account.
-#[poise::command(slash_command, prefix_command, category = "Utility")]
+#[poise::command(slash_command, category = "Utility")]
 pub async fn age(
     ctx: Context<'_>,
     #[description = "Selected user"] user: Option<serenity::User>,
@@ -287,7 +287,7 @@ impl_choice! { Role, RoleChoice }
 struct RoleChoice(Role);
 
 /// Sets a users role giving them specific permissions
-#[poise::command(slash_command, prefix_command, category = "Utility")]
+#[poise::command(slash_command, category = "Utility")]
 pub async fn set_role(
     ctx: Context<'_>,
     #[description = "Selected user"] user: serenity::User,
@@ -313,7 +313,7 @@ pub async fn set_role(
 }
 
 /// Grants permissions to user
-#[poise::command(slash_command, prefix_command, category = "Utility")]
+#[poise::command(slash_command, category = "Utility")]
 pub async fn grant(
     ctx: Context<'_>,
     #[description = "Selected user"] user: serenity::User,
@@ -341,7 +341,7 @@ pub async fn grant(
 }
 
 /// Revokes permissions from user
-#[poise::command(slash_command, prefix_command, category = "Utility")]
+#[poise::command(slash_command, category = "Utility")]
 pub async fn revoke(
     ctx: Context<'_>,
     #[description = "Selected user"] user: serenity::User,
@@ -369,7 +369,7 @@ pub async fn revoke(
 }
 
 /// Cancels ongoing generations
-#[poise::command(slash_command, prefix_command, category = "Utility")]
+#[poise::command(slash_command, category = "Utility")]
 pub async fn cancel(ctx: Context<'_>) -> Result<(), Error> {
     let funboy = ctx.data().funboy.clone();
     let user_id = DiscordUserId(ctx.author().id);

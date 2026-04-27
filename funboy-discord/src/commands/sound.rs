@@ -154,7 +154,7 @@ impl VoiceEventHandler for TrackErrorNotifier {
 }
 
 /// Join bot to current voice channel
-#[poise::command(slash_command, prefix_command, category = "Sound")]
+#[poise::command(slash_command, category = "Sound")]
 pub async fn join_voice(ctx: Context<'_>) -> Result<(), Error> {
     let (guild_id, channel_id) = {
         let guild = ctx.guild().unwrap();
@@ -198,7 +198,7 @@ pub async fn join_voice(ctx: Context<'_>) -> Result<(), Error> {
 }
 
 /// Disconnect bot from voice channel
-#[poise::command(slash_command, prefix_command, category = "Sound")]
+#[poise::command(slash_command, category = "Sound")]
 pub async fn leave_voice(ctx: Context<'_>) -> Result<(), Error> {
     let guild_id = ctx.guild_id().unwrap();
 
@@ -223,7 +223,7 @@ pub async fn leave_voice(ctx: Context<'_>) -> Result<(), Error> {
 ///
 /// Example usage: **/play_track** url_or_query: **https://www.youtube.com/watch?v=a3mxLL7nX1E**
 /// Example usage: **/play_track** url_or_query: **Back In Black**
-#[poise::command(slash_command, prefix_command, category = "Sound")]
+#[poise::command(slash_command, category = "Sound")]
 pub async fn play_track(ctx: Context<'_>, url_or_query: String) -> Result<(), Error> {
     let lock = match ctx.data().track_player_lock.try_lock() {
         Ok(gaurd) => gaurd,
@@ -307,7 +307,7 @@ pub async fn play_track(ctx: Context<'_>, url_or_query: String) -> Result<(), Er
 }
 
 /// Stop all currently playing audio tracks
-#[poise::command(slash_command, prefix_command, category = "Sound")]
+#[poise::command(slash_command, category = "Sound")]
 pub async fn stop_tracks(ctx: Context<'_>) -> Result<(), Error> {
     ctx.data().track_list.lock().await.clear();
 
@@ -361,7 +361,7 @@ pub async fn display_track_controls(ctx: Context<'_>) -> Result<(), Error> {
 }
 
 /// Show currently playing audio tracks
-#[poise::command(slash_command, prefix_command, category = "Sound")]
+#[poise::command(slash_command, category = "Sound")]
 pub async fn list_tracks(ctx: Context<'_>) -> Result<(), Error> {
     display_track_controls(ctx).await?;
     Ok(())
