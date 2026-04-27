@@ -151,7 +151,7 @@ pub async fn generate_file(ctx: Context<'_>, file: Attachment) -> Result<(), Err
 ///
 /// This treats the entire input as a single substitute allowing spaces and quotes inside the substitute.
 #[poise::command(slash_command, prefix_command, category = "Templates")]
-pub async fn add_subs(
+pub async fn add(
     ctx: Context<'_>,
     template: String,
     substitutes: String,
@@ -203,7 +203,7 @@ pub async fn add_subs(
 ///
 /// **Example:** `/delete_subs template: sentence | subs: This is one substitute containing "spaces and quotes inside it" | single: true`
 #[poise::command(slash_command, prefix_command, category = "Templates")]
-pub async fn delete_subs(
+pub async fn delete(
     ctx: Context<'_>,
     template: String,
     substitutes: String,
@@ -315,12 +315,12 @@ pub async fn copy_subs(
 /// - **Example:** `/replace_sub noun 0 "new substitute" id: true` — replaces the substitute with id 0
 /// Note: ID's of substitutes can be obtained by using the `/list_subs` command with the ID list style.
 #[poise::command(slash_command, prefix_command, category = "Templates")]
-pub async fn replace_sub(
+pub async fn replace(
     ctx: Context<'_>,
     template: Option<String>,
+    id: Option<bool>,
     from: String,
     to: String,
-    id: Option<bool>,
 ) -> Result<(), Error> {
     let funboy = ctx.data().funboy.clone();
     let result = funboy
