@@ -2,6 +2,7 @@ use std::{str::FromStr, sync::Arc};
 
 use ::serenity::all::{FullEvent, Interaction, UserId};
 use dotenvy::dotenv;
+use fsl_interpreter::FslInterpreter;
 use funboy_cli::{FunboyEnv, get_funboy};
 use funboy_core::{Funboy, database::Platform, interpreter::InterpreterLimits, user::FunboyUserId};
 use poise::serenity_prelude as serenity;
@@ -129,6 +130,8 @@ fn get_discord_commands()
         commands::utility::grant(),
         commands::utility::revoke(),
         commands::utility::cancel(),
+        commands::ollama::clear_ollama_history(),
+        commands::ollama::toggle_ollama_web_search(),
         commands::ollama::list_ollama_models(),
         commands::ollama::set_ollama_model(),
         commands::ollama::list_ollama_settings(),
@@ -176,9 +179,35 @@ async fn main() {
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
             commands: get_discord_commands(),
+            prefix_options: poise::PrefixFrameworkOptions {
+                prefix: Some("!".into()),
+                mention_as_prefix: false,
+                ..Default::default()
+            },
             event_handler: |ctx, event, _framework_ctx, data| {
                 Box::pin(async move {
                     match event {
+                        FullEvent::Message { new_message } => {
+                            if new_message
+                                .mentions_me(ctx)
+                                .await
+                                .is_ok_and(|is_true| is_true)
+                            {
+                                let user_id = DiscordUserId(new_message.author.id);
+                                let msg = new_message.content.to_owned();
+                                let interpreter = Arc::new(Mutex::new(FslInterpreter::new()));
+                                let result = data.funboy.user_chat(user_id, msg, interpreter).await;
+
+                                match result {
+                                    Ok(response) => {
+                                        let _ = new_message.reply(&ctx.http, response).await;
+                                    }
+                                    Err(e) => {
+                                        let _ = new_message.reply(&ctx.http, e.to_string()).await;
+                                    }
+                                }
+                            }
+                        }
                         FullEvent::InteractionCreate {
                             interaction: Interaction::Component(component_interaction),
                         } => match CustomComponent::from(component_interaction) {

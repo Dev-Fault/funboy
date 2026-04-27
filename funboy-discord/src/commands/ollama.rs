@@ -1,5 +1,6 @@
 use funboy_core::commands::{
-    CommandResult, OllamaAction, OllamaListOption, OllamaResetOption, OllamaSetOption,
+    CommandResult, OllamaAction, OllamaEnableTool, OllamaListOption, OllamaResetOption,
+    OllamaSetOption,
 };
 use funboy_core::database::Platform;
 
@@ -157,6 +158,58 @@ pub async fn set_ollama_template(ctx: Context<'_>, template: String) -> Result<(
 #[poise::command(slash_command, prefix_command, category = "Ollama")]
 pub async fn reset_ollama_template(ctx: Context<'_>) -> Result<(), Error> {
     reset_ollama(ctx, OllamaResetOption::Template).await
+}
+
+/// Clears ollama history
+#[poise::command(slash_command, prefix_command, category = "Ollama")]
+pub async fn clear_ollama_history(ctx: Context<'_>) -> Result<(), Error> {
+    let funboy = ctx.data().funboy.clone();
+    let user_id = DiscordUserId(ctx.author().id);
+    let result = funboy
+        .ollama_command(user_id, Platform::Discord, OllamaAction::Clear)
+        .await;
+
+    match result {
+        Ok(result) => {
+            if let CommandResult::Text(message) = result {
+                ctx.say_ephemeral(&message).await?;
+            }
+        }
+        Err(e) => {
+            ctx.say_ephemeral(&e.to_string()).await?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Clears ollama history
+#[poise::command(slash_command, prefix_command, category = "Ollama")]
+pub async fn toggle_ollama_web_search(ctx: Context<'_>) -> Result<(), Error> {
+    let funboy = ctx.data().funboy.clone();
+    let user_id = DiscordUserId(ctx.author().id);
+    let result = funboy
+        .ollama_command(
+            user_id,
+            Platform::Discord,
+            OllamaAction::Toggle {
+                tool: OllamaEnableTool::WebSearch,
+            },
+        )
+        .await;
+
+    match result {
+        Ok(result) => {
+            if let CommandResult::Text(message) = result {
+                ctx.say_ephemeral(&message).await?;
+            }
+        }
+        Err(e) => {
+            ctx.say_ephemeral(&e.to_string()).await?;
+        }
+    }
+
+    Ok(())
 }
 
 /// Sets the maximum amount of words (tokens) ollama can generate per prompt
