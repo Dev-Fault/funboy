@@ -13,7 +13,10 @@ use songbird::{SerenityInit, typemap::TypeMapKey};
 use tokio::sync::Mutex;
 
 use crate::{
-    commands::{prefix_commands::handle_prefix_commands, sound::TrackList},
+    commands::{
+        prefix_commands::{handle_discord_command, handle_discord_request},
+        sound::TrackList,
+    },
     components::{CustomComponent, TrackComponent},
     interpreter::interpreter_from_serenity,
 };
@@ -180,6 +183,18 @@ async fn main() {
                 Box::pin(async move {
                     match event {
                         FullEvent::Message { new_message } => {
+                            let user_id = DiscordUserId(new_message.author.id);
+                            let user_ctx = data.funboy.users.get_or_insert(user_id.clone()).await;
+                            if let Ok(user_ctx) = user_ctx {
+                                let requests = user_ctx.pending_requests.clone();
+                                let mut requests = requests.lock().await;
+                                if let Some(request) = requests.pop() {
+                                    let _ = handle_discord_request(request, ctx, data, new_message)
+                                        .await;
+                                    return Ok(());
+                                }
+                            }
+
                             let mentions_bot = new_message
                                 .mentions_me(ctx)
                                 .await
@@ -200,7 +215,7 @@ async fn main() {
                                     }
                                 }
                             } else if new_message.content.starts_with("!") {
-                                let result = handle_prefix_commands(&ctx, data, &new_message).await;
+                                let result = handle_discord_command(&ctx, data, &new_message).await;
                                 match result {
                                     Ok(result) => match result {
                                         CommandResult::Text(response) => {

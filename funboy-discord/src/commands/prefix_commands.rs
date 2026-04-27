@@ -66,7 +66,45 @@ pub enum DiscordCommand {
     Cancel,
 }
 
-pub async fn handle_prefix_commands(
+pub async fn handle_discord_request(
+    request: Request,
+    ctx: &serenity::prelude::Context,
+    data: &Data,
+    message: &Message,
+) -> Result<CommandResult, CommandError> {
+    let funboy = data.funboy.clone();
+    let interpreter = interpreter_from_serenity(ctx, data, message);
+    let user_id = DiscordUserId(message.author.id);
+
+    match request {
+        Request::GenerateFile => {
+            let attatchment = message.attachments.get(0).unwrap();
+            todo!()
+        }
+        Request::UploadSub(template) => {
+            let attatchment = message.attachments.get(0).unwrap();
+            todo!()
+        }
+        Request::DeleteTemplate(template) => {
+            if message.content.to_lowercase() == "yes" {
+                funboy
+                    .delete_command(
+                        user_id.clone(),
+                        Platform::Matrix,
+                        template,
+                        String::new(),
+                        false,
+                        false,
+                    )
+                    .await
+            } else {
+                Ok(CommandResult::None)
+            }
+        }
+    }
+}
+
+pub async fn handle_discord_command(
     ctx: &serenity::prelude::Context,
     data: &Data,
     message: &Message,
