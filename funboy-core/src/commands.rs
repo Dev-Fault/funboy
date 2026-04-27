@@ -1,8 +1,8 @@
-use std::{num::ParseIntError, str::FromStr, sync::Arc};
+use std::{num::ParseIntError, sync::Arc};
 
 use clap::{Args, Parser, ValueEnum};
 use fsl_interpreter::FslInterpreter;
-use strum_macros::Display;
+use strum::EnumString;
 use tokio::sync::Mutex;
 
 use crate::{
@@ -12,7 +12,6 @@ use crate::{
         AsStrs, LIST_STYLE_NONE, ListStyle, ONE_HUNDRED, SeperatedListOptions, TruncateEllipsize,
         format_as_item_seperated_list, format_item_list, parse_bot_args,
     },
-    ollama::OllamaParameters,
     user::FunboyUserId,
 };
 
@@ -55,7 +54,7 @@ pub enum OllamaAction {
 
     Toggle {
         #[command(subcommand)]
-        tool: OllamaEnableTool,
+        tool: OllamaToggleTool,
     },
 
     Reset {
@@ -66,9 +65,19 @@ pub enum OllamaAction {
     Clear,
 }
 
-#[derive(Parser, Debug, Copy, Clone, ValueEnum)]
-pub enum OllamaEnableTool {
+#[derive(
+    Parser, Debug, Copy, Clone, PartialEq, Eq, Hash, ValueEnum, strum_macros::Display, EnumString,
+)]
+pub enum OllamaToggleTool {
     WebSearch,
+}
+
+impl OllamaToggleTool {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            OllamaToggleTool::WebSearch => "web search",
+        }
+    }
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -99,15 +108,11 @@ pub enum OllamaSetOption {
     RepeatPenalty {
         repeat_penalty: f32,
     },
-    Parameters {
-        temperature: Option<f32>,
-        repeat_penalty: Option<f32>,
-        top_k: Option<u32>,
-        top_p: Option<f32>,
-    },
 }
 
-#[derive(Display, Parser, Debug, Clone, ValueEnum)]
+#[derive(
+    Parser, Debug, Copy, Clone, PartialEq, Eq, Hash, ValueEnum, strum_macros::Display, EnumString,
+)]
 pub enum OllamaResetOption {
     #[strum(to_string = "System Prompt")]
     SystemPrompt,
@@ -119,26 +124,32 @@ pub enum OllamaResetOption {
     Parameters,
 }
 
-const MODEL: &str = "model";
-const MODELS: &str = "models";
-const SETTINGS: &str = "settings";
+impl OllamaResetOption {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            OllamaResetOption::SystemPrompt => "system-prompt",
+            OllamaResetOption::Template => "template",
+            OllamaResetOption::OutputLimit => "output-limit",
+            OllamaResetOption::Parameters => "parameters",
+        }
+    }
+}
 
-#[derive(Parser, Debug, Copy, Clone, ValueEnum)]
+#[derive(
+    Parser, Debug, Copy, Clone, PartialEq, Eq, Hash, ValueEnum, strum_macros::Display, EnumString,
+)]
 pub enum OllamaListOption {
     Model,
     Models,
     Settings,
 }
 
-impl FromStr for OllamaListOption {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            MODEL => Ok(OllamaListOption::Model),
-            MODELS => Ok(OllamaListOption::Models),
-            SETTINGS => Ok(OllamaListOption::Settings),
-            _ => Err(format!("Unknown list option {}", s)),
+impl OllamaListOption {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            OllamaListOption::Model => "model",
+            OllamaListOption::Models => "models",
+            OllamaListOption::Settings => "settings",
         }
     }
 }
@@ -530,26 +541,6 @@ impl<U: FunboyUserId> Funboy<U> {
                         repeat_penalty
                     )))
                 }
-                OllamaSetOption::Parameters {
-                    temperature,
-                    top_k,
-                    top_p,
-                    repeat_penalty,
-                } => {
-                    let mut ollama_settings = ollama_settings.lock().await;
-                    let parameters =
-                        OllamaParameters::new(temperature, repeat_penalty, top_k, top_p);
-                    ollama_settings.set_parameters(parameters);
-                    let settings = ollama_settings.clone();
-                    drop(ollama_settings);
-                    self.users
-                        .update_ollama_settings(user_id, platform, settings)
-                        .await?;
-                    Ok(CommandResult::Text(format!(
-                        "Set ollama parameters to:\n{}",
-                        parameters
-                    )))
-                }
             },
             OllamaAction::Reset { option } => {
                 let mut ollama_settings = ollama_settings.lock().await;
@@ -569,7 +560,7 @@ impl<U: FunboyUserId> Funboy<U> {
             OllamaAction::Toggle { tool } => {
                 let mut ollama_settings = ollama_settings.lock().await;
                 let result = match tool {
-                    OllamaEnableTool::WebSearch => {
+                    OllamaToggleTool::WebSearch => {
                         if ollama_settings.tools.toggle_web_search() {
                             "Enabled web search tool"
                         } else {

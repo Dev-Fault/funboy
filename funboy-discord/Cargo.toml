@@ -18,6 +18,7 @@ async-recursion = "1.1.1"
 dotenvy = "0.15.7"
 fsl_interpreter = { version = "0.1.0", path = "../../fsl_interpreter" }
 clap = "4.6.1"
+strum = { version = "0.28.0", features = ["strum_macros"] }
 
 [dependencies.serenity]
 default-features = false

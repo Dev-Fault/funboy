@@ -247,6 +247,7 @@ pub async fn age(
     Ok(())
 }
 
+#[macro_export]
 macro_rules! impl_choice {
     ($option:ty, $type:tt) => {
         impl ChoiceParameter for $type {
