@@ -105,16 +105,17 @@ fn get_discord_commands()
     vec![
         register(),
         commands::templates::generate(),
+        commands::templates::generate_ollama(),
         commands::templates::generate_file(),
         commands::templates::rename_template(),
         commands::templates::add(),
-        commands::templates::upload_sub(),
-        commands::templates::copy_subs(),
+        commands::templates::add_file(),
+        commands::templates::copy(),
         commands::templates::replace(),
         commands::templates::delete(),
         commands::templates::delete_templates(),
-        commands::templates::list_subs(),
         commands::templates::list_templates(),
+        commands::templates::list_subs(),
         commands::random::random_number(),
         commands::random::random_entry(),
         commands::sound::join_voice(),
@@ -131,7 +132,6 @@ fn get_discord_commands()
         commands::utility::revoke(),
         commands::utility::cancel(),
         commands::ollama::ollama(),
-        commands::ollama::generate_ollama(),
     ]
 }
 

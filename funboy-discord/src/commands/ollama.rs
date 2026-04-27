@@ -6,7 +6,6 @@ use funboy_core::commands::{
 use funboy_core::database::Platform;
 use poise::ChoiceParameter;
 
-use crate::commands::templates::generate_message;
 use crate::impl_choice;
 use crate::{Context, DiscordUserId, Error, context_extension::ContextExtension};
 
@@ -268,10 +267,4 @@ pub async fn ollama_set_top_k(ctx: Context<'_>, top_k: u32) -> Result<(), Error>
 #[poise::command(slash_command, prefix_command, category = "Ollama", rename = "top-p")]
 pub async fn ollama_set_top_p(ctx: Context<'_>, top_p: f32) -> Result<(), Error> {
     set_ollama(ctx, OllamaSetOption::TopP { top_p }).await
-}
-
-/// Generates text like the generate command but sends the text as a prompt to ollama
-#[poise::command(slash_command, prefix_command, category = "Ollama")]
-pub async fn generate_ollama(ctx: Context<'_>, prompt: String) -> Result<(), Error> {
-    generate_message(ctx, prompt, true).await
 }

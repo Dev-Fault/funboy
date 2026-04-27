@@ -115,6 +115,12 @@ pub async fn generate(ctx: Context<'_>, input: String) -> Result<(), Error> {
     generate_message(ctx, input, false).await
 }
 
+/// Generates text like the generate command but sends the text as a prompt to ollama
+#[poise::command(slash_command, prefix_command, category = "Templates")]
+pub async fn generate_ollama(ctx: Context<'_>, input: String) -> Result<(), Error> {
+    generate_message(ctx, input, true).await
+}
+
 /// Generates text by preforming template substitution and intepreting fsl code from a file
 ///  
 /// See /generate command for more info
@@ -182,6 +188,45 @@ pub async fn add(
     Ok(())
 }
 
+/// Adds a single substitute from a file
+///
+/// **Example:** `/upload_sub essay [essay.txt]` — uploads file `essay.txt` and adds it as a single substitute to the `essay`
+#[poise::command(slash_command, prefix_command, category = "Templates")]
+pub async fn add_file(
+    ctx: Context<'_>,
+    template: String,
+    #[description = "Upload a text file"] sub_file: Attachment,
+) -> Result<(), Error> {
+    let bytes = sub_file.download().await?;
+    let sub = String::from_utf8(bytes);
+
+    let sub = match sub {
+        Ok(s) => s,
+        Err(_) => {
+            ctx.say_ephemeral("Only text files are allowed (file must be valid UTF-8).")
+                .await?;
+            return Ok(());
+        }
+    };
+
+    let result = ctx.data().funboy.add_substitutes(&template, &[&sub]).await;
+    match result {
+        Ok(_) => {
+            ctx.say(&format!(
+                "Added substitute from file {} to `{}`",
+                &sub_file.filename.truncate_with_ellipse(ONE_HUNDRED),
+                template
+            ))
+            .await?;
+        }
+        Err(e) => {
+            ctx.say_ephemeral(&e.to_string()).await?;
+        }
+    }
+
+    Ok(())
+}
+
 /// Deletes substitutes from a template
 ///
 ///
@@ -238,50 +283,11 @@ pub async fn delete(
     Ok(())
 }
 
-/// Adds a single substitute from a file
-///
-/// **Example:** `/upload_sub essay [essay.txt]` — uploads file `essay.txt` and adds it as a single substitute to the `essay`
-#[poise::command(slash_command, prefix_command, category = "Templates")]
-pub async fn upload_sub(
-    ctx: Context<'_>,
-    template: String,
-    #[description = "Upload a text file"] sub_file: Attachment,
-) -> Result<(), Error> {
-    let bytes = sub_file.download().await?;
-    let sub = String::from_utf8(bytes);
-
-    let sub = match sub {
-        Ok(s) => s,
-        Err(_) => {
-            ctx.say_ephemeral("Only text files are allowed (file must be valid UTF-8).")
-                .await?;
-            return Ok(());
-        }
-    };
-
-    let result = ctx.data().funboy.add_substitutes(&template, &[&sub]).await;
-    match result {
-        Ok(_) => {
-            ctx.say(&format!(
-                "Added substitute from file {} to `{}`",
-                &sub_file.filename.truncate_with_ellipse(ONE_HUNDRED),
-                template
-            ))
-            .await?;
-        }
-        Err(e) => {
-            ctx.say_ephemeral(&e.to_string()).await?;
-        }
-    }
-
-    Ok(())
-}
-
 /// Copies all substitutes from one template to another
 ///
 /// **Example:** `/copy_subs food noun` — copies all substitutes from `food` to `noun`
 #[poise::command(slash_command, prefix_command, category = "Templates")]
-pub async fn copy_subs(
+pub async fn copy(
     ctx: Context<'_>,
     from_template: String,
     to_template: String,
