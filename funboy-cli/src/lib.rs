@@ -5,9 +5,11 @@ use dotenvy::dotenv;
 use fsl_interpreter::FslInterpreter;
 use funboy_core::{
     Funboy,
-    commands::{CommandError, CommandResult, OllamaAction, parse_command_args},
+    commands::{
+        AddArgs, CommandError, CommandResult, CopyArgs, DeleteArgs, GenerateArgs, ListArgs,
+        OllamaArgs, RenameArgs, ReplaceArgs, parse_command_args,
+    },
     database::{FunboyDatabase, Platform},
-    format::{LIST_STYLE_NONE, ListStyle},
     user::FunboyUserId,
 };
 use rustyline::DefaultEditor;
@@ -196,71 +198,38 @@ impl FromStr for Mode {
 }
 
 #[derive(Parser, Debug, Clone)]
-pub enum Command {
+pub enum CliCommand {
     Generate {
-        #[arg(trailing_var_arg = true)]
-        input: Vec<String>,
-
-        #[arg(short, long)]
-        file: bool,
-
-        #[arg(short, long)]
-        ollama: bool,
+        #[command(flatten)]
+        args: GenerateArgs,
     },
     Add {
-        template: String,
-
-        #[arg(short, long)]
-        single: bool,
-
-        #[arg(short, long)]
-        file: bool,
-
-        #[arg(trailing_var_arg = true)]
-        substitutes: Vec<String>,
+        #[command(flatten)]
+        args: AddArgs,
     },
     Delete {
-        template: String,
-
-        #[arg(short, long)]
-        single: bool,
-
-        #[arg(short, long)]
-        id: bool,
-
-        #[arg(trailing_var_arg = true)]
-        substitutes: Vec<String>,
+        #[command(flatten)]
+        args: DeleteArgs,
     },
     List {
-        template: Option<String>,
-
-        #[arg(short, long, default_value = None)]
-        search_term: Option<String>,
-
-        #[arg(short, long, value_parser = clap::value_parser!(ListStyle), default_value = LIST_STYLE_NONE)]
-        list_style: ListStyle,
+        #[command(flatten)]
+        args: ListArgs,
     },
     Copy {
-        from_template: String,
-        to_template: String,
+        #[command(flatten)]
+        args: CopyArgs,
     },
     Rename {
-        from_template: String,
-        to_template: String,
+        #[command(flatten)]
+        args: RenameArgs,
     },
     Replace {
-        substitute: String,
-        with_substitute: String,
-
-        #[arg(short, long)]
-        template: Option<String>,
-
-        #[arg(short, long)]
-        id: bool,
+        #[command(flatten)]
+        args: ReplaceArgs,
     },
     Ollama {
-        #[command(subcommand)]
-        action: OllamaAction,
+        #[command(flatten)]
+        args: OllamaArgs,
     },
     Mode {
         #[arg(value_parser = clap::value_parser!(Mode))]
@@ -295,78 +264,98 @@ pub async fn interpret_bot_commands<U: FunboyUserId>(
 
     let args = parse_command_args(input);
 
-    match Command::try_parse_from(args) {
+    match CliCommand::try_parse_from(args) {
         Ok(command) => match command {
-            Command::Generate {
-                input,
-                file,
-                ollama,
-            } => funboy
-                .generate_command(Platform::Cli, user_id, interpreter, input, file, ollama)
-                .await
-                .map(|r| r.into()),
-            Command::Mode { mode } => return Ok(CliCommandResult::Mode(mode)),
-            Command::Add {
-                template,
-                substitutes,
-                single,
-                file: _,
-            } => {
+            CliCommand::Generate { args } => {
+                let GenerateArgs {
+                    file,
+                    ollama,
+                    input,
+                } = args;
+                funboy
+                    .generate_command(Platform::Cli, user_id, interpreter, input, file, ollama)
+                    .await
+                    .map(|r| r.into())
+            }
+            CliCommand::Mode { mode } => return Ok(CliCommandResult::Mode(mode)),
+            CliCommand::Add { args } => {
+                let AddArgs {
+                    template,
+                    single,
+                    file: _,
+                    substitutes,
+                } = args;
                 let substitutes = substitutes.join(" ");
                 funboy
                     .add_command(user_id, Platform::Cli, template, substitutes, single)
                     .await
                     .map(|r| r.into())
             }
-            Command::Delete {
-                template,
-                substitutes,
-                single,
-                id,
-            } => {
+            CliCommand::Delete { args } => {
+                let DeleteArgs {
+                    template,
+                    single,
+                    id,
+                    substitutes,
+                } = args;
                 let substitutes = substitutes.join(" ");
                 funboy
                     .delete_command(user_id, Platform::Cli, template, substitutes, single, id)
                     .await
                     .map(|r| r.into())
             }
-            Command::List {
-                template,
-                search_term,
-                list_style,
-            } => funboy
-                .list_command(template, search_term, list_style)
-                .await
-                .map(|r| r.into()),
-            Command::Ollama { action } => funboy
-                .ollama_command(user_id, Platform::Cli, action)
-                .await
-                .map(|r| r.into()),
-            Command::Copy {
-                from_template,
-                to_template,
-            } => funboy
-                .copy_command(user_id, from_template, to_template)
-                .await
-                .map(|r| r.into()),
-            Command::Rename {
-                from_template,
-                to_template,
-            } => funboy
-                .rename_command(user_id, from_template, to_template)
-                .await
-                .map(|r| r.into()),
-            Command::Replace {
-                template,
-                substitute,
-                with_substitute,
-                id,
-            } => funboy
-                .replace_command(user_id, template, substitute, with_substitute, id)
-                .await
-                .map(|r| r.into()),
-            Command::Exit => Ok(CliCommandResult::Exit),
-            Command::Cancel => funboy.cancel_command(user_id).await.map(|r| r.into()),
+            CliCommand::List { args } => {
+                let ListArgs {
+                    template,
+                    search_term,
+                    list_style,
+                } = args;
+                funboy
+                    .list_command(template, search_term, list_style)
+                    .await
+                    .map(|r| r.into())
+            }
+            CliCommand::Ollama { args } => {
+                let OllamaArgs { action } = args;
+                funboy
+                    .ollama_command(user_id, Platform::Cli, action)
+                    .await
+                    .map(|r| r.into())
+            }
+            CliCommand::Copy { args } => {
+                let CopyArgs {
+                    from_template,
+                    to_template,
+                } = args;
+                funboy
+                    .copy_command(user_id, from_template, to_template)
+                    .await
+                    .map(|r| r.into())
+            }
+            CliCommand::Rename { args } => {
+                let RenameArgs {
+                    from_template,
+                    to_template,
+                } = args;
+                funboy
+                    .rename_command(user_id, from_template, to_template)
+                    .await
+                    .map(|r| r.into())
+            }
+            CliCommand::Replace { args } => {
+                let ReplaceArgs {
+                    substitute,
+                    with_substitute,
+                    template,
+                    id,
+                } = args;
+                funboy
+                    .replace_command(user_id, template, substitute, with_substitute, id)
+                    .await
+                    .map(|r| r.into())
+            }
+            CliCommand::Exit => Ok(CliCommandResult::Exit),
+            CliCommand::Cancel => funboy.cancel_command(user_id).await.map(|r| r.into()),
         },
         Err(e) => Err(CommandError::UnknownCommand(e.to_string())),
     }

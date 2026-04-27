@@ -4,9 +4,11 @@ use clap::Parser;
 use fsl_interpreter::FslInterpreter;
 use funboy_core::{
     Funboy, Request,
-    commands::{CommandError, CommandResult, OllamaAction, parse_command_args},
+    commands::{
+        AddArgs, CommandError, CommandResult, CopyArgs, DeleteArgs, GenerateArgs, ListArgs,
+        OllamaArgs, RenameArgs, ReplaceArgs, parse_command_args,
+    },
     database::Platform,
-    format::{LIST_STYLE_NONE, ListStyle},
     permissions::{Permission, Permissions, Role},
 };
 use matrix_sdk::{
@@ -18,76 +20,38 @@ use tokio::sync::Mutex;
 use crate::{MatrixUser, send_msg_with_mixed_content};
 
 #[derive(Parser, Debug, Clone)]
-pub enum ImageAction {
-    Embed { url: String },
-}
-
-#[derive(Parser, Debug, Clone)]
-pub enum Command {
+pub enum MatrixCommand {
     Generate {
-        #[arg(short, long)]
-        file: bool,
-
-        #[arg(short, long)]
-        ollama: bool,
-
-        #[arg(trailing_var_arg = true)]
-        input: Vec<String>,
+        #[command(flatten)]
+        args: GenerateArgs,
     },
     Add {
-        template: String,
-
-        #[arg(short, long)]
-        single: bool,
-
-        #[arg(short, long)]
-        file: bool,
-
-        #[arg(trailing_var_arg = true)]
-        substitutes: Vec<String>,
+        #[command(flatten)]
+        args: AddArgs,
     },
     Delete {
-        template: String,
-
-        #[arg(short, long)]
-        single: bool,
-
-        #[arg(short, long)]
-        id: bool,
-
-        #[arg(trailing_var_arg = true)]
-        substitutes: Vec<String>,
+        #[command(flatten)]
+        args: DeleteArgs,
     },
     List {
-        template: Option<String>,
-
-        #[arg(short, long, default_value = None)]
-        search_term: Option<String>,
-
-        #[arg(short, long, value_parser = clap::value_parser!(ListStyle), default_value = LIST_STYLE_NONE)]
-        list_style: ListStyle,
+        #[command(flatten)]
+        args: ListArgs,
     },
     Copy {
-        from_template: String,
-        to_template: String,
+        #[command(flatten)]
+        args: CopyArgs,
     },
     Rename {
-        from_template: String,
-        to_template: String,
+        #[command(flatten)]
+        args: RenameArgs,
     },
     Replace {
-        substitute: String,
-        with_substitute: String,
-
-        #[arg(short, long)]
-        template: Option<String>,
-
-        #[arg(short, long)]
-        id: bool,
+        #[command(flatten)]
+        args: ReplaceArgs,
     },
     Ollama {
-        #[command(subcommand)]
-        action: OllamaAction,
+        #[command(flatten)]
+        args: OllamaArgs,
     },
     Attach {
         url: String,
@@ -181,76 +145,85 @@ pub async fn interpret_matrix_commands(
 
     let args = parse_command_args(input);
 
-    match Command::try_parse_from(args) {
+    match MatrixCommand::try_parse_from(args) {
         Ok(command) => match command {
-            Command::Attach { url } => attach_url(&url, &user_permissions, room).await,
-            Command::Generate {
-                file: false,
-                input,
-                ollama,
-            } => {
-                let result = funboy
-                    .generate_command(Platform::Matrix, user_id, interpreter, input, false, ollama)
-                    .await;
+            MatrixCommand::Attach { url } => attach_url(&url, &user_permissions, room).await,
+            MatrixCommand::Generate { args } => {
+                let GenerateArgs {
+                    file,
+                    ollama,
+                    input,
+                } = args;
 
-                match result {
-                    Ok(output) => match output {
-                        CommandResult::Text(output) => {
-                            send_msg_with_mixed_content(&output, &user_permissions, room).await;
-                            Ok(CommandResult::None)
-                        }
-                        _ => Ok(CommandResult::None),
-                    },
-                    Err(e) => Err(e),
-                }
-            }
-            Command::Generate { file: true, .. } => {
-                if user_permissions.can_use_files() && user_permissions.can_generate() {
-                    let mut pending_requests = user_ctx.pending_requests.lock().await;
-                    pending_requests.push(Request::GenerateFile);
-                    Ok(CommandResult::Text(format!(
-                        "Attach the file you want to upload."
-                    )))
+                if file {
+                    if user_permissions.can_use_files() && user_permissions.can_generate() {
+                        let mut pending_requests = user_ctx.pending_requests.lock().await;
+                        pending_requests.push(Request::GenerateFile);
+                        Ok(CommandResult::Text(format!(
+                            "Attach the file you want to upload."
+                        )))
+                    } else {
+                        Err(CommandError::LackingPermissions(
+                            user_permissions.get_lacking(&[Permission::File, Permission::Generate]),
+                        ))
+                    }
                 } else {
-                    Err(CommandError::LackingPermissions(
-                        user_permissions.get_lacking(&[Permission::File, Permission::Generate]),
-                    ))
+                    let result = funboy
+                        .generate_command(
+                            Platform::Matrix,
+                            user_id,
+                            interpreter,
+                            input,
+                            false,
+                            ollama,
+                        )
+                        .await;
+
+                    match result {
+                        Ok(output) => match output {
+                            CommandResult::Text(output) => {
+                                send_msg_with_mixed_content(&output, &user_permissions, room).await;
+                                Ok(CommandResult::None)
+                            }
+                            _ => Ok(CommandResult::None),
+                        },
+                        Err(e) => Err(e),
+                    }
                 }
             }
-            Command::Add {
-                file: false,
-                template,
-                single,
-                substitutes,
-            } => {
-                let substitutes = substitutes.join(" ");
-                funboy
-                    .add_command(user_id, Platform::Matrix, template, substitutes, single)
-                    .await
-            }
-            Command::Add {
-                template,
-                file: true,
-                ..
-            } => {
-                if user_permissions.can_use_files() && user_permissions.can_update() {
-                    let mut pending_requests = user_ctx.pending_requests.lock().await;
-                    pending_requests.push(Request::UploadSub(template));
-                    Ok(CommandResult::Text(format!(
-                        "Attach the file you want to add as a substitute.",
-                    )))
+            MatrixCommand::Add { args } => {
+                let AddArgs {
+                    template,
+                    single,
+                    file,
+                    substitutes,
+                } = args;
+                if file {
+                    if user_permissions.can_use_files() && user_permissions.can_update() {
+                        let mut pending_requests = user_ctx.pending_requests.lock().await;
+                        pending_requests.push(Request::UploadSub(template));
+                        Ok(CommandResult::Text(format!(
+                            "Attach the file you want to add as a substitute.",
+                        )))
+                    } else {
+                        Err(CommandError::LackingPermissions(
+                            user_permissions.get_lacking(&[Permission::File, Permission::Update]),
+                        ))
+                    }
                 } else {
-                    Err(CommandError::LackingPermissions(
-                        user_permissions.get_lacking(&[Permission::File, Permission::Update]),
-                    ))
+                    let substitutes = substitutes.join(" ");
+                    funboy
+                        .add_command(user_id, Platform::Matrix, template, substitutes, single)
+                        .await
                 }
             }
-            Command::Delete {
-                template,
-                single,
-                id,
-                substitutes,
-            } => {
+            MatrixCommand::Delete { args } => {
+                let DeleteArgs {
+                    template,
+                    single,
+                    id,
+                    substitutes,
+                } = args;
                 if substitutes.len() == 0 {
                     let mut pending_requests = user_ctx.pending_requests.lock().await;
                     pending_requests.push(Request::DeleteTemplate(template.clone()));
@@ -272,61 +245,68 @@ pub async fn interpret_matrix_commands(
                         .await
                 }
             }
-            Command::List {
-                template,
-                search_term,
-                list_style,
-            } => funboy.list_command(template, search_term, list_style).await,
-            Command::Copy {
-                from_template,
-                to_template,
-            } => {
+            MatrixCommand::List { args } => {
+                let ListArgs {
+                    template,
+                    search_term,
+                    list_style,
+                } = args;
+                funboy.list_command(template, search_term, list_style).await
+            }
+            MatrixCommand::Copy { args } => {
+                let CopyArgs {
+                    from_template,
+                    to_template,
+                } = args;
                 funboy
                     .copy_command(user_id, from_template, to_template)
                     .await
             }
-            Command::Rename {
-                from_template,
-                to_template,
-            } => {
+            MatrixCommand::Rename { args } => {
+                let RenameArgs {
+                    from_template,
+                    to_template,
+                } = args;
                 funboy
                     .rename_command(user_id, from_template, to_template)
                     .await
             }
-            Command::Replace {
-                substitute,
-                with_substitute,
-                template,
-                id,
-            } => {
+            MatrixCommand::Replace { args } => {
+                let ReplaceArgs {
+                    substitute,
+                    with_substitute,
+                    template,
+                    id,
+                } = args;
                 funboy
                     .replace_command(user_id, template, substitute, with_substitute, id)
                     .await
             }
-            Command::Ollama { action } => {
+            MatrixCommand::Ollama { args } => {
+                let OllamaArgs { action } = args;
                 funboy
                     .ollama_command(user_id, Platform::Matrix, action)
                     .await
             }
-            Command::Grant { user, permissions } => {
+            MatrixCommand::Grant { user, permissions } => {
                 let receiver_id = find_user(&user, room).await?;
                 let receiver = MatrixUser::new(room_id, receiver_id);
 
                 funboy.grant_command(user_id, receiver, permissions).await
             }
-            Command::Revoke { user, permissions } => {
+            MatrixCommand::Revoke { user, permissions } => {
                 let receiver_id = find_user(&user, room).await?;
                 let receiver = MatrixUser::new(room_id, receiver_id);
 
                 funboy.revoke_command(user_id, receiver, permissions).await
             }
-            Command::SetRole { user, role } => {
+            MatrixCommand::SetRole { user, role } => {
                 let receiver_id = find_user(&user, room).await?;
                 let receiver = MatrixUser::new(room_id, receiver_id);
 
                 funboy.set_role(user_id, receiver, role).await
             }
-            Command::Cancel => funboy.cancel_command(user_id).await,
+            MatrixCommand::Cancel => funboy.cancel_command(user_id).await,
         },
         Err(e) => Err(CommandError::UnknownCommand(e.to_string())),
     }

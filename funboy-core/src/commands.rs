@@ -1,6 +1,6 @@
 use std::{num::ParseIntError, str::FromStr, sync::Arc};
 
-use clap::{Parser, ValueEnum};
+use clap::{Args, Parser, ValueEnum};
 use fsl_interpreter::FslInterpreter;
 use strum_macros::Display;
 use tokio::sync::Mutex;
@@ -9,7 +9,7 @@ use crate::{
     Funboy, FunboyError, Permission, Permissions, Role,
     database::{KeySize, Limit, OrderBy, Platform, SortOrder, SubstituteReceipt},
     format::{
-        AsStrs, ListStyle, ONE_HUNDRED, SeperatedListOptions, TruncateEllipsize,
+        AsStrs, LIST_STYLE_NONE, ListStyle, ONE_HUNDRED, SeperatedListOptions, TruncateEllipsize,
         format_as_item_seperated_list, format_item_list, parse_bot_args,
     },
     ollama::OllamaParameters,
@@ -166,6 +166,87 @@ pub fn parse_command_args<'a>(input: &'a str) -> Vec<&'a str> {
     full_args.extend(&args);
 
     full_args
+}
+
+#[derive(Args, Clone, Debug)]
+pub struct GenerateArgs {
+    #[arg(short, long)]
+    pub file: bool,
+
+    #[arg(short, long)]
+    pub ollama: bool,
+
+    #[arg(trailing_var_arg = true)]
+    pub input: Vec<String>,
+}
+
+#[derive(Args, Clone, Debug)]
+pub struct AddArgs {
+    pub template: String,
+
+    #[arg(short, long)]
+    pub single: bool,
+
+    #[arg(short, long)]
+    pub file: bool,
+
+    #[arg(trailing_var_arg = true)]
+    pub substitutes: Vec<String>,
+}
+
+#[derive(Args, Clone, Debug)]
+pub struct DeleteArgs {
+    pub template: String,
+
+    #[arg(short, long)]
+    pub single: bool,
+
+    #[arg(short, long)]
+    pub id: bool,
+
+    #[arg(trailing_var_arg = true)]
+    pub substitutes: Vec<String>,
+}
+
+#[derive(Args, Clone, Debug)]
+pub struct ListArgs {
+    pub template: Option<String>,
+
+    #[arg(short, long, default_value = None)]
+    pub search_term: Option<String>,
+
+    #[arg(short, long, value_parser = clap::value_parser!(ListStyle), default_value = LIST_STYLE_NONE)]
+    pub list_style: ListStyle,
+}
+
+#[derive(Args, Clone, Debug)]
+pub struct CopyArgs {
+    pub from_template: String,
+    pub to_template: String,
+}
+
+#[derive(Args, Clone, Debug)]
+pub struct RenameArgs {
+    pub from_template: String,
+    pub to_template: String,
+}
+
+#[derive(Args, Clone, Debug)]
+pub struct ReplaceArgs {
+    pub substitute: String,
+    pub with_substitute: String,
+
+    #[arg(short, long)]
+    pub template: Option<String>,
+
+    #[arg(short, long)]
+    pub id: bool,
+}
+
+#[derive(Args, Clone, Debug)]
+pub struct OllamaArgs {
+    #[command(subcommand)]
+    pub action: OllamaAction,
 }
 
 impl<U: FunboyUserId> Funboy<U> {
