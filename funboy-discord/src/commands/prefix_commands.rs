@@ -66,7 +66,7 @@ pub enum DiscordCommand {
     Cancel,
 }
 
-pub async fn handle_discord_request(
+pub async fn handle_request(
     request: Request,
     ctx: &serenity::prelude::Context,
     data: &Data,
@@ -104,7 +104,7 @@ pub async fn handle_discord_request(
     }
 }
 
-pub async fn handle_discord_command(
+pub async fn handle_prefix_command(
     ctx: &serenity::prelude::Context,
     data: &Data,
     message: &Message,
