@@ -16,7 +16,8 @@ use songbird::SerenityInit;
 async fn main() {
     let intents = serenity::GatewayIntents::non_privileged()
         | serenity::GatewayIntents::MESSAGE_CONTENT
-        | serenity::GatewayIntents::GUILD_MEMBERS;
+        | serenity::GatewayIntents::GUILD_MEMBERS
+        | serenity::GatewayIntents::GUILD_VOICE_STATES;
 
     let funboy_env = FunboyEnv::new();
     let env = DiscordEnv::new(funboy_env);

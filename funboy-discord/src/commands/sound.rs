@@ -184,18 +184,25 @@ pub async fn join_voice(ctx: Context<'_>) -> Result<(), Error> {
         .expect(NOT_INITIALIZED)
         .clone();
 
-    if let Ok(handler_lock) = manager.join(guild_id, connect_to).await {
-        let mut handler = handler_lock.lock().await;
+    ctx.defer().await?;
+    match manager.join(guild_id, connect_to).await {
+        Ok(handler) => {
+            let mut handler = handler.lock().await;
 
-        handler.add_global_event(TrackEvent::Error.into(), TrackErrorNotifier);
-        handler.add_global_event(
-            CoreEvent::DriverDisconnect.into(),
-            TrackEndHandler {
-                track_list: ctx.data().track_list.clone(),
-            },
-        );
+            handler.add_global_event(TrackEvent::Error.into(), TrackErrorNotifier);
+            handler.add_global_event(
+                CoreEvent::DriverDisconnect.into(),
+                TrackEndHandler {
+                    track_list: ctx.data().track_list.clone(),
+                },
+            );
 
-        ctx.say(JOINED_CHANNEL_NOTIF).await?;
+            ctx.say(JOINED_CHANNEL_NOTIF).await?;
+        }
+        Err(e) => {
+            ctx.say("Failed to join voice channel").await?;
+            eprintln!("{e}");
+        }
     }
 
     Ok(())
