@@ -56,7 +56,6 @@ pub async fn ollama(_ctx: Context<'_>) -> Result<(), Error> {
 
 #[poise::command(
     slash_command,
-    prefix_command,
     category = "Ollama",
     subcommands(
         "ollama_set_model",
@@ -75,18 +74,13 @@ pub async fn ollama_set(_ctx: Context<'_>) -> Result<(), Error> {
 }
 
 /// Sets the current ollama model
-#[poise::command(slash_command, prefix_command, category = "Ollama", rename = "model")]
+#[poise::command(slash_command, category = "Ollama", rename = "model")]
 pub async fn ollama_set_model(ctx: Context<'_>, model: String) -> Result<(), Error> {
     set_ollama(ctx, OllamaSetOption::Model { model: model }).await
 }
 
 /// Sets the system prompt for ollama
-#[poise::command(
-    slash_command,
-    prefix_command,
-    category = "Ollama",
-    rename = "system-prompt"
-)]
+#[poise::command(slash_command, category = "Ollama", rename = "system-prompt")]
 pub async fn ollama_set_system_prompt(
     ctx: Context<'_>,
     system_prompt: String,
@@ -101,12 +95,7 @@ pub async fn ollama_set_system_prompt(
 }
 
 /// Sets the template for ollama
-#[poise::command(
-    slash_command,
-    prefix_command,
-    category = "Ollama",
-    rename = "template"
-)]
+#[poise::command(slash_command, category = "Ollama", rename = "template")]
 pub async fn ollama_set_template(ctx: Context<'_>, template: String) -> Result<(), Error> {
     set_ollama(
         ctx,
@@ -118,18 +107,13 @@ pub async fn ollama_set_template(ctx: Context<'_>, template: String) -> Result<(
 }
 
 /// Sets the maximum amount of tokens ollama can generate per prompt
-#[poise::command(
-    slash_command,
-    prefix_command,
-    category = "Ollama",
-    rename = "output-limit"
-)]
+#[poise::command(slash_command, category = "Ollama", rename = "output-limit")]
 pub async fn ollama_set_output_limit(ctx: Context<'_>, limit: u16) -> Result<(), Error> {
     set_ollama(ctx, OllamaSetOption::OutputLimit { limit: limit }).await
 }
 
 /// Resets an ollama setting to it's default value
-#[poise::command(slash_command, prefix_command, category = "Ollama", rename = "reset")]
+#[poise::command(slash_command, category = "Ollama", rename = "reset")]
 async fn ollama_reset(ctx: Context<'_>, option: OllamaResetChoice) -> Result<(), Error> {
     let funboy = ctx.data().funboy.clone();
     let user_id = ctx.author().id;
@@ -154,7 +138,7 @@ async fn ollama_reset(ctx: Context<'_>, option: OllamaResetChoice) -> Result<(),
 }
 
 /// Toggles ollama tool on or off
-#[poise::command(slash_command, prefix_command, category = "Ollama", rename = "toggle")]
+#[poise::command(slash_command, category = "Ollama", rename = "toggle")]
 pub async fn ollama_toggle(ctx: Context<'_>, tool: OllamaToggleChoice) -> Result<(), Error> {
     let funboy = ctx.data().funboy.clone();
     let user_id = DiscordUserId(ctx.author().id);
@@ -181,7 +165,7 @@ pub async fn ollama_toggle(ctx: Context<'_>, tool: OllamaToggleChoice) -> Result
 }
 
 /// Lists ollama settings
-#[poise::command(slash_command, prefix_command, category = "Ollama", rename = "list")]
+#[poise::command(slash_command, category = "Ollama", rename = "list")]
 pub async fn ollama_list(ctx: Context<'_>, choice: OllamaListChoice) -> Result<(), Error> {
     let funboy = ctx.data().funboy.clone();
     let user_id = ctx.author().id;
@@ -206,7 +190,7 @@ pub async fn ollama_list(ctx: Context<'_>, choice: OllamaListChoice) -> Result<(
 }
 
 /// Clears ollama chat history
-#[poise::command(slash_command, prefix_command, category = "Ollama", rename = "clear")]
+#[poise::command(slash_command, category = "Ollama", rename = "clear")]
 pub async fn ollama_clear(ctx: Context<'_>) -> Result<(), Error> {
     let funboy = ctx.data().funboy.clone();
     let user_id = DiscordUserId(ctx.author().id);
@@ -229,23 +213,13 @@ pub async fn ollama_clear(ctx: Context<'_>) -> Result<(), Error> {
 }
 
 /// Sets ollama temperature
-#[poise::command(
-    slash_command,
-    prefix_command,
-    category = "Ollama",
-    rename = "temperature"
-)]
+#[poise::command(slash_command, category = "Ollama", rename = "temperature")]
 pub async fn ollama_set_temperature(ctx: Context<'_>, temperature: f32) -> Result<(), Error> {
     set_ollama(ctx, OllamaSetOption::Temperature { temperature }).await
 }
 
 /// Sets ollama repeat penalty
-#[poise::command(
-    slash_command,
-    prefix_command,
-    category = "Ollama",
-    rename = "repeat-penalty"
-)]
+#[poise::command(slash_command, category = "Ollama", rename = "repeat-penalty")]
 pub async fn ollama_set_repeat_penalty(ctx: Context<'_>, repeat_penalty: f32) -> Result<(), Error> {
     set_ollama(
         ctx,
@@ -257,13 +231,13 @@ pub async fn ollama_set_repeat_penalty(ctx: Context<'_>, repeat_penalty: f32) ->
 }
 
 /// Sets ollama top k
-#[poise::command(slash_command, prefix_command, category = "Ollama", rename = "top-k")]
+#[poise::command(slash_command, category = "Ollama", rename = "top-k")]
 pub async fn ollama_set_top_k(ctx: Context<'_>, top_k: u32) -> Result<(), Error> {
     set_ollama(ctx, OllamaSetOption::TopK { top_k }).await
 }
 
 /// Sets ollama top p
-#[poise::command(slash_command, prefix_command, category = "Ollama", rename = "top-p")]
+#[poise::command(slash_command, category = "Ollama", rename = "top-p")]
 pub async fn ollama_set_top_p(ctx: Context<'_>, top_p: f32) -> Result<(), Error> {
     set_ollama(ctx, OllamaSetOption::TopP { top_p }).await
 }
