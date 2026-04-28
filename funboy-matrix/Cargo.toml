@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+ollama-rs.workspace = true
+reqwest.workspace = true
 dotenvy = "0.15.7"
 matrix-sdk = { version = "0.16.0", features = ["markdown"] }
 funboy-core = { path = "../funboy-core" }
@@ -13,8 +15,6 @@ tokio = {version = "1.39.2", features = ["full"]}
 rand = "0.9.2"
 serde = { version = "1.0.210", features = ["derive"] }
 serde_json = "1.0.132"
-reqwest = {version = "0.11", features = ["json"]}
-ollama-rs = "0.3.2"
 async-recursion = "1.1.1"
 fsl_interpreter = { version = "0.1.0", path = "../../fsl_interpreter" }
 tracing-subscriber = "0.3.23"

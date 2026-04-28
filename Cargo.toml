@@ -6,3 +6,7 @@ members = [
 	"funboy-discord",
 	"funboy-matrix",
 ]
+
+[workspace.dependencies]
+ollama-rs = {version = "0.3.4", features = ["tool-implementations"]}
+reqwest = {version = "0.12", features = ["json"]}
