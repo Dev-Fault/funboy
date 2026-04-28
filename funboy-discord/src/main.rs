@@ -199,7 +199,8 @@ async fn main() {
                                 .mentions_me(ctx)
                                 .await
                                 .is_ok_and(|is_true| is_true);
-                            let mentions_bot = mentions_bot && new_message.content.starts_with("@");
+                            let mentions_bot =
+                                mentions_bot && new_message.content.starts_with("<@");
                             if mentions_bot {
                                 let user_id = DiscordUserId(new_message.author.id);
                                 let msg = new_message.content.to_owned();
