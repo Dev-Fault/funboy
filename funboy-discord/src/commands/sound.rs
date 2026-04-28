@@ -157,7 +157,11 @@ impl VoiceEventHandler for TrackErrorNotifier {
 #[poise::command(slash_command, category = "Sound")]
 pub async fn join_voice(ctx: Context<'_>) -> Result<(), Error> {
     let (guild_id, channel_id) = {
-        let guild = ctx.guild().unwrap();
+        let Some(guild) = ctx.guild() else {
+            ctx.say_ephemeral("command must be called inside of a guild")
+                .await?;
+            return Ok(());
+        };
         let channel_id = guild
             .voice_states
             .get(&ctx.author().id)
@@ -200,7 +204,11 @@ pub async fn join_voice(ctx: Context<'_>) -> Result<(), Error> {
 /// Disconnect bot from voice channel
 #[poise::command(slash_command, category = "Sound")]
 pub async fn leave_voice(ctx: Context<'_>) -> Result<(), Error> {
-    let guild_id = ctx.guild_id().unwrap();
+    let Some(guild_id) = ctx.guild_id() else {
+        ctx.say_ephemeral("command must be called inside of a guild")
+            .await?;
+        return Ok(());
+    };
 
     let manager = get_songbird_manager(ctx).await;
 
@@ -255,7 +263,13 @@ pub async fn play_track(ctx: Context<'_>, url_or_query: String) -> Result<(), Er
 
     let manager = get_songbird_manager(ctx).await;
 
-    if let Some(handler_lock) = manager.get(ctx.guild_id().unwrap()) {
+    let Some(guild_id) = ctx.guild_id() else {
+        ctx.say_ephemeral("command must be called inside of a guild")
+            .await?;
+        return Ok(());
+    };
+
+    if let Some(handler_lock) = manager.get(guild_id) {
         ctx.say_ephemeral("Queuing track...").await?;
         ctx.defer().await?;
         let mut handler = handler_lock.lock().await;
@@ -313,7 +327,13 @@ pub async fn stop_tracks(ctx: Context<'_>) -> Result<(), Error> {
 
     let manager = get_songbird_manager(ctx).await;
 
-    if let Some(handler_lock) = manager.get(ctx.guild_id().unwrap()) {
+    let Some(guild_id) = ctx.guild_id() else {
+        ctx.say_ephemeral("command must be called inside of a guild")
+            .await?;
+        return Ok(());
+    };
+
+    if let Some(handler_lock) = manager.get(guild_id) {
         let mut handler = handler_lock.lock().await;
         handler.stop();
 
@@ -328,7 +348,13 @@ pub async fn stop_tracks(ctx: Context<'_>) -> Result<(), Error> {
 pub async fn display_track_controls(ctx: Context<'_>) -> Result<(), Error> {
     let manager = get_songbird_manager(ctx).await;
 
-    if let Some(handler_lock) = manager.get(ctx.guild_id().unwrap()) {
+    let Some(guild_id) = ctx.guild_id() else {
+        ctx.say_ephemeral("command must be called inside of a guild")
+            .await?;
+        return Ok(());
+    };
+
+    if let Some(handler_lock) = manager.get(guild_id) {
         let mut _handler = handler_lock.lock().await;
 
         let mut track_list = ctx.data().track_list.lock().await;
