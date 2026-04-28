@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use crate::{
-    Data, HttpClient,
+    Data,
     components::{TrackComponent, create_track_button},
     context_extension::ContextExtension,
 };
@@ -465,8 +465,8 @@ async fn get_songbird_manager(ctx: Context<'_>) -> Arc<Songbird> {
         .clone()
 }
 
-async fn get_http_client(ctx: Context<'_>) -> HttpClient {
-    let client: HttpClient = {
+async fn get_http_client(ctx: Context<'_>) -> reqwest::Client {
+    let client: reqwest::Client = {
         let data = ctx.serenity_context().data.read().await;
         data.get::<HttpKey>()
             .cloned()

@@ -12,18 +12,29 @@ pub const WARN_EMPTY_MESSAGE: &str = "Message was empty.";
 
 #[allow(dead_code)]
 pub trait ContextExtension {
-    async fn say_list(&self, message: &[&str], ephemeral: bool) -> Result<(), Error>;
+    fn say_list(
+        &self,
+        message: &[&str],
+        ephemeral: bool,
+    ) -> impl std::future::Future<Output = Result<(), Error>> + Send;
 
-    async fn say_ephemeral(&self, message: &str) -> Result<ReplyHandle<'_>, Error>;
+    fn say_ephemeral(
+        &self,
+        message: &str,
+    ) -> impl std::future::Future<Output = Result<ReplyHandle<'_>, Error>> + Send;
 
-    async fn say_long(&self, message: &str, ephemeral: bool) -> Result<(), Error>;
+    fn say_long(
+        &self,
+        message: &str,
+        ephemeral: bool,
+    ) -> impl std::future::Future<Output = Result<(), Error>> + Send;
 
-    async fn edit_long<'b>(
+    fn edit_long<'b>(
         &self,
         original_message: ReplyHandle<'b>,
         message: &str,
         ephemeral: bool,
-    ) -> Result<(), Error>;
+    ) -> impl std::future::Future<Output = Result<(), Error>> + Send;
 }
 
 impl<'a> ContextExtension for Context<'a> {

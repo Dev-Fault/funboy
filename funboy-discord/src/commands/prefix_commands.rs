@@ -79,11 +79,32 @@ pub async fn handle_request(
     match request {
         Request::GenerateFile => {
             let attatchment = message.attachments.get(0).unwrap();
-            todo!()
+            let bytes = attatchment.download().await.unwrap();
+            let input = String::from_utf8(bytes);
+
+            if let Ok(input) = input {
+                let output = funboy.generate(input, interpreter).await?;
+                Ok(CommandResult::Text(output))
+            } else {
+                Err(CommandError::ExecutionFailed(
+                    "Only text files are allowed (file must be valid UTF-8).".into(),
+                ))
+            }
         }
         Request::UploadSub(template) => {
             let attatchment = message.attachments.get(0).unwrap();
-            todo!()
+            let bytes = attatchment.download().await.unwrap();
+            let input = String::from_utf8(bytes);
+
+            if let Ok(sub) = input {
+                funboy
+                    .add_command(user_id, Platform::Discord, template, sub, true)
+                    .await
+            } else {
+                Err(CommandError::ExecutionFailed(
+                    "Only text files are allowed (file must be valid UTF-8).".into(),
+                ))
+            }
         }
         Request::DeleteTemplate(template) => {
             if message.content.to_lowercase() == "yes" {

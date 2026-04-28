@@ -2,16 +2,12 @@ use std::sync::Arc;
 
 use ::serenity::all::{FullEvent, Interaction};
 use funboy_cli::{FunboyEnv, get_funboy};
-use funboy_core::{commands::CommandResult, database::Platform};
+use funboy_core::database::Platform;
 use funboy_discord::{
-    Data, DiscordEnv, DiscordUserId,
-    commands::{
-        self,
-        prefix_commands::{handle_discord_command, handle_discord_request},
-    },
+    Data, DiscordEnv, HttpKey,
+    commands::{self},
     components::{CustomComponent, TrackComponent},
     get_discord_commands, grant_host_permissions, handle_message,
-    interpreter::interpreter_from_serenity,
 };
 use poise::serenity_prelude as serenity;
 use songbird::SerenityInit;
@@ -74,7 +70,7 @@ async fn main() {
     let client = serenity::ClientBuilder::new(env.token, intents)
         .framework(framework)
         .register_songbird()
-        .type_map_insert::<HttpKey>(HttpClient::new())
+        .type_map_insert::<HttpKey>(reqwest::Client::new())
         .await;
     client.unwrap().start().await.unwrap();
 }
