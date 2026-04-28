@@ -37,7 +37,21 @@ async fn main() {
                 Box::pin(async move {
                     match event {
                         FullEvent::Message { new_message } => {
-                            handle_message(ctx, data, new_message).await;
+                            let result = handle_message(ctx, data, new_message).await;
+                            match result {
+                                Ok(output) => {
+                                    if let Some(output) = output {
+                                        if let Err(e) = new_message.reply(&ctx.http, output).await {
+                                            eprintln!("{e}");
+                                        };
+                                    }
+                                }
+                                Err(e) => {
+                                    if let Err(e) = new_message.reply(&ctx.http, e).await {
+                                        eprintln!("{e}");
+                                    };
+                                }
+                            }
                         }
                         FullEvent::InteractionCreate {
                             interaction: Interaction::Component(component_interaction),

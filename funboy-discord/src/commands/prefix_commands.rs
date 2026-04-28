@@ -8,7 +8,7 @@ use funboy_core::{
     database::Platform,
     permissions::{Permission, Role},
 };
-use serenity::all::{Message, UserId};
+use serenity::all::{Attachment, Message, UserId};
 
 use crate::{Data, DiscordUserId, interpreter::interpreter_from_serenity};
 
@@ -66,6 +66,27 @@ pub enum DiscordCommand {
     Cancel,
 }
 
+async fn get_input_from_attatchment(
+    attachment: Option<&Attachment>,
+) -> Result<String, CommandError> {
+    let Some(attatchment) = attachment else {
+        return Err(CommandError::ExecutionFailed(
+            "Please attatch a file you want to generate".into(),
+        ));
+    };
+    let Ok(bytes) = attatchment.download().await else {
+        return Err(CommandError::ExecutionFailed(
+            "Failed to download file".into(),
+        ));
+    };
+    let Ok(input) = String::from_utf8(bytes) else {
+        return Err(CommandError::ExecutionFailed(
+            "Only text files are allowed (file must be valid UTF-8).".into(),
+        ));
+    };
+    Ok(input)
+}
+
 pub async fn handle_request(
     request: Request,
     ctx: &serenity::prelude::Context,
@@ -78,33 +99,15 @@ pub async fn handle_request(
 
     match request {
         Request::GenerateFile => {
-            let attatchment = message.attachments.get(0).unwrap();
-            let bytes = attatchment.download().await.unwrap();
-            let input = String::from_utf8(bytes);
-
-            if let Ok(input) = input {
-                let output = funboy.generate(input, interpreter).await?;
-                Ok(CommandResult::Text(output))
-            } else {
-                Err(CommandError::ExecutionFailed(
-                    "Only text files are allowed (file must be valid UTF-8).".into(),
-                ))
-            }
+            let input = get_input_from_attatchment(message.attachments.get(0)).await?;
+            let output = funboy.generate(input, interpreter).await?;
+            Ok(CommandResult::Text(output))
         }
         Request::UploadSub(template) => {
-            let attatchment = message.attachments.get(0).unwrap();
-            let bytes = attatchment.download().await.unwrap();
-            let input = String::from_utf8(bytes);
-
-            if let Ok(sub) = input {
-                funboy
-                    .add_command(user_id, Platform::Discord, template, sub, true)
-                    .await
-            } else {
-                Err(CommandError::ExecutionFailed(
-                    "Only text files are allowed (file must be valid UTF-8).".into(),
-                ))
-            }
+            let sub = get_input_from_attatchment(message.attachments.get(0)).await?;
+            funboy
+                .add_command(user_id, Platform::Discord, template, sub, true)
+                .await
         }
         Request::DeleteTemplate(template) => {
             if message.content.to_lowercase() == "yes" {

@@ -2,9 +2,7 @@ use std::{str::FromStr, sync::Arc};
 
 use dotenvy::dotenv;
 use funboy_cli::FunboyEnv;
-use funboy_core::{
-    Funboy, commands::CommandResult, interpreter::InterpreterLimits, user::FunboyUserId,
-};
+use funboy_core::{Funboy, interpreter::InterpreterLimits, user::FunboyUserId};
 use serenity::{
     all::{Message, UserId},
     prelude::TypeMapKey,
@@ -156,15 +154,19 @@ pub async fn grant_host_permissions(env: &DiscordEnv, funboy: Arc<Funboy<Discord
     }
 }
 
-pub async fn handle_message(ctx: &serenity::prelude::Context, data: &Data, message: &Message) {
+pub async fn handle_message(
+    ctx: &serenity::prelude::Context,
+    data: &Data,
+    message: &Message,
+) -> Result<Option<String>, String> {
     let user_id = DiscordUserId(message.author.id);
     let user_ctx = data.funboy.users.get_or_insert(user_id.clone()).await;
     if let Ok(user_ctx) = user_ctx {
         let requests = user_ctx.pending_requests.clone();
         let mut requests = requests.lock().await;
         if let Some(request) = requests.pop() {
-            let _ = handle_request(request, ctx, data, message).await;
-            return;
+            let result = handle_request(request, ctx, data, message).await;
+            return result.map(|r| r.into()).map_err(|e| e.to_string());
         }
     }
 
@@ -175,27 +177,11 @@ pub async fn handle_message(ctx: &serenity::prelude::Context, data: &Data, messa
         let msg = message.content.to_owned();
         let interpreter = interpreter_from_serenity(ctx, data, message);
         let result = data.funboy.user_chat(user_id, msg, interpreter).await;
-
-        match result {
-            Ok(response) => {
-                let _ = message.reply(&ctx.http, response).await;
-            }
-            Err(e) => {
-                let _ = message.reply(&ctx.http, e.to_string()).await;
-            }
-        }
+        result.map(|r| Some(r)).map_err(|e| e.to_string())
     } else if message.content.starts_with("!") {
         let result = handle_prefix_command(&ctx, data, &message).await;
-        match result {
-            Ok(result) => match result {
-                CommandResult::Text(response) => {
-                    let _ = message.reply(&ctx.http, response).await;
-                }
-                CommandResult::None => {}
-            },
-            Err(e) => {
-                let _ = message.reply(&ctx.http, e.to_string()).await;
-            }
-        }
+        result.map(|r| r.into()).map_err(|e| e.to_string())
+    } else {
+        Ok(None)
     }
 }

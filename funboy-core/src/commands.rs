@@ -20,6 +20,15 @@ pub enum CommandResult {
     None,
 }
 
+impl Into<Option<String>> for CommandResult {
+    fn into(self) -> Option<String> {
+        match self {
+            CommandResult::Text(text) => Some(text),
+            CommandResult::None => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum CommandError {
     ExecutionFailed(String),
