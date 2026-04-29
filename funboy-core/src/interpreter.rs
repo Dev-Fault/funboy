@@ -4,7 +4,7 @@ use fsl_interpreter::{
     FslInterpreter, InterpreterData,
     commands::{NUMERIC_TYPES, TEXT_TYPES, WHOLE_NUMBER_TYPES},
     types::{
-        command::{ArgPos, ArgRule, Command, CommandError, Handler},
+        command::{ArgPos, ArgRule, Command, Handler},
         value::Value,
     },
 };
@@ -24,7 +24,7 @@ pub trait Messenger: Clone + Sync + Send + 'static {
     fn await_response(
         &self,
         timeout: f64,
-    ) -> impl std::future::Future<Output = Result<String, CommandError>> + Send;
+    ) -> impl std::future::Future<Output = Result<String, fsl_interpreter::error::CommandError>> + Send;
     fn mention(&self) -> String;
 }
 
@@ -33,12 +33,12 @@ pub trait Interactor: Clone + Sync + Send + 'static {
         &self,
         user_name: &str,
         message: &str,
-    ) -> impl std::future::Future<Output = Result<(), CommandError>> + Send;
+    ) -> impl std::future::Future<Output = Result<(), fsl_interpreter::error::CommandError>> + Send;
     fn await_user_response(
         &self,
         user_name: &str,
         timeout: f64,
-    ) -> impl std::future::Future<Output = Result<String, CommandError>> + Send;
+    ) -> impl std::future::Future<Output = Result<String, fsl_interpreter::error::CommandError>> + Send;
 }
 
 #[derive(Clone)]
@@ -107,7 +107,10 @@ impl<U: FunboyUserId, M: Messenger> InterpreterContext<U, M> {
         }
     }
 
-    pub async fn generate_message(&self, message: &str) -> Result<String, CommandError> {
+    pub async fn generate_message(
+        &self,
+        message: &str,
+    ) -> Result<String, fsl_interpreter::error::CommandError> {
         match self
             .funboy
             .generate(message, self.interpreter.clone())
@@ -115,7 +118,7 @@ impl<U: FunboyUserId, M: Messenger> InterpreterContext<U, M> {
         {
             Ok(gen_msg) => Ok(gen_msg),
             Err(e) => {
-                return Err(CommandError::Custom(e.to_string()));
+                return Err(fsl_interpreter::error::CommandError::Custom(e.to_string()));
             }
         }
     }
@@ -123,12 +126,14 @@ impl<U: FunboyUserId, M: Messenger> InterpreterContext<U, M> {
 
 async fn check_limits<U: FunboyUserId, M: Messenger>(
     ictx: InterpreterContext<U, M>,
-) -> Result<(), CommandError> {
+) -> Result<(), fsl_interpreter::error::CommandError> {
     if let Some(limit) = ictx.limits.message_limit {
         let mut call_count = ictx.messages_sent.lock().await;
         if *call_count >= limit {
             *call_count = 0;
-            return Err(CommandError::Custom(format!("message limit exceeded",)));
+            return Err(fsl_interpreter::error::CommandError::Custom(format!(
+                "message limit exceeded",
+            )));
         }
         *call_count = call_count.saturating_add(1);
     }
@@ -137,7 +142,7 @@ async fn check_limits<U: FunboyUserId, M: Messenger>(
         let mut rate_limit = rate_limit.lock().await;
         match rate_limit.check(ictx.user_id) {
             RateLimitResult::MaxLimitsReached => {
-                return Err(CommandError::Custom(format!(
+                return Err(fsl_interpreter::error::CommandError::Custom(format!(
                     "exceeded rate limit too many times, please wait a bit before trying again",
                 )));
             }
@@ -181,7 +186,7 @@ pub fn say_command<U: FunboyUserId, M: Messenger>(ictx: InterpreterContext<U, M>
 
                     Ok(Value::None)
                 } else {
-                    return Err(CommandError::Custom(format!(
+                    return Err(fsl_interpreter::error::CommandError::Custom(format!(
                         "Message exceeded max length of {} characters",
                         SAY_MAX_OUTPUT_LENGTH,
                     )));
@@ -264,7 +269,7 @@ pub fn ask_command<U: FunboyUserId, M: Messenger>(ictx: InterpreterContext<U, M>
                         sleep(Duration::from_millis(FIVE_HUNDRED_MS)).await;
                     }
                 } else {
-                    return Err(CommandError::Custom(format!(
+                    return Err(fsl_interpreter::error::CommandError::Custom(format!(
                         "Message exceeded max length of {} characters",
                         SAY_MAX_OUTPUT_LENGTH,
                     )));
@@ -275,7 +280,7 @@ pub fn ask_command<U: FunboyUserId, M: Messenger>(ictx: InterpreterContext<U, M>
 
                 let response = ictx.messenger.await_response(timeout).await?;
                 if response == STOP {
-                    return Err(CommandError::ProgramExited);
+                    return Err(fsl_interpreter::error::CommandError::ProgramExited);
                 }
                 let response = ictx.generate_message(&response).await?;
 
@@ -325,7 +330,7 @@ pub fn ask_to_command<U: FunboyUserId, M: Messenger + Interactor>(
                     .await_user_response(&user_name, timeout)
                     .await?;
                 if response == STOP {
-                    return Err(CommandError::ProgramExited);
+                    return Err(fsl_interpreter::error::CommandError::ProgramExited);
                 }
                 let response = ictx.generate_message(&response).await?;
 
@@ -335,15 +340,18 @@ pub fn ask_to_command<U: FunboyUserId, M: Messenger + Interactor>(
     })
 }
 
-pub fn validate_time_out(time_out: f64, max: f64) -> Result<(), CommandError> {
+pub fn validate_time_out(
+    time_out: f64,
+    max: f64,
+) -> Result<(), fsl_interpreter::error::CommandError> {
     if !time_out.is_finite() {
-        return Err(CommandError::NonFiniteValue);
+        return Err(fsl_interpreter::error::CommandError::NonFiniteValue);
     } else if time_out.is_sign_negative() {
-        return Err(CommandError::Custom(format!(
+        return Err(fsl_interpreter::error::CommandError::Custom(format!(
             "time_out cannot be a negative number"
         )));
     } else if time_out > max {
-        return Err(CommandError::Custom(format!(
+        return Err(fsl_interpreter::error::CommandError::Custom(format!(
             "timeout cannot be greater than {} seconds",
             max
         )));
@@ -366,10 +374,10 @@ pub fn get_sub_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
                     let sub = funboy.get_random_substitute(template).await;
                     match sub {
                         Ok(sub) => Ok(Value::Text(sub.name)),
-                        Err(e) => Err(CommandError::Custom(e.to_string())),
+                        Err(e) => Err(fsl_interpreter::error::CommandError::Custom(e.to_string())),
                     }
                 } else {
-                    return Err(CommandError::Custom(format!(
+                    return Err(fsl_interpreter::error::CommandError::Custom(format!(
                         "template name must be preceeded by a single ` (backtick)\nThis ensures if the template is renamed this {} will not be invalid",
                         GET_SUB
                     )));
@@ -395,11 +403,11 @@ pub fn ask_ai_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
 
                 let word_limit = args.pop_front().unwrap().as_int(data).await?;
                 if word_limit <= 0 {
-                    return Err(CommandError::Custom(
+                    return Err(fsl_interpreter::error::CommandError::Custom(
                         "word limit must be greater than zero".to_string(),
                     ));
                 } else if word_limit > MAX_WORD_LIMIT {
-                    return Err(CommandError::Custom(format!(
+                    return Err(fsl_interpreter::error::CommandError::Custom(format!(
                         "word limit cannot be greater than {}",
                         MAX_WORD_LIMIT
                     )));
@@ -418,7 +426,7 @@ pub fn ask_ai_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
                         let response = response.response;
                         Ok(Value::Text(response))
                     }
-                    Err(e) => Err(CommandError::Custom(e.to_string())),
+                    Err(e) => Err(fsl_interpreter::error::CommandError::Custom(e.to_string())),
                 }
             }
         }

@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
-use fsl_interpreter::{FslInterpreter, types::command::CommandError};
+use fsl_interpreter::FslInterpreter;
 use funboy_core::{
     Funboy,
     interpreter::{
@@ -51,7 +51,7 @@ impl MatrixCtx {
         &self,
         user: MatrixUser,
         timeout: f64,
-    ) -> Result<String, CommandError> {
+    ) -> Result<String, fsl_interpreter::error::CommandError> {
         let (tx, rx) = oneshot::channel::<String>();
         let mut asks = self.pending_asks.lock().await;
         asks.insert(user, tx);
@@ -62,14 +62,16 @@ impl MatrixCtx {
                 return Ok(response);
             }
             Ok(Err(e)) => {
-                return Err(fsl_interpreter::types::command::CommandError::Custom(
-                    format!("{}", e.to_string()),
-                ));
+                return Err(fsl_interpreter::error::CommandError::Custom(format!(
+                    "{}",
+                    e.to_string()
+                )));
             }
             Err(_) => {
-                return Err(fsl_interpreter::types::command::CommandError::Custom(
-                    format!("{}", "didn't receive message before timeout"),
-                ));
+                return Err(fsl_interpreter::error::CommandError::Custom(format!(
+                    "{}",
+                    "didn't receive message before timeout"
+                )));
             }
         }
     }
@@ -100,7 +102,8 @@ impl Messenger for MatrixCtx {
     fn await_response(
         &self,
         timeout: f64,
-    ) -> impl std::future::Future<Output = Result<String, CommandError>> + Send {
+    ) -> impl std::future::Future<Output = Result<String, fsl_interpreter::error::CommandError>> + Send
+    {
         async move {
             self.await_response_from_user(self.sender.clone(), timeout)
                 .await
@@ -113,7 +116,8 @@ impl Interactor for MatrixCtx {
         &self,
         user_name: &str,
         message: &str,
-    ) -> impl std::future::Future<Output = Result<(), CommandError>> + Send {
+    ) -> impl std::future::Future<Output = Result<(), fsl_interpreter::error::CommandError>> + Send
+    {
         let room = self.room.clone();
         let message = message.to_owned();
         let funboy = self.funboy.clone();
@@ -143,7 +147,8 @@ impl Interactor for MatrixCtx {
         &self,
         user_name: &str,
         timeout: f64,
-    ) -> impl std::future::Future<Output = Result<String, CommandError>> + Send {
+    ) -> impl std::future::Future<Output = Result<String, fsl_interpreter::error::CommandError>> + Send
+    {
         async move {
             let user = user_name_to_id(&user_name, self.room.clone()).await?;
             let receiver = MatrixUser::new(self.room.room_id().into(), user);
@@ -152,7 +157,10 @@ impl Interactor for MatrixCtx {
     }
 }
 
-async fn user_name_to_id(user_name: &str, room: Room) -> Result<OwnedUserId, CommandError> {
+async fn user_name_to_id(
+    user_name: &str,
+    room: Room,
+) -> Result<OwnedUserId, fsl_interpreter::error::CommandError> {
     let users = room.users_with_power_levels().await;
 
     let users: Vec<&OwnedUserId> = users
@@ -164,9 +172,10 @@ async fn user_name_to_id(user_name: &str, room: Room) -> Result<OwnedUserId, Com
     let user = match users.get(0) {
         Some(user) => user,
         None => {
-            return Err(fsl_interpreter::types::command::CommandError::Custom(
-                format!("no user named {} present in room", user_name),
-            ));
+            return Err(fsl_interpreter::error::CommandError::Custom(format!(
+                "no user named {} present in room",
+                user_name
+            )));
         }
     };
     Ok((*user).clone())
