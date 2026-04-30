@@ -3,7 +3,7 @@ use std::{sync::Arc, time::Duration};
 use fsl_interpreter::data::InterpreterData;
 use fsl_interpreter::{
     FslInterpreter,
-    commands::{NUMERIC_TYPES, TEXT_TYPES, WHOLE_NUMBER_TYPES},
+    commands::{MAYBE_INT, MAYBE_NUMBER, MAYBE_TEXT},
     types::{
         command::{ArgPos, ArgRule, Command, Handler},
         value::Value,
@@ -156,7 +156,7 @@ async fn check_limits<U: FunboyUserId, M: Messenger>(
 }
 
 pub const SAY: &str = "say";
-pub const SAY_RULES: &'static [ArgRule] = &[ArgRule::new(ArgPos::Index(0), TEXT_TYPES)];
+pub const SAY_RULES: &'static [ArgRule] = &[ArgRule::new(ArgPos::Index(0), MAYBE_TEXT)];
 pub const FIVE_HUNDRED_MS: u64 = 500;
 pub const TWO_THOUSAND_MESSAGES: u16 = 2000;
 pub const SAY_MAX_OUTPUT_LENGTH: usize = 8000;
@@ -199,8 +199,8 @@ pub fn say_command<U: FunboyUserId, M: Messenger>(ictx: InterpreterContext<U, M>
 
 pub const SAY_TO: &str = "say_to";
 pub const SAY_TO_RULES: &'static [ArgRule] = &[
-    ArgRule::new(ArgPos::Index(0), TEXT_TYPES),
-    ArgRule::new(ArgPos::Index(1), TEXT_TYPES),
+    ArgRule::new(ArgPos::Index(0), MAYBE_TEXT),
+    ArgRule::new(ArgPos::Index(1), MAYBE_TEXT),
 ];
 pub fn say_to_command<U: FunboyUserId, M: Messenger + Interactor>(
     ictx: InterpreterContext<U, M>,
@@ -240,8 +240,8 @@ pub fn say_to_command<U: FunboyUserId, M: Messenger + Interactor>(
 pub const DEFAULT_TIMEOUT_SECS: f64 = 60.0 * 30.0;
 pub const ASK: &str = "ask";
 pub const ASK_RULES: &'static [ArgRule] = &[
-    ArgRule::new(ArgPos::Index(0), TEXT_TYPES),
-    ArgRule::new(ArgPos::OptionalIndex(1), NUMERIC_TYPES),
+    ArgRule::new(ArgPos::Index(0), MAYBE_TEXT),
+    ArgRule::new(ArgPos::OptionalIndex(1), MAYBE_NUMBER),
 ];
 const MAX_TIMEOUT_SECS: f64 = 60.0 * 60.0;
 const STOP: &str = "-STOP-";
@@ -293,9 +293,9 @@ pub fn ask_command<U: FunboyUserId, M: Messenger>(ictx: InterpreterContext<U, M>
 
 pub const ASK_TO: &str = "ask_to";
 pub const ASK_TO_RULES: &'static [ArgRule] = &[
-    ArgRule::new(ArgPos::Index(0), TEXT_TYPES),
-    ArgRule::new(ArgPos::Index(1), TEXT_TYPES),
-    ArgRule::new(ArgPos::OptionalIndex(2), NUMERIC_TYPES),
+    ArgRule::new(ArgPos::Index(0), MAYBE_TEXT),
+    ArgRule::new(ArgPos::Index(1), MAYBE_TEXT),
+    ArgRule::new(ArgPos::OptionalIndex(2), MAYBE_NUMBER),
 ];
 
 pub fn ask_to_command<U: FunboyUserId, M: Messenger + Interactor>(
@@ -361,7 +361,7 @@ pub fn validate_time_out(
 }
 
 pub const GET_SUB: &str = "get_sub";
-pub const GET_SUB_RULES: &[ArgRule] = &[ArgRule::new(ArgPos::Index(0), TEXT_TYPES)];
+pub const GET_SUB_RULES: &[ArgRule] = &[ArgRule::new(ArgPos::Index(0), MAYBE_TEXT)];
 pub fn get_sub_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
     Handler::from({
         move |command: Command, data: Arc<InterpreterData>| {
@@ -390,8 +390,8 @@ pub fn get_sub_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
 
 pub const ASK_AI: &str = "ask_ai";
 pub const ASK_AI_RULES: &[ArgRule] = &[
-    ArgRule::new(ArgPos::Index(0), TEXT_TYPES),
-    ArgRule::new(ArgPos::Index(1), WHOLE_NUMBER_TYPES),
+    ArgRule::new(ArgPos::Index(0), MAYBE_TEXT),
+    ArgRule::new(ArgPos::Index(1), MAYBE_INT),
 ];
 pub const MAX_WORD_LIMIT: i64 = 500;
 pub fn ask_ai_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
