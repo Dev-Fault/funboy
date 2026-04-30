@@ -1,7 +1,8 @@
 use std::{sync::Arc, time::Duration};
 
+use fsl_interpreter::data::InterpreterData;
 use fsl_interpreter::{
-    FslInterpreter, InterpreterData,
+    FslInterpreter,
     commands::{NUMERIC_TYPES, TEXT_TYPES, WHOLE_NUMBER_TYPES},
     types::{
         command::{ArgPos, ArgRule, Command, Handler},
