@@ -1787,6 +1787,7 @@ dependencies = [
  "async-recursion",
  "rand 0.9.4",
  "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
