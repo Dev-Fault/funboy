@@ -12,10 +12,13 @@ use funboy_core::{
 use matrix_sdk::{
     Client, Room, RoomState,
     ruma::{
-        OwnedRoomId, OwnedUserId,
+        OwnedRoomId, OwnedUserId, UserId,
         events::room::{
             member::StrippedRoomMemberEvent,
-            message::{MessageType, OriginalSyncRoomMessageEvent, RoomMessageEventContent},
+            message::{
+                MessageType, OriginalSyncRoomMessageEvent, RoomMessageEventContent,
+                TextMessageEventContent,
+            },
         },
     },
 };
@@ -155,6 +158,17 @@ pub async fn on_stripped_state_member(
     });
 }
 
+fn mentions_bot(message: &OriginalSyncRoomMessageEvent, bot_user_id: &UserId) -> bool {
+    let MessageType::Text(ref text) = message.content.msgtype else {
+        return false;
+    };
+
+    let bot_local_name = bot_user_id.localpart().to_owned();
+
+    let first_word = text.body.trim().split_whitespace().next().unwrap_or("");
+    first_word.contains(&bot_local_name)
+}
+
 pub async fn on_room_message(
     client: Client,
     event: OriginalSyncRoomMessageEvent,
@@ -192,12 +206,6 @@ pub async fn on_room_message(
     .await;
 
     let bot_user_id = client.user_id().unwrap().to_owned();
-    let bot_local_name = client.user_id().unwrap().localpart().to_owned();
-    let bot_mentioned = event
-        .content
-        .mentions
-        .as_ref()
-        .is_some_and(|m| m.user_ids.contains(&bot_user_id));
 
     if let Some(request) = pending_requests.pop() {
         tokio::spawn(async move {
@@ -217,21 +225,26 @@ pub async fn on_room_message(
         }
 
         tokio::spawn(async move {
-            if text_content.body.starts_with("!") {
+            let body = text_content.body.trim();
+            if body.starts_with("!") {
                 handle_bot_command(
                     event,
                     room,
                     funboy,
                     pending_asks,
-                    text_content.body.trim_start_matches("!"),
+                    body.trim_start_matches("!"),
                 )
                 .await;
-            } else if bot_mentioned && text_content.body.starts_with(&bot_local_name) {
-                let input = text_content
-                    .body
-                    .trim_start_matches(&bot_local_name)
-                    .to_owned();
-                let result = funboy.user_chat(matrix_user, input, interpreter).await;
+            } else if mentions_bot(&event, &bot_user_id) {
+                let begin = body.find(char::is_whitespace);
+                let input = if let Some(begin) = begin {
+                    &body[begin..].trim()
+                } else {
+                    ""
+                };
+                let result = funboy
+                    .user_chat(matrix_user, input.to_string(), interpreter)
+                    .await;
                 match result {
                     Ok(response) => {
                         room.send(RoomMessageEventContent::text_markdown(response))
