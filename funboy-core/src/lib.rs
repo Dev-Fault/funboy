@@ -8,7 +8,7 @@ use std::{
 };
 
 use async_recursion::async_recursion;
-use fsl_interpreter::FslInterpreter;
+use fsl_core::FslInterpreter;
 use moka::future::{Cache, CacheBuilder};
 use ollama_rs::models::ModelInfo;
 use rand::{Rng, distr::uniform::SampleUniform, random_range};

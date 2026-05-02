@@ -1,7 +1,7 @@
 use std::{num::ParseIntError, sync::Arc};
 
 use clap::{Args, Parser, ValueEnum};
-use fsl_interpreter::FslInterpreter;
+use fsl_core::FslInterpreter;
 use strum::EnumString;
 use tokio::sync::Mutex;
 

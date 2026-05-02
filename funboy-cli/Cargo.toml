@@ -5,8 +5,8 @@ edition = "2024"
 
 [dependencies]
 ollama-rs.workspace = true
+fsl-core.workspace = true
 funboy-core = { path = "../funboy-core" }
-fsl_interpreter = { version = "0.1.0", path = "../../fsl_interpreter" }
 async-recursion = "1.1.1"
 tokio = {version = "1.39.2", features = ["full"]}
 dotenvy = "0.15.7"

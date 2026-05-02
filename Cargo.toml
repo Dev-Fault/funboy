@@ -10,3 +10,4 @@ members = [
 [workspace.dependencies]
 ollama-rs = {version = "0.3.4", features = ["tool-implementations"]}
 reqwest = {version = "0.12", features = ["json"]}
+fsl-core = {version = "0.1.0", path = "../fsl_interpreter/fsl-core"}

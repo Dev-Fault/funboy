@@ -1,7 +1,7 @@
 use std::{str::FromStr, sync::Arc};
 
 use clap::Parser;
-use fsl_interpreter::FslInterpreter;
+use fsl_core::FslInterpreter;
 use funboy_core::{
     Funboy, Request,
     commands::{

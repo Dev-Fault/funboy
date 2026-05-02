@@ -1781,7 +1781,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "fsl_interpreter"
+name = "fsl-core"
 version = "0.1.0"
 dependencies = [
  "async-recursion",
@@ -1797,7 +1797,7 @@ dependencies = [
  "async-recursion",
  "clap 4.6.1",
  "dotenvy",
- "fsl_interpreter",
+ "fsl-core",
  "funboy-core",
  "ollama-rs",
  "rustyline 18.0.0",
@@ -1811,7 +1811,7 @@ version = "0.1.0"
 dependencies = [
  "async-recursion",
  "clap 4.6.1",
- "fsl_interpreter",
+ "fsl-core",
  "moka",
  "ollama-rs",
  "rand 0.9.4",
@@ -1833,7 +1833,7 @@ dependencies = [
  "async-recursion",
  "clap 4.6.1",
  "dotenvy",
- "fsl_interpreter",
+ "fsl-core",
  "funboy-cli",
  "funboy-core",
  "ollama-rs",
@@ -1858,7 +1858,7 @@ dependencies = [
  "async-recursion",
  "clap 4.6.1",
  "dotenvy",
- "fsl_interpreter",
+ "fsl-core",
  "funboy-cli",
  "funboy-core",
  "matrix-sdk",

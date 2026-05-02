@@ -1,6 +1,6 @@
 use std::{collections::HashMap, env, str::FromStr, sync::Arc, time::Duration};
 
-use fsl_interpreter::FslInterpreter;
+use fsl_core::FslInterpreter;
 use funboy_cli::FunboyEnv;
 use funboy_core::{
     Funboy, Request,
@@ -15,10 +15,7 @@ use matrix_sdk::{
         OwnedRoomId, OwnedUserId, UserId,
         events::room::{
             member::StrippedRoomMemberEvent,
-            message::{
-                MessageType, OriginalSyncRoomMessageEvent, RoomMessageEventContent,
-                TextMessageEventContent,
-            },
+            message::{MessageType, OriginalSyncRoomMessageEvent, RoomMessageEventContent},
         },
     },
 };

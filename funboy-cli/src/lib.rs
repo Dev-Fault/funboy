@@ -2,7 +2,7 @@ use std::{str::FromStr, sync::Arc, time::Duration};
 
 use clap::{Parser, ValueEnum};
 use dotenvy::dotenv;
-use fsl_interpreter::FslInterpreter;
+use fsl_core::FslInterpreter;
 use funboy_core::{
     Funboy,
     commands::{

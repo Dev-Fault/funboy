@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 ollama-rs.workspace = true
 reqwest.workspace = true
+fsl-core.workspace = true
 rand = "0.9.2"
 serde = { version = "1.0.210", features = ["derive"] }
 serde_json = "1.0.132"
@@ -15,7 +16,6 @@ regex = "1.12.2"
 strum = "0.27.2"
 strum_macros = "0.27.2"
 async-recursion = "1.1.1"
-fsl_interpreter = { version = "0.1.0", path = "../../fsl_interpreter" }
 moka = { version = "0.12.11", features = ["future"] }
 clap = "4.6.1"
 tokio-util = "0.7.18"
