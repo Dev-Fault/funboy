@@ -1,6 +1,8 @@
 use std::{sync::Arc, time::Duration};
 
+use fsl_core::commands::MAYBE_INDEXABLE;
 use fsl_core::data::InterpreterData;
+use fsl_core::types::FslType;
 use fsl_core::{
     FslInterpreter,
     commands::{MAYBE_INT, MAYBE_NUMBER, MAYBE_TEXT},
@@ -11,6 +13,7 @@ use fsl_core::{
 };
 use tokio::{sync::Mutex, time::sleep};
 
+use crate::format::AsStrs;
 use crate::{
     Funboy,
     format::{TWO_THOUSAND, split_message},
@@ -378,6 +381,58 @@ pub fn get_sub_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
                     return Err(fsl_core::error::CommandError::Custom(format!(
                         "template name must be preceeded by a single ` (backtick)\nThis ensures if the template is renamed this {} will not be invalid",
                         GET_SUB
+                    )));
+                }
+            }
+        }
+    })
+}
+
+pub const ADD_SUBS: &str = "add_subs";
+pub const ADD_SUBS_RULES: &[ArgRule] = &[
+    ArgRule::new(ArgPos::Index(0), MAYBE_TEXT),
+    ArgRule::new(ArgPos::Index(1), MAYBE_INDEXABLE),
+];
+pub fn add_subs_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
+    Handler::from({
+        move |command: Command, data: Arc<InterpreterData>| {
+            let funboy = funboy.clone();
+            async move {
+                let mut args = command.take_args();
+                let template = args.pop_front().unwrap().as_text(data.clone()).await?;
+                let subs = args
+                    .pop_front()
+                    .unwrap()
+                    .as_raw(data.clone(), &[FslType::Text, FslType::List])
+                    .await?;
+                let regex = TemplateDelimiter::BackTick.to_regex().await;
+
+                let subs = match subs {
+                    Value::Text(sub) => vec![sub],
+                    Value::List(values) => {
+                        let mut subs = vec![];
+                        for value in values {
+                            let value = value.as_text(data.clone()).await?;
+                            subs.push(value);
+                        }
+                        subs
+                    }
+                    _ => unreachable!("as raw should have verified type"),
+                };
+                if regex.is_match(&template) {
+                    let template = template.trim_matches('`');
+                    let result = funboy.add_substitutes(template, &subs.as_strs()).await;
+                    match result {
+                        Ok(receipt) => Ok(Value::Text(receipt.updated_to_string())),
+                        Err(e) => Err(fsl_core::error::CommandError::Custom(format!(
+                            "{}",
+                            e.to_string()
+                        ))),
+                    }
+                } else {
+                    return Err(fsl_core::error::CommandError::Custom(format!(
+                        "template name must be preceeded by a single ` (backtick)\nThis ensures if the template is renamed this {} will not be invalid",
+                        ADD_SUBS
                     )));
                 }
             }
