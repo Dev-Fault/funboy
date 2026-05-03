@@ -1,3 +1,4 @@
+use std::process::Stdio;
 use std::{sync::Arc, time::Duration};
 
 use fsl_core::commands::MAYBE_INDEXABLE;
@@ -11,6 +12,7 @@ use fsl_core::{
         value::Value,
     },
 };
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::{sync::Mutex, time::sleep};
 
 use crate::format::AsStrs;
@@ -358,6 +360,79 @@ pub fn validate_time_out(time_out: f64, max: f64) -> Result<(), fsl_core::error:
         )));
     }
     Ok(())
+}
+
+pub const EXEC_INTERACTIVE: &str = "exec_interactive";
+pub const EXEC_INTERACTIVE_RULES: &'static [ArgRule] = &[
+    ArgRule::new(ArgPos::Index(0), MAYBE_TEXT),
+    ArgRule::new(ArgPos::OptionalIndex(1), MAYBE_TEXT),
+];
+pub fn exec_interactive_command<U: FunboyUserId, M: Messenger + Interactor>(
+    ictx: InterpreterContext<U, M>,
+) -> Handler {
+    Handler::from({
+        move |command: Command, data: Arc<InterpreterData>| {
+            let ictx = ictx.clone();
+            async move {
+                // exec_interactive("python game.py", optional_user)
+                let mut args = command.take_args();
+                let child_process = args.pop_front().unwrap().as_text(data.clone()).await?;
+                let user_name = match args.pop_front() {
+                    Some(user_name) => user_name.as_text(data.clone()).await?,
+                    None => ictx.messenger.mention(),
+                };
+                let child = tokio::process::Command::new("sh")
+                    .arg("-c")
+                    .arg(child_process)
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .spawn();
+                let mut child = match child {
+                    Ok(child) => child,
+                    Err(e) => {
+                        return Err(fsl_core::error::CommandError::Custom(format!("{e}")));
+                    }
+                };
+
+                let mut stdout = child.stdout.take().unwrap();
+                let mut stdin = child.stdin.take().unwrap();
+                let mut buf = vec![0u8; 1024];
+
+                for _ in 0..1000 {
+                    let result = stdout.read(&mut buf).await;
+                    let n = match result {
+                        Ok(n) => n,
+                        Err(e) => {
+                            return Err(fsl_core::error::CommandError::Custom(format!("{e}")));
+                        }
+                    };
+
+                    if n == 0 {
+                        break;
+                    }
+
+                    let output = String::from_utf8_lossy(&buf[..n]);
+                    ictx.messenger.say_to_user(&user_name, &output).await?;
+                    let reply = ictx.messenger.await_user_response(&user_name, 60.0).await?;
+
+                    if reply == STOP {
+                        break;
+                    }
+
+                    if let Err(e) = stdin.write_all(reply.as_bytes()).await {
+                        return Err(fsl_core::error::CommandError::Custom(format!("{e}")));
+                    }
+                    if let Err(e) = stdin.write_all(b"\n").await {
+                        return Err(fsl_core::error::CommandError::Custom(format!("{e}")));
+                    }
+                }
+
+                let _ = child.kill().await;
+
+                Ok(Value::None)
+            }
+        }
+    })
 }
 
 pub const GET_SUB: &str = "get_sub";
