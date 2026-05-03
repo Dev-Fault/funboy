@@ -189,6 +189,7 @@ pub async fn on_room_message(
             return;
         }
     };
+    let permissions = funboy.users.get_permissions(matrix_user.clone()).await;
 
     let mut pending_requests = user_ctx.pending_requests.lock().await;
     let interpreter = create_interpreter(
@@ -201,6 +202,20 @@ pub async fn on_room_message(
         ),
     )
     .await;
+
+    match permissions {
+        Ok(permissions) => {
+            if permissions.is_owner() {
+                let mut interpreter_lock = interpreter.lock().await;
+                if let Err(e) =
+                    interpreter_lock.register_library(fsl_core::libraries::Library::Exec)
+                {
+                    eprintln!("{e}");
+                }
+            }
+        }
+        Err(e) => eprintln!("{e}"),
+    }
 
     let bot_user_id = client.user_id().unwrap().to_owned();
 

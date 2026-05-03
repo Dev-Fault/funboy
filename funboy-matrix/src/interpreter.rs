@@ -211,5 +211,23 @@ pub async fn create_interpreter(
         ASK_TO_RULES,
         funboy_core::interpreter::ask_to_command(ictx.clone()),
     );
+
+    let permissions = funboy
+        .users
+        .get_permissions(matrix_ctx.sender.clone())
+        .await;
+
+    match permissions {
+        Ok(permissions) => {
+            if permissions.is_owner() {
+                let result = interpreter.register_library(fsl_core::libraries::Library::Exec);
+                if let Err(e) = result {
+                    eprintln!("{e}")
+                }
+            }
+        }
+        Err(e) => eprintln!("{e}"),
+    }
+
     Arc::new(Mutex::new(interpreter))
 }
