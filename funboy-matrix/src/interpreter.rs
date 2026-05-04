@@ -220,7 +220,7 @@ pub async fn create_interpreter(
 
     match permissions {
         Ok(permissions) => {
-            if permissions.is_owner() {
+            if permissions.can_exec() {
                 let result = interpreter.register_library(fsl_core::libraries::Library::Exec);
                 interpreter.register(
                     INTERACTIVE_SH,

@@ -8,6 +8,7 @@ use crate::FunboyError;
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, ValueEnum, strum_macros::Display, EnumString)]
 pub enum Permission {
     Owner,
+    Exec,
     File,
     Create,
     Update,
@@ -21,6 +22,7 @@ impl Permission {
     pub fn as_str(&self) -> &'static str {
         match self {
             Permission::Owner => "Owner",
+            Permission::Exec => "Exec",
             Permission::File => "File",
             Permission::Create => "Create",
             Permission::Update => "Update",
@@ -97,6 +99,7 @@ impl Permissions {
     pub fn owner() -> Self {
         Permissions(HashSet::from([
             Permission::Owner,
+            Permission::Exec,
             Permission::File,
             Permission::Create,
             Permission::Update,
@@ -162,6 +165,10 @@ impl Permissions {
 
     pub fn can_revoke(&self) -> bool {
         self.0.contains(&Permission::Revoke)
+    }
+
+    pub fn can_exec(&self) -> bool {
+        self.0.contains(&Permission::Exec)
     }
 
     pub fn has_permission(&self, permission: Permission) -> bool {
