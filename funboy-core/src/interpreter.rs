@@ -362,19 +362,19 @@ pub fn validate_time_out(time_out: f64, max: f64) -> Result<(), fsl_core::error:
     Ok(())
 }
 
-pub const EXEC_INTERACTIVE: &str = "exec_interactive";
-pub const EXEC_INTERACTIVE_RULES: &'static [ArgRule] = &[
+pub const INTERACTIVE_SH: &str = "interactive_sh";
+pub const INTERACTIVE_SH_RULES: &'static [ArgRule] = &[
     ArgRule::new(ArgPos::Index(0), MAYBE_TEXT),
     ArgRule::new(ArgPos::OptionalIndex(1), MAYBE_TEXT),
 ];
-pub fn exec_interactive_command<U: FunboyUserId, M: Messenger + Interactor>(
+pub fn interactive_sh_command<U: FunboyUserId, M: Messenger + Interactor>(
     ictx: InterpreterContext<U, M>,
 ) -> Handler {
     Handler::from({
         move |command: Command, data: Arc<InterpreterData>| {
             let ictx = ictx.clone();
             async move {
-                // exec_interactive("python game.py", optional_user)
+                // interactive_sh("python game.py", optional_user)
                 let mut args = command.take_args();
                 let child_process = args.pop_front().unwrap().as_text(data.clone()).await?;
                 let user_name = match args.pop_front() {
@@ -396,7 +396,7 @@ pub fn exec_interactive_command<U: FunboyUserId, M: Messenger + Interactor>(
 
                 let mut stdout = child.stdout.take().unwrap();
                 let mut stdin = child.stdin.take().unwrap();
-                let mut buf = vec![0u8; 1024];
+                let mut buf = vec![0u8; 4096];
 
                 for _ in 0..1000 {
                     let result = stdout.read(&mut buf).await;
