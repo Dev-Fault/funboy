@@ -362,6 +362,8 @@ pub fn validate_time_out(time_out: f64, max: f64) -> Result<(), fsl_core::error:
     Ok(())
 }
 
+const INTERACTIVE_LOOP_LIMIT: u16 = 1000;
+const INTERACTIVE_BUF_SIZE: usize = 4096;
 pub const INTERACTIVE_SH: &str = "interactive_sh";
 pub const INTERACTIVE_SH_RULES: &'static [ArgRule] = &[
     ArgRule::new(ArgPos::Index(0), MAYBE_TEXT),
@@ -387,6 +389,7 @@ pub fn interactive_sh_command<U: FunboyUserId, M: Messenger + Interactor>(
                     .stdin(Stdio::piped())
                     .stdout(Stdio::piped())
                     .spawn();
+
                 let mut child = match child {
                     Ok(child) => child,
                     Err(e) => {
@@ -396,9 +399,11 @@ pub fn interactive_sh_command<U: FunboyUserId, M: Messenger + Interactor>(
 
                 let mut stdout = child.stdout.take().unwrap();
                 let mut stdin = child.stdin.take().unwrap();
-                let mut buf = vec![0u8; 4096];
+                let mut buf = vec![0u8; INTERACTIVE_BUF_SIZE];
 
-                for _ in 0..1000 {
+                for _ in 0..INTERACTIVE_LOOP_LIMIT {
+                    check_limits(ictx.clone()).await?;
+
                     let result = stdout.read(&mut buf).await;
                     let n = match result {
                         Ok(n) => n,
@@ -412,6 +417,7 @@ pub fn interactive_sh_command<U: FunboyUserId, M: Messenger + Interactor>(
                     }
 
                     let output = String::from_utf8_lossy(&buf[..n]);
+                    let output = format!("{}\n\n{}", output, "(enter -STOP- to quit)");
                     ictx.messenger.say_to_user(&user_name, &output).await?;
                     let reply = ictx.messenger.await_user_response(&user_name, 60.0).await?;
 
