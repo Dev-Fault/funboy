@@ -4,9 +4,9 @@ use fsl_core::FslInterpreter;
 use funboy_core::{
     Funboy,
     interpreter::{
-        ASK, ASK_RULES, ASK_TO, ASK_TO_RULES, EXEC_INTERACTIVE, EXEC_INTERACTIVE_RULES, Interactor,
+        ASK, ASK_RULES, ASK_TO, ASK_TO_RULES, INTERACTIVE_SH, INTERACTIVE_SH_RULES, Interactor,
         InterpreterContext, InterpreterLimits, Messenger, SAY, SAY_RULES, SAY_TO, SAY_TO_RULES,
-        exec_interactive_command,
+        interactive_sh_command,
     },
 };
 use matrix_sdk::{
@@ -223,9 +223,9 @@ pub async fn create_interpreter(
             if permissions.is_owner() {
                 let result = interpreter.register_library(fsl_core::libraries::Library::Exec);
                 interpreter.register(
-                    EXEC_INTERACTIVE,
-                    EXEC_INTERACTIVE_RULES,
-                    exec_interactive_command(ictx),
+                    INTERACTIVE_SH,
+                    INTERACTIVE_SH_RULES,
+                    interactive_sh_command(ictx),
                 );
                 if let Err(e) = result {
                     eprintln!("{e}")
