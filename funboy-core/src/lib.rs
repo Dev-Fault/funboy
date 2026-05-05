@@ -411,6 +411,14 @@ impl<U: FunboyUserId> Funboy<U> {
         }
     }
 
+    async fn register_funboy_interpreter_commands(&self, interpreter: Arc<Mutex<FslInterpreter>>) {
+        let mut modified_interpreter = interpreter.lock().await;
+        let funboy = Arc::new(self.clone());
+        modified_interpreter.register(GET_SUB, GET_SUB_RULES, get_sub_command(funboy.clone()));
+        modified_interpreter.register(ADD_SUBS, ADD_SUBS_RULES, add_subs_command(funboy.clone()));
+        modified_interpreter.register(ASK_AI, ASK_AI_RULES, ask_ai_command(funboy));
+    }
+
     /* PROFILE CODE
         let before = SystemTime::now();
 
@@ -432,12 +440,8 @@ impl<U: FunboyUserId> Funboy<U> {
         let mut output: String = input.into();
         let mut prev_hashes = HashSet::new();
 
-        let mut modified_interpreter = interpreter.lock().await;
-        let funboy = Arc::new(self.clone());
-        modified_interpreter.register(GET_SUB, GET_SUB_RULES, get_sub_command(funboy.clone()));
-        modified_interpreter.register(ADD_SUBS, ADD_SUBS_RULES, add_subs_command(funboy.clone()));
-        modified_interpreter.register(ASK_AI, ASK_AI_RULES, ask_ai_command(funboy));
-        drop(modified_interpreter);
+        self.register_funboy_interpreter_commands(interpreter.clone())
+            .await;
 
         for _ in 0..u8::MAX {
             let mut hasher = DefaultHasher::new();
@@ -452,6 +456,24 @@ impl<U: FunboyUserId> Funboy<U> {
         }
 
         Ok(output)
+    }
+
+    pub async fn interpret_fsl(
+        &self,
+        input: &str,
+        interpreter: Arc<Mutex<FslInterpreter>>,
+    ) -> Result<String, FunboyError> {
+        self.register_funboy_interpreter_commands(interpreter.clone())
+            .await;
+
+        let interpreter = interpreter.lock().await;
+
+        let output = interpreter.interpret(&input).await;
+
+        match output {
+            Ok(output) => Ok(output),
+            Err(e) => Err(FunboyError::Interpreter(e.to_string())),
+        }
     }
 
     pub async fn get_ollama_models(&self) -> Result<Vec<String>, FunboyError> {
@@ -513,6 +535,37 @@ impl<U: FunboyUserId> Funboy<U> {
 
         let output = tokio::select! {
             result = generate => result,
+            _ = cancel_token.cancelled() => {
+                Err(FunboyError::GenerationCancelled)
+            }
+        };
+
+        output
+    }
+
+    pub async fn user_interpret_fsl(
+        &self,
+        user_id: U,
+        input: &str,
+        interpreter: Arc<Mutex<FslInterpreter>>,
+    ) -> Result<String, FunboyError> {
+        let user_ctx = self.users.get_or_insert(user_id).await?;
+        let Some(_guard) = FlagGuard::new(user_ctx.is_generating.clone()) else {
+            return Err(FunboyError::UsageLimit(
+                "You're already generating something, please wait until it's finished.".to_string(),
+            ));
+        };
+
+        let cancel_token = {
+            let mut cancel_token = user_ctx.cancel_generation.lock().await;
+            *cancel_token = CancellationToken::new();
+            cancel_token.clone()
+        };
+
+        let output = self.interpret_fsl(input, interpreter);
+
+        let output = tokio::select! {
+            result = output => result,
             _ = cancel_token.cancelled() => {
                 Err(FunboyError::GenerationCancelled)
             }

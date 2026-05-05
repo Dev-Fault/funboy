@@ -5,8 +5,8 @@ use fsl_core::FslInterpreter;
 use funboy_core::{
     Funboy, Request,
     commands::{
-        AddArgs, CommandError, CommandResult, CopyArgs, DeleteArgs, GenerateArgs, ListArgs,
-        OllamaArgs, RenameArgs, ReplaceArgs, parse_command_args,
+        AddArgs, CommandError, CommandResult, CopyArgs, DeleteArgs, FslArgs, GenerateArgs,
+        ListArgs, OllamaArgs, RenameArgs, ReplaceArgs, parse_command_args,
     },
     database::Platform,
     permissions::{Permission, Permissions, Role},
@@ -24,6 +24,10 @@ pub enum MatrixCommand {
     Generate {
         #[command(flatten)]
         args: GenerateArgs,
+    },
+    Fsl {
+        #[command(flatten)]
+        args: FslArgs,
     },
     Add {
         #[command(flatten)]
@@ -307,6 +311,10 @@ pub async fn interpret_matrix_commands(
                 funboy.set_role(user_id, receiver, role).await
             }
             MatrixCommand::Cancel => funboy.cancel_command(user_id).await,
+            MatrixCommand::Fsl { args } => {
+                let FslArgs { input } = args;
+                funboy.fsl_command(user_id, input, interpreter).await
+            }
         },
         Err(e) => Err(CommandError::UnknownCommand(e.to_string())),
     }

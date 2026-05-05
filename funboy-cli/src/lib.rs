@@ -6,8 +6,8 @@ use fsl_core::FslInterpreter;
 use funboy_core::{
     Funboy,
     commands::{
-        AddArgs, CommandError, CommandResult, CopyArgs, DeleteArgs, GenerateArgs, ListArgs,
-        OllamaArgs, RenameArgs, ReplaceArgs, parse_command_args,
+        AddArgs, CommandError, CommandResult, CopyArgs, DeleteArgs, FslArgs, GenerateArgs,
+        ListArgs, OllamaArgs, RenameArgs, ReplaceArgs, parse_command_args,
     },
     database::{FunboyDatabase, Platform},
     user::FunboyUserId,
@@ -203,6 +203,10 @@ pub enum CliCommand {
         #[command(flatten)]
         args: GenerateArgs,
     },
+    Fsl {
+        #[command(flatten)]
+        args: FslArgs,
+    },
     Add {
         #[command(flatten)]
         args: AddArgs,
@@ -356,6 +360,13 @@ pub async fn interpret_bot_commands<U: FunboyUserId>(
             }
             CliCommand::Exit => Ok(CliCommandResult::Exit),
             CliCommand::Cancel => funboy.cancel_command(user_id).await.map(|r| r.into()),
+            CliCommand::Fsl { args } => {
+                let FslArgs { input } = args;
+                funboy
+                    .fsl_command(user_id, input, interpreter)
+                    .await
+                    .map(|r| r.into())
+            }
         },
         Err(e) => Err(CommandError::UnknownCommand(e.to_string())),
     }

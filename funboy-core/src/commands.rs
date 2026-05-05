@@ -201,6 +201,12 @@ pub struct GenerateArgs {
 }
 
 #[derive(Args, Clone, Debug)]
+pub struct FslArgs {
+    #[arg(trailing_var_arg = true)]
+    pub input: Vec<String>,
+}
+
+#[derive(Args, Clone, Debug)]
 pub struct AddArgs {
     pub template: String,
 
@@ -842,6 +848,33 @@ impl<U: FunboyUserId> Funboy<U> {
             self.user_generate(user_id, input, interpreter.clone())
                 .await
         };
+        match result {
+            Ok(output) => return Ok(CommandResult::Text(output)),
+            Err(e) => {
+                return Err(CommandError::ExecutionFailed(e.to_string()).into());
+            }
+        };
+    }
+
+    pub async fn fsl_command(
+        &self,
+        user_id: U,
+        input: Vec<String>,
+        interpreter: Arc<Mutex<FslInterpreter>>,
+    ) -> Result<CommandResult, CommandError> {
+        let permissions = self.users.get_permissions(user_id.clone()).await?;
+        if !permissions.can_generate() {
+            return Err(CommandError::LackingPermission(Permission::Generate).into());
+        } else if !permissions.can_use_ollama() {
+            return Err(CommandError::LackingPermission(Permission::Ollama).into());
+        }
+
+        let input = input.join(" ");
+
+        let result = self
+            .user_interpret_fsl(user_id, &input, interpreter.clone())
+            .await;
+
         match result {
             Ok(output) => return Ok(CommandResult::Text(output)),
             Err(e) => {

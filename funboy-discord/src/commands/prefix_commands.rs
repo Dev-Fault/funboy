@@ -2,8 +2,8 @@ use clap::{Parser, arg};
 use funboy_core::{
     Request,
     commands::{
-        AddArgs, CommandError, CommandResult, CopyArgs, DeleteArgs, GenerateArgs, ListArgs,
-        OllamaArgs, RenameArgs, ReplaceArgs, parse_command_args,
+        AddArgs, CommandError, CommandResult, CopyArgs, DeleteArgs, FslArgs, GenerateArgs,
+        ListArgs, OllamaArgs, RenameArgs, ReplaceArgs, parse_command_args,
     },
     database::Platform,
     permissions::{Permission, Role},
@@ -17,6 +17,10 @@ pub enum DiscordCommand {
     Generate {
         #[command(flatten)]
         args: GenerateArgs,
+    },
+    Fsl {
+        #[command(flatten)]
+        args: FslArgs,
     },
     Add {
         #[command(flatten)]
@@ -292,6 +296,10 @@ pub async fn handle_prefix_command(
             DiscordCommand::Register => {
                 // register already handled by poise
                 Ok(CommandResult::None)
+            }
+            DiscordCommand::Fsl { args } => {
+                let FslArgs { input } = args;
+                funboy.fsl_command(user_id, input, interpreter).await
             }
         },
         Err(e) => Err(CommandError::UnknownCommand(e.to_string())),
