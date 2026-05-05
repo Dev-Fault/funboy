@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
-use fsl_core::{FslInterpreter, libraries::exec::SH_RULES};
+use fsl_core::FslInterpreter;
 use funboy_core::{
     Funboy,
     interpreter::{
@@ -223,7 +223,7 @@ pub async fn create_interpreter(
         {
             #[cfg(target_os = "linux")]
             if permissions.can_exec() {
-                interpreter.register(SANDBOXED_SH, SH_RULES, sandboxed_sh_command());
+                interpreter.register(SANDBOXED_SH, SANDBOXED_SH_RULES, sandboxed_sh_command());
                 interpreter.register(
                     INTERACTIVE_SH,
                     INTERACTIVE_SH_RULES,
