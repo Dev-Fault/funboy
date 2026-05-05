@@ -1,4 +1,3 @@
-use std::process::Stdio;
 use std::{sync::Arc, time::Duration};
 
 use fsl_core::commands::MAYBE_INDEXABLE;
@@ -12,7 +11,6 @@ use fsl_core::{
         value::Value,
     },
 };
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::{sync::Mutex, time::sleep};
 
 use crate::format::AsStrs;
@@ -362,111 +360,126 @@ pub fn validate_time_out(time_out: f64, max: f64) -> Result<(), fsl_core::error:
     Ok(())
 }
 
-pub const SANDBOXED_SH_RULES: &[ArgRule] = &[ArgRule::new(ArgPos::Index(0), MAYBE_TEXT)];
-pub const SANDBOXED_SH: &str = "sh";
+#[cfg(all(target_os = "linux", feature = "sh_exec"))]
 #[cfg(target_os = "linux")]
-pub fn sandboxed_sh_command() -> Handler {
-    Handler::from({
-        move |command: Command, data: Arc<InterpreterData>| async move {
-            let mut args = command.take_args();
-            let script = args.pop_front().unwrap().as_text(data).await?;
-            let output = tokio::process::Command::new("sudo")
-                .args(["-u", "sandbox", "sh", "-c", &script])
-                .current_dir("/home/sandbox")
-                .output()
-                .await
-                .map_err(|e| fsl_core::error::CommandError::Custom(e.to_string()))?;
+pub mod sh_exec {
+    use fsl_core::commands::MAYBE_TEXT;
+    use fsl_core::types::command::Handler;
+    use fsl_core::types::command::{ArgPos, ArgRule};
+    use fsl_core::types::value::Value;
+    use fsl_core::{data::InterpreterData, types::command::Command};
+    use std::process::Stdio;
+    use std::sync::Arc;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-            if !output.status.success() {
-                let err = String::from_utf8_lossy(&output.stderr);
-                eprintln!("{err}");
-            }
+    use crate::interpreter::{Interactor, InterpreterContext, Messenger, STOP, check_limits};
+    use crate::user::FunboyUserId;
 
-            let output = String::from_utf8_lossy(&output.stdout);
-
-            Ok(Value::Text(output.into_owned()))
-        }
-    })
-}
-
-const INTERACTIVE_LOOP_LIMIT: u16 = 1000;
-const INTERACTIVE_BUF_SIZE: usize = 4096;
-pub const INTERACTIVE_SH: &str = "interactive_sh";
-pub const INTERACTIVE_SH_RULES: &'static [ArgRule] = &[
-    ArgRule::new(ArgPos::Index(0), MAYBE_TEXT),
-    ArgRule::new(ArgPos::OptionalIndex(1), MAYBE_TEXT),
-];
-#[cfg(target_os = "linux")]
-pub fn interactive_sh_command<U: FunboyUserId, M: Messenger + Interactor>(
-    ictx: InterpreterContext<U, M>,
-) -> Handler {
-    Handler::from({
-        move |command: Command, data: Arc<InterpreterData>| {
-            let ictx = ictx.clone();
-            async move {
-                // interactive_sh("python game.py", optional_user)
+    pub const SANDBOXED_SH_RULES: &[ArgRule] = &[ArgRule::new(ArgPos::Index(0), MAYBE_TEXT)];
+    pub const SANDBOXED_SH: &str = "sh";
+    #[cfg(target_os = "linux")]
+    pub fn sandboxed_sh_command() -> Handler {
+        Handler::from({
+            move |command: Command, data: Arc<InterpreterData>| async move {
                 let mut args = command.take_args();
-                let child_process = args.pop_front().unwrap().as_text(data.clone()).await?;
-                let user_name = match args.pop_front() {
-                    Some(user_name) => user_name.as_text(data.clone()).await?,
-                    None => ictx.messenger.mention(),
-                };
-                let child = tokio::process::Command::new("sudo")
-                    .args(["-u", "sandbox", "sh", "-c", &child_process])
+                let script = args.pop_front().unwrap().as_text(data).await?;
+                let output = tokio::process::Command::new("sudo")
+                    .args(["-u", "sandbox", "sh", "-c", &script])
                     .current_dir("/home/sandbox")
-                    .stdin(Stdio::piped())
-                    .stdout(Stdio::piped())
-                    .spawn();
+                    .output()
+                    .await
+                    .map_err(|e| fsl_core::error::CommandError::Custom(e.to_string()))?;
 
-                let mut child = match child {
-                    Ok(child) => child,
-                    Err(e) => {
-                        return Err(fsl_core::error::CommandError::Custom(format!("{e}")));
-                    }
-                };
+                if !output.status.success() {
+                    let err = String::from_utf8_lossy(&output.stderr);
+                    eprintln!("{err}");
+                }
 
-                let mut stdout = child.stdout.take().unwrap();
-                let mut stdin = child.stdin.take().unwrap();
-                let mut buf = vec![0u8; INTERACTIVE_BUF_SIZE];
+                let output = String::from_utf8_lossy(&output.stdout);
 
-                for _ in 0..INTERACTIVE_LOOP_LIMIT {
-                    check_limits(ictx.clone()).await?;
+                Ok(Value::Text(output.into_owned()))
+            }
+        })
+    }
 
-                    let result = stdout.read(&mut buf).await;
-                    let n = match result {
-                        Ok(n) => n,
+    const INTERACTIVE_LOOP_LIMIT: u16 = 1000;
+    const INTERACTIVE_BUF_SIZE: usize = 4096;
+    pub const INTERACTIVE_SH: &str = "interactive_sh";
+    pub const INTERACTIVE_SH_RULES: &'static [ArgRule] = &[
+        ArgRule::new(ArgPos::Index(0), MAYBE_TEXT),
+        ArgRule::new(ArgPos::OptionalIndex(1), MAYBE_TEXT),
+    ];
+    pub fn interactive_sh_command<U: FunboyUserId, M: Messenger + Interactor>(
+        ictx: InterpreterContext<U, M>,
+    ) -> Handler {
+        Handler::from({
+            move |command: Command, data: Arc<InterpreterData>| {
+                let ictx = ictx.clone();
+                async move {
+                    // interactive_sh("python game.py", optional_user)
+                    let mut args = command.take_args();
+                    let child_process = args.pop_front().unwrap().as_text(data.clone()).await?;
+                    let user_name = match args.pop_front() {
+                        Some(user_name) => user_name.as_text(data.clone()).await?,
+                        None => ictx.messenger.mention(),
+                    };
+                    let child = tokio::process::Command::new("sudo")
+                        .args(["-u", "sandbox", "sh", "-c", &child_process])
+                        .current_dir("/home/sandbox")
+                        .stdin(Stdio::piped())
+                        .stdout(Stdio::piped())
+                        .spawn();
+
+                    let mut child = match child {
+                        Ok(child) => child,
                         Err(e) => {
                             return Err(fsl_core::error::CommandError::Custom(format!("{e}")));
                         }
                     };
 
-                    if n == 0 {
-                        break;
+                    let mut stdout = child.stdout.take().unwrap();
+                    let mut stdin = child.stdin.take().unwrap();
+                    let mut buf = vec![0u8; INTERACTIVE_BUF_SIZE];
+
+                    for _ in 0..INTERACTIVE_LOOP_LIMIT {
+                        check_limits(ictx.clone()).await?;
+
+                        let result = stdout.read(&mut buf).await;
+                        let n = match result {
+                            Ok(n) => n,
+                            Err(e) => {
+                                return Err(fsl_core::error::CommandError::Custom(format!("{e}")));
+                            }
+                        };
+
+                        if n == 0 {
+                            break;
+                        }
+
+                        let output = String::from_utf8_lossy(&buf[..n]);
+                        let output = format!("{}\n\n{}", output, "(enter -STOP- to quit)");
+                        ictx.messenger.say_to_user(&user_name, &output).await?;
+                        let reply = ictx.messenger.await_user_response(&user_name, 60.0).await?;
+
+                        if reply == STOP {
+                            break;
+                        }
+
+                        if let Err(e) = stdin.write_all(reply.as_bytes()).await {
+                            return Err(fsl_core::error::CommandError::Custom(format!("{e}")));
+                        }
+                        if let Err(e) = stdin.write_all(b"\n").await {
+                            return Err(fsl_core::error::CommandError::Custom(format!("{e}")));
+                        }
                     }
 
-                    let output = String::from_utf8_lossy(&buf[..n]);
-                    let output = format!("{}\n\n{}", output, "(enter -STOP- to quit)");
-                    ictx.messenger.say_to_user(&user_name, &output).await?;
-                    let reply = ictx.messenger.await_user_response(&user_name, 60.0).await?;
+                    let _ = child.kill().await;
 
-                    if reply == STOP {
-                        break;
-                    }
-
-                    if let Err(e) = stdin.write_all(reply.as_bytes()).await {
-                        return Err(fsl_core::error::CommandError::Custom(format!("{e}")));
-                    }
-                    if let Err(e) = stdin.write_all(b"\n").await {
-                        return Err(fsl_core::error::CommandError::Custom(format!("{e}")));
-                    }
+                    Ok(Value::None)
                 }
-
-                let _ = child.kill().await;
-
-                Ok(Value::None)
             }
-        }
-    })
+        })
+    }
 }
 
 pub const GET_SUB: &str = "get_sub";

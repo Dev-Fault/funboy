@@ -4,9 +4,8 @@ use fsl_core::FslInterpreter;
 use funboy_core::{
     Funboy,
     interpreter::{
-        ASK, ASK_RULES, ASK_TO, ASK_TO_RULES, INTERACTIVE_SH, INTERACTIVE_SH_RULES, Interactor,
-        InterpreterContext, InterpreterLimits, Messenger, SANDBOXED_SH, SANDBOXED_SH_RULES, SAY,
-        SAY_RULES, SAY_TO, SAY_TO_RULES, interactive_sh_command, sandboxed_sh_command,
+        ASK, ASK_RULES, ASK_TO, ASK_TO_RULES, Interactor, InterpreterContext, InterpreterLimits,
+        Messenger, SAY, SAY_RULES, SAY_TO, SAY_TO_RULES,
     },
 };
 use matrix_sdk::{
@@ -213,25 +212,27 @@ pub async fn create_interpreter(
         funboy_core::interpreter::ask_to_command(ictx.clone()),
     );
 
-    let permissions = funboy
-        .users
-        .get_permissions(matrix_ctx.sender.clone())
-        .await;
+    #[cfg(all(target_os = "linux", feature = "sh_exec"))]
+    {
+        use funboy_core::interpreter::sh_exec::*;
+        let permissions = funboy
+            .users
+            .get_permissions(matrix_ctx.sender.clone())
+            .await;
 
-    match permissions {
-        Ok(permissions) =>
-        {
-            #[cfg(target_os = "linux")]
-            if permissions.can_exec() {
-                interpreter.register(SANDBOXED_SH, SANDBOXED_SH_RULES, sandboxed_sh_command());
-                interpreter.register(
-                    INTERACTIVE_SH,
-                    INTERACTIVE_SH_RULES,
-                    interactive_sh_command(ictx),
-                );
+        match permissions {
+            Ok(permissions) => {
+                if permissions.can_exec() {
+                    interpreter.register(SANDBOXED_SH, SANDBOXED_SH_RULES, sandboxed_sh_command());
+                    interpreter.register(
+                        INTERACTIVE_SH,
+                        INTERACTIVE_SH_RULES,
+                        interactive_sh_command(ictx),
+                    );
+                }
             }
+            Err(e) => eprintln!("{e}"),
         }
-        Err(e) => eprintln!("{e}"),
     }
 
     Arc::new(Mutex::new(interpreter))
