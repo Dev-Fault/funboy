@@ -1,12 +1,12 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
-use fsl_core::FslInterpreter;
+use fsl_core::{FslInterpreter, libraries::exec::SH_RULES};
 use funboy_core::{
     Funboy,
     interpreter::{
         ASK, ASK_RULES, ASK_TO, ASK_TO_RULES, INTERACTIVE_SH, INTERACTIVE_SH_RULES, Interactor,
-        InterpreterContext, InterpreterLimits, Messenger, SAY, SAY_RULES, SAY_TO, SAY_TO_RULES,
-        interactive_sh_command,
+        InterpreterContext, InterpreterLimits, Messenger, SANDBOXED_SH, SANDBOXED_SH_RULES, SAY,
+        SAY_RULES, SAY_TO, SAY_TO_RULES, interactive_sh_command, sandboxed_sh_command,
     },
 };
 use matrix_sdk::{
@@ -221,15 +221,12 @@ pub async fn create_interpreter(
     match permissions {
         Ok(permissions) => {
             if permissions.can_exec() {
-                let result = interpreter.register_library(fsl_core::libraries::Library::Exec);
+                interpreter.register(SANDBOXED_SH, SH_RULES, sandboxed_sh_command());
                 interpreter.register(
                     INTERACTIVE_SH,
                     INTERACTIVE_SH_RULES,
                     interactive_sh_command(ictx),
                 );
-                if let Err(e) = result {
-                    eprintln!("{e}")
-                }
             }
         }
         Err(e) => eprintln!("{e}"),
