@@ -333,6 +333,7 @@ pub fn ask_to_command<U: FunboyUserId, M: Messenger + Interactor>(
                     .messenger
                     .await_user_response(&user_name, timeout)
                     .await?;
+
                 if response == STOP {
                     return Err(fsl_core::error::CommandError::ProgramExited);
                 }
@@ -361,7 +362,6 @@ pub fn validate_time_out(time_out: f64, max: f64) -> Result<(), fsl_core::error:
 }
 
 #[cfg(all(target_os = "linux", feature = "sh_exec"))]
-#[cfg(target_os = "linux")]
 pub mod sh_exec {
     use fsl_core::commands::MAYBE_TEXT;
     use fsl_core::types::command::Handler;
@@ -459,13 +459,15 @@ pub mod sh_exec {
                         let output = String::from_utf8_lossy(&buf[..n]);
                         let output = format!("{}\n\n{}", output, "(enter -STOP- to quit)");
                         ictx.messenger.say_to_user(&user_name, &output).await?;
-                        let reply = ictx.messenger.await_user_response(&user_name, 60.0).await?;
+                        let response = ictx.messenger.await_user_response(&user_name, 60.0).await?;
 
-                        if reply == STOP {
+                        if response == STOP {
                             break;
                         }
 
-                        if let Err(e) = stdin.write_all(reply.as_bytes()).await {
+                        let response = ictx.generate_message(&response).await?;
+
+                        if let Err(e) = stdin.write_all(response.as_bytes()).await {
                             return Err(fsl_core::error::CommandError::Custom(format!("{e}")));
                         }
                         if let Err(e) = stdin.write_all(b"\n").await {
