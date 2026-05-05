@@ -219,7 +219,9 @@ pub async fn create_interpreter(
         .await;
 
     match permissions {
-        Ok(permissions) => {
+        Ok(permissions) =>
+        {
+            #[cfg(target_os = "linux")]
             if permissions.can_exec() {
                 interpreter.register(SANDBOXED_SH, SH_RULES, sandboxed_sh_command());
                 interpreter.register(

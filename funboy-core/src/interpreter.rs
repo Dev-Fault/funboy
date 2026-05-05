@@ -364,6 +364,7 @@ pub fn validate_time_out(time_out: f64, max: f64) -> Result<(), fsl_core::error:
 
 pub const SANDBOXED_SH_RULES: &[ArgRule] = &[ArgRule::new(ArgPos::Index(0), MAYBE_TEXT)];
 pub const SANDBOXED_SH: &str = "sh";
+#[cfg(target_os = "linux")]
 pub fn sandboxed_sh_command() -> Handler {
     Handler::from({
         move |command: Command, data: Arc<InterpreterData>| async move {
@@ -371,6 +372,7 @@ pub fn sandboxed_sh_command() -> Handler {
             let script = args.pop_front().unwrap().as_text(data).await?;
             let output = tokio::process::Command::new("sudo")
                 .args(["-u", "sandbox", "sh", "-c", &script])
+                .current_dir("/home/sandbox")
                 .output()
                 .await
                 .map_err(|e| fsl_core::error::CommandError::Custom(e.to_string()))?;
@@ -394,6 +396,7 @@ pub const INTERACTIVE_SH_RULES: &'static [ArgRule] = &[
     ArgRule::new(ArgPos::Index(0), MAYBE_TEXT),
     ArgRule::new(ArgPos::OptionalIndex(1), MAYBE_TEXT),
 ];
+#[cfg(target_os = "linux")]
 pub fn interactive_sh_command<U: FunboyUserId, M: Messenger + Interactor>(
     ictx: InterpreterContext<U, M>,
 ) -> Handler {
@@ -410,6 +413,7 @@ pub fn interactive_sh_command<U: FunboyUserId, M: Messenger + Interactor>(
                 };
                 let child = tokio::process::Command::new("sudo")
                     .args(["-u", "sandbox", "sh", "-c", &child_process])
+                    .current_dir("/home/sandbox")
                     .stdin(Stdio::piped())
                     .stdout(Stdio::piped())
                     .spawn();
