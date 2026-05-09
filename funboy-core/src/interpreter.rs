@@ -392,7 +392,7 @@ pub mod sh_exec {
 
                 let output = String::from_utf8_lossy(&output.stdout);
 
-                Ok(Value::Text(output.into_owned()))
+                Ok(Value::from(output.into_owned()))
             }
             .boxed()
         })
@@ -415,8 +415,8 @@ pub mod sh_exec {
                 let mut args = command.take_args();
                 let child_process = args.pop_front().unwrap().as_text(data.clone()).await?;
                 let user_name = match args.pop_front() {
-                    Some(user_name) => user_name.as_text(data.clone()).await?,
-                    None => ictx.messenger.mention(),
+                    Some(user_name) => &*user_name.as_text(data.clone()).await?,
+                    None => &ictx.messenger.mention(),
                 };
                 let child = tokio::process::Command::new("sudo")
                     .args(["-u", "sandbox", "sh", "-c", &child_process])
