@@ -354,8 +354,8 @@ impl<U: FunboyUserId> Funboy<U> {
             })
             .await;
 
-        let mut interpreter = interpreter.lock().await;
-        let interpreter_result = interpreter.interpret_embedded_code(&substituted_text).await;
+        let interpreter = interpreter.lock().await;
+        let interpreter_result = interpreter.interpret_embedded_code(substituted_text).await;
 
         match interpreter_result {
             Ok(interpreted_text) => Ok(interpreted_text),
@@ -460,7 +460,7 @@ impl<U: FunboyUserId> Funboy<U> {
 
     pub async fn interpret_fsl(
         &self,
-        input: &str,
+        input: String,
         interpreter: Arc<Mutex<FslInterpreter>>,
     ) -> Result<String, FunboyError> {
         self.register_funboy_interpreter_commands(interpreter.clone())
@@ -468,7 +468,7 @@ impl<U: FunboyUserId> Funboy<U> {
 
         let interpreter = interpreter.lock().await;
 
-        let output = interpreter.interpret(&input).await;
+        let output = interpreter.interpret(input).await;
 
         match output {
             Ok(output) => Ok(output),
@@ -546,7 +546,7 @@ impl<U: FunboyUserId> Funboy<U> {
     pub async fn user_interpret_fsl(
         &self,
         user_id: U,
-        input: &str,
+        input: String,
         interpreter: Arc<Mutex<FslInterpreter>>,
     ) -> Result<String, FunboyError> {
         let user_ctx = self.users.get_or_insert(user_id).await?;

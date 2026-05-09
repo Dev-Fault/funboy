@@ -1785,6 +1785,7 @@ name = "fsl-core"
 version = "0.1.0"
 dependencies = [
  "async-recursion",
+ "futures",
  "rand 0.9.4",
  "tokio",
  "tokio-stream",
@@ -1812,6 +1813,7 @@ dependencies = [
  "async-recursion",
  "clap 4.6.1",
  "fsl-core",
+ "futures",
  "moka",
  "ollama-rs",
  "rand 0.9.4",

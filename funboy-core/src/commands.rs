@@ -872,7 +872,7 @@ impl<U: FunboyUserId> Funboy<U> {
         let input = input.join(" ");
 
         let result = self
-            .user_interpret_fsl(user_id, &input, interpreter.clone())
+            .user_interpret_fsl(user_id, input, interpreter.clone())
             .await;
 
         match result {
