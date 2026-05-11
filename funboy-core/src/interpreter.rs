@@ -1,11 +1,11 @@
 use std::{sync::Arc, time::Duration};
 
-use fsl_core::commands::MAYBE_INDEXABLE;
 use fsl_core::data::InterpreterData;
+use fsl_core::libraries::standard::MAYBE_INDEXABLE;
 use fsl_core::types::FslType;
 use fsl_core::{
     FslInterpreter,
-    commands::{MAYBE_INT, MAYBE_NUMBER, MAYBE_TEXT},
+    libraries::standard::{MAYBE_INT, MAYBE_NUMBER, MAYBE_TEXT},
     types::{
         command::{ArgPos, ArgRule, Command, Handler},
         value::Value,
@@ -357,7 +357,7 @@ pub fn validate_time_out(time_out: f64, max: f64) -> Result<(), fsl_core::error:
 
 #[cfg(all(target_os = "linux", feature = "sh_exec"))]
 pub mod sh_exec {
-    use fsl_core::commands::MAYBE_TEXT;
+    use fsl_core::libraries::standard::MAYBE_TEXT;
     use fsl_core::types::command::Handler;
     use fsl_core::types::command::{ArgPos, ArgRule};
     use fsl_core::types::value::Value;

@@ -207,11 +207,7 @@ pub async fn on_room_message(
         Ok(permissions) => {
             if permissions.is_owner() {
                 let mut interpreter_lock = interpreter.lock().await;
-                if let Err(e) =
-                    interpreter_lock.register_library(fsl_core::libraries::Library::Exec)
-                {
-                    eprintln!("{e}");
-                }
+                interpreter_lock.register_library(fsl_core::libraries::Library::Exec)
             }
         }
         Err(e) => eprintln!("{e}"),

@@ -70,11 +70,7 @@ pub async fn create_interpreter(
         funboy_core::interpreter::ask_command(ictx.clone()),
     );
 
-    let result = interpreter.register_library(fsl_core::libraries::Library::Exec);
-
-    if let Err(e) = result {
-        eprintln!("{e}")
-    }
+    interpreter.register_library(fsl_core::libraries::Library::Exec);
 
     Arc::new(Mutex::new(interpreter))
 }
