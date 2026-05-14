@@ -56,7 +56,7 @@ pub async fn create_interpreter(
     funboy: Arc<Funboy<Id>>,
     rl: Arc<Mutex<DefaultEditor>>,
 ) -> Arc<Mutex<FslInterpreter>> {
-    let mut interpreter = FslInterpreter::new_unbounded();
+    let mut interpreter = FslInterpreter::new();
     let cli_context = CliContext::new(rl);
     let ictx = InterpreterContext::new(Id(0), funboy, cli_context, InterpreterLimits::none());
     interpreter.register(

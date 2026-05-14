@@ -2,7 +2,7 @@ use std::{str::FromStr, sync::Arc, time::Duration};
 
 use clap::{Parser, ValueEnum};
 use dotenvy::dotenv;
-use fsl_core::FslInterpreter;
+use fsl_core::{FslInterpreter, data::InterpreterData};
 use funboy_core::{
     Funboy,
     commands::{
@@ -63,7 +63,9 @@ pub async fn enter_interpreter(
                 rl.add_history_entry(&input)?;
                 drop(rl);
                 let interpreter_lock = interpreter.lock().await;
-                let result = interpreter_lock.interpret(input).await;
+                let result = interpreter_lock
+                    .interpret(&input, InterpreterData::default())
+                    .await;
                 drop(interpreter_lock);
                 match result {
                     Ok(output) => println!("{}", output),

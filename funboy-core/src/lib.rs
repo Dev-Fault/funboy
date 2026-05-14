@@ -8,7 +8,10 @@ use std::{
 };
 
 use async_recursion::async_recursion;
-use fsl_core::FslInterpreter;
+use fsl_core::{
+    FslInterpreter,
+    data::{InterpreterData, InterpreterLimits},
+};
 use moka::future::{Cache, CacheBuilder};
 use ollama_rs::models::ModelInfo;
 use rand::{Rng, distr::uniform::SampleUniform, random_range};
@@ -355,7 +358,12 @@ impl<U: FunboyUserId> Funboy<U> {
             .await;
 
         let interpreter = interpreter.lock().await;
-        let interpreter_result = interpreter.interpret_embedded_code(substituted_text).await;
+        let interpreter_result = interpreter
+            .interpret_embedded_code(
+                &substituted_text,
+                InterpreterData::default().with_limits(InterpreterLimits::bounded()),
+            )
+            .await;
 
         match interpreter_result {
             Ok(interpreted_text) => Ok(interpreted_text),
@@ -468,7 +476,12 @@ impl<U: FunboyUserId> Funboy<U> {
 
         let interpreter = interpreter.lock().await;
 
-        let output = interpreter.interpret(input).await;
+        let output = interpreter
+            .interpret(
+                &input,
+                InterpreterData::default().with_limits(InterpreterLimits::bounded()),
+            )
+            .await;
 
         match output {
             Ok(output) => Ok(output),
