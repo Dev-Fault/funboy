@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
-use fsl_core::FslInterpreter;
+use fsl_core::{FslInterpreter, error::RuntimeError};
 use funboy_core::{
     Funboy,
     interpreter::{
@@ -51,7 +51,7 @@ impl MatrixCtx {
         &self,
         user: MatrixUser,
         timeout: f64,
-    ) -> Result<String, fsl_core::error::CommandError> {
+    ) -> Result<String, RuntimeError> {
         let (tx, rx) = oneshot::channel::<String>();
         let mut asks = self.pending_asks.lock().await;
         asks.insert(user, tx);
@@ -62,13 +62,10 @@ impl MatrixCtx {
                 return Ok(response);
             }
             Ok(Err(e)) => {
-                return Err(fsl_core::error::CommandError::Custom(format!(
-                    "{}",
-                    e.to_string()
-                )));
+                return Err(RuntimeError::Custom(format!("{}", e.to_string())));
             }
             Err(_) => {
-                return Err(fsl_core::error::CommandError::Custom(format!(
+                return Err(RuntimeError::Custom(format!(
                     "{}",
                     "didn't receive message before timeout"
                 )));
@@ -102,8 +99,7 @@ impl Messenger for MatrixCtx {
     fn await_response(
         &self,
         timeout: f64,
-    ) -> impl std::future::Future<Output = Result<String, fsl_core::error::CommandError>> + Send
-    {
+    ) -> impl std::future::Future<Output = Result<String, RuntimeError>> + Send {
         async move {
             self.await_response_from_user(self.sender.clone(), timeout)
                 .await
@@ -116,7 +112,7 @@ impl Interactor for MatrixCtx {
         &self,
         user_name: &str,
         message: &str,
-    ) -> impl std::future::Future<Output = Result<(), fsl_core::error::CommandError>> + Send {
+    ) -> impl std::future::Future<Output = Result<(), RuntimeError>> + Send {
         let room = self.room.clone();
         let message = message.to_owned();
         let funboy = self.funboy.clone();
@@ -146,8 +142,7 @@ impl Interactor for MatrixCtx {
         &self,
         user_name: &str,
         timeout: f64,
-    ) -> impl std::future::Future<Output = Result<String, fsl_core::error::CommandError>> + Send
-    {
+    ) -> impl std::future::Future<Output = Result<String, RuntimeError>> + Send {
         async move {
             let user = user_name_to_id(&user_name, self.room.clone()).await?;
             let receiver = MatrixUser::new(self.room.room_id().into(), user);
@@ -156,10 +151,7 @@ impl Interactor for MatrixCtx {
     }
 }
 
-async fn user_name_to_id(
-    user_name: &str,
-    room: Room,
-) -> Result<OwnedUserId, fsl_core::error::CommandError> {
+async fn user_name_to_id(user_name: &str, room: Room) -> Result<OwnedUserId, RuntimeError> {
     let users = room.users_with_power_levels().await;
 
     let users: Vec<&OwnedUserId> = users
@@ -171,7 +163,7 @@ async fn user_name_to_id(
     let user = match users.get(0) {
         Some(user) => user,
         None => {
-            return Err(fsl_core::error::CommandError::Custom(format!(
+            return Err(RuntimeError::Custom(format!(
                 "no user named {} present in room",
                 user_name
             )));

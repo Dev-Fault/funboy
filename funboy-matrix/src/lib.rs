@@ -260,7 +260,7 @@ pub async fn on_room_message(
                             .unwrap();
                     }
                     Err(e) => {
-                        room.send(RoomMessageEventContent::text_plain(e.to_string()))
+                        room.send(RoomMessageEventContent::text_markdown(e.to_string()))
                             .await
                             .unwrap();
                     }
@@ -447,7 +447,7 @@ async fn handle_command_result(result: CommandResult, room: Room) {
 
 async fn handle_command_err(err: CommandError, room: Room) {
     let e = err.to_string();
-    let content = RoomMessageEventContent::text_plain(&e);
+    let content = RoomMessageEventContent::text_markdown(&e);
     room.send(content).await.unwrap();
     return;
 }

@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use fsl_core::FslInterpreter;
+use fsl_core::{FslInterpreter, error::RuntimeError};
 use funboy_core::{
     format::{TWO_THOUSAND, split_message},
     interpreter::{
@@ -43,8 +43,7 @@ impl Messenger for DiscordContext {
     fn await_response(
         &self,
         timeout: f64,
-    ) -> impl std::future::Future<Output = Result<String, fsl_core::error::CommandError>> + Send
-    {
+    ) -> impl std::future::Future<Output = Result<String, RuntimeError>> + Send {
         async move {
             let mut collector = self
                 .channel_id
@@ -57,7 +56,7 @@ impl Messenger for DiscordContext {
             if let Some(msg) = collector.next().await {
                 Ok(msg.content)
             } else {
-                Err(fsl_core::error::CommandError::Custom(format!(
+                Err(RuntimeError::Custom(format!(
                     "Didn't receive a message before timeout ended"
                 )))
             }
@@ -66,23 +65,17 @@ impl Messenger for DiscordContext {
 }
 
 impl Interactor for DiscordContext {
-    async fn say_to_user(
-        &self,
-        user_name: &str,
-        message: &str,
-    ) -> Result<(), fsl_core::error::CommandError> {
+    async fn say_to_user(&self, user_name: &str, message: &str) -> Result<(), RuntimeError> {
         let members = if let Some(guild_id) = self.guild_id {
             if let Ok(members) = guild_id.members(self.http.clone(), None, None).await {
                 members
             } else {
-                return Err(fsl_core::error::CommandError::Custom(format!(
+                return Err(RuntimeError::Custom(format!(
                     "failed to fetch guild members",
                 )));
             }
         } else {
-            return Err(fsl_core::error::CommandError::Custom(format!(
-                "failed to get guild id",
-            )));
+            return Err(RuntimeError::Custom(format!("failed to get guild id",)));
         };
 
         let say_message = async |mention: &str| {
@@ -90,11 +83,11 @@ impl Interactor for DiscordContext {
                 let mention_message = &format!("{} {}", mention, message);
                 for m in split_message(mention_message, TWO_THOUSAND) {
                     if let Err(e) = self.channel_id.say(&self.http, m).await {
-                        return Err(fsl_core::error::CommandError::Custom(e.to_string()));
+                        return Err(RuntimeError::Custom(e.to_string()));
                     };
                 }
             } else {
-                return Err(fsl_core::error::CommandError::Custom(format!(
+                return Err(RuntimeError::Custom(format!(
                     "Message exceeded max length of {} characters",
                     BOT_MAX_MESSAGE_SIZE,
                 )));
@@ -113,7 +106,7 @@ impl Interactor for DiscordContext {
         } else if user_name == "everyone" {
             say_message("@everyone").await?;
         } else {
-            return Err(fsl_core::error::CommandError::Custom(format!(
+            return Err(RuntimeError::Custom(format!(
                 "no user named {} found",
                 user_name
             )));
@@ -125,8 +118,7 @@ impl Interactor for DiscordContext {
         &self,
         user_name: &str,
         timeout: f64,
-    ) -> impl std::future::Future<Output = Result<String, fsl_core::error::CommandError>> + Send
-    {
+    ) -> impl std::future::Future<Output = Result<String, RuntimeError>> + Send {
         async move {
             let mut collector = if user_name == "everyone" {
                 self.channel_id
@@ -147,7 +139,7 @@ impl Interactor for DiscordContext {
             if let Some(msg) = collector.next().await {
                 Ok(msg.content)
             } else {
-                Err(fsl_core::error::CommandError::Custom(format!(
+                Err(RuntimeError::Custom(format!(
                     "Didn't receive a message before timeout ended"
                 )))
             }
@@ -178,26 +170,21 @@ impl DiscordContext {
         }
     }
 
-    pub async fn get_guild_members(&self) -> Result<Vec<Member>, fsl_core::error::CommandError> {
+    pub async fn get_guild_members(&self) -> Result<Vec<Member>, RuntimeError> {
         if let Some(guild_id) = self.guild_id {
             if let Ok(members) = guild_id.members(self.http.clone(), None, None).await {
                 Ok(members)
             } else {
-                return Err(fsl_core::error::CommandError::Custom(format!(
+                return Err(RuntimeError::Custom(format!(
                     "failed to fetch guild members",
                 )));
             }
         } else {
-            return Err(fsl_core::error::CommandError::Custom(format!(
-                "failed to get guild id",
-            )));
+            return Err(RuntimeError::Custom(format!("failed to get guild id",)));
         }
     }
 
-    pub async fn get_user_id(
-        &self,
-        user_name: &str,
-    ) -> Result<UserId, fsl_core::error::CommandError> {
+    pub async fn get_user_id(&self, user_name: &str) -> Result<UserId, RuntimeError> {
         let members = self.get_guild_members().await?;
 
         if let Some(member) = members.iter().find(|m| {
@@ -208,7 +195,7 @@ impl DiscordContext {
         }) {
             Ok(member.user.id)
         } else {
-            return Err(fsl_core::error::CommandError::Custom(format!(
+            return Err(RuntimeError::Custom(format!(
                 "no user named {} found",
                 user_name
             )));

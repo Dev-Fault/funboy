@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use fsl_core::FslInterpreter;
+use fsl_core::{FslInterpreter, error::RuntimeError};
 use funboy_core::{
     Funboy,
     interpreter::{
@@ -31,8 +31,7 @@ impl Messenger for CliContext {
     fn await_response(
         &self,
         _timeout: f64,
-    ) -> impl std::future::Future<Output = Result<String, fsl_core::error::CommandError>> + Send
-    {
+    ) -> impl std::future::Future<Output = Result<String, RuntimeError>> + Send {
         let rl = self.rl.clone();
         async move {
             let mut rl = rl.lock().await;
@@ -41,7 +40,7 @@ impl Messenger for CliContext {
             match result {
                 Ok(output) => Ok(output),
                 Err(e) => {
-                    return Err(fsl_core::error::CommandError::Custom(format!("{:?}", e)));
+                    return Err(RuntimeError::Custom(format!("{:?}", e)));
                 }
             }
         }

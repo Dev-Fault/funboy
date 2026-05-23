@@ -59,7 +59,7 @@ impl Display for FunboyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let text = match self {
             FunboyError::Interpreter(e) => {
-                format!("FSL interpreter error:\n{}", e)
+                format!("```\nFSL interpreter error:\n{}\n```", e)
             }
             FunboyError::Ollama(e) => {
                 format!("Ollama error:\n{}", e)

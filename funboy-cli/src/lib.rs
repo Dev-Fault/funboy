@@ -35,12 +35,12 @@ pub async fn enter_interactive_generation(
                 match funboy.generate(&input, interpreter.clone()).await {
                     Ok(output) => println!("{}", output),
                     Err(e) => {
-                        eprint!("{:?}", e);
+                        eprint!("{}", e);
                     }
                 };
             }
             Err(e) => {
-                eprintln!("{:?}", e);
+                eprintln!("{}", e);
                 drop(rl);
                 break;
             }
@@ -70,12 +70,12 @@ pub async fn enter_interpreter(
                 match result {
                     Ok(output) => println!("{}", output),
                     Err(e) => {
-                        eprintln!("{:?}", e)
+                        eprintln!("{}", e)
                     }
                 }
             }
             Err(e) => {
-                eprintln!("{:?}", e);
+                eprintln!("{}", e);
                 drop(rl);
                 break;
             }
