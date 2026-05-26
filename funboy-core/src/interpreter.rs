@@ -406,6 +406,7 @@ pub mod sh_exec {
 
     use crate::interpreter::{Interactor, InterpreterContext, Messenger, STOP, check_limits};
     use crate::user::FunboyUserId;
+    use fsl_core::error::RuntimeError;
 
     pub const SANDBOXED_SH_RULES: &[ArgRule] = &[ArgRule::new(ArgPos::Index(0), MAYBE_TEXT)];
     pub const SANDBOXED_SH: &str = "sh";
@@ -423,8 +424,11 @@ pub mod sh_exec {
                     .current_dir("/home/sandbox")
                     .output()
                     .await
-                    .map_err(|e| {
-                        fsl_core::error::RuntimeError::Custom(e.to_string()).to_exec(command.span)
+                    .map_err(|_| {
+                        RuntimeError::FailedToRun {
+                            process: "sh".into(),
+                        }
+                        .to_exec(command.span)
                     })?;
 
                 if !output.status.success() {
@@ -432,9 +436,12 @@ pub mod sh_exec {
                     eprintln!("{err}");
                 }
 
-                let output = String::from_utf8_lossy(&output.stdout);
-
-                Ok(Value::from(output.into_owned()))
+                let output = output.stdout;
+                let text = match String::from_utf8(output) {
+                    Ok(s) => s,
+                    Err(e) => String::from_utf8_lossy(e.as_bytes()).into_owned(),
+                };
+                Ok(Value::from(text))
             }
             .boxed()
         })
