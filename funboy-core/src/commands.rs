@@ -1,9 +1,8 @@
-use std::{num::ParseIntError, sync::Arc};
+use std::num::ParseIntError;
 
 use clap::{Args, Parser, ValueEnum};
 use fsl_core::FslInterpreter;
 use strum::EnumString;
-use tokio::sync::Mutex;
 
 use crate::{
     Funboy, FunboyError, Permission, Permissions, Role,
@@ -813,7 +812,7 @@ impl<U: FunboyUserId> Funboy<U> {
         &self,
         platform: Platform,
         user_id: U,
-        interpreter: Arc<Mutex<FslInterpreter>>,
+        interpreter: &FslInterpreter,
         input: Vec<String>,
         file: bool,
         ollama: bool,
@@ -841,12 +840,11 @@ impl<U: FunboyUserId> Funboy<U> {
             input
         };
         let result = if ollama {
-            self.user_generate_ollama(user_id, input, interpreter.clone())
+            self.user_generate_ollama(user_id, input, interpreter)
                 .await
                 .map(|o| format!("{} {}", o.prompt, o.generated_text))
         } else {
-            self.user_generate(user_id, input, interpreter.clone())
-                .await
+            self.user_generate(user_id, input, interpreter).await
         };
         match result {
             Ok(output) => return Ok(CommandResult::Text(output)),
@@ -860,7 +858,7 @@ impl<U: FunboyUserId> Funboy<U> {
         &self,
         user_id: U,
         input: Vec<String>,
-        interpreter: Arc<Mutex<FslInterpreter>>,
+        interpreter: &FslInterpreter,
     ) -> Result<CommandResult, CommandError> {
         let permissions = self.users.get_permissions(user_id.clone()).await?;
         if !permissions.can_generate() {
@@ -871,9 +869,7 @@ impl<U: FunboyUserId> Funboy<U> {
 
         let input = input.join(" ");
 
-        let result = self
-            .user_interpret_fsl(user_id, input, interpreter.clone())
-            .await;
+        let result = self.user_interpret_fsl(user_id, input, interpreter).await;
 
         match result {
             Ok(output) => return Ok(CommandResult::Text(output)),

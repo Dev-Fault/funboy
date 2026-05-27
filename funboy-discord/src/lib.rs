@@ -175,8 +175,8 @@ pub async fn handle_message(
     if mentions_bot {
         let user_id = DiscordUserId(message.author.id);
         let msg = message.content.to_owned();
-        let interpreter = interpreter_from_serenity(ctx, data, message);
-        let result = data.funboy.user_chat(user_id, msg, interpreter).await;
+        let interpreter = interpreter_from_serenity(ctx, data, message).await;
+        let result = data.funboy.user_chat(user_id, msg, &interpreter).await;
         result.map(|r| Some(r)).map_err(|e| e.to_string())
     } else if message.content.starts_with("!") {
         let result = handle_prefix_command(&ctx, data, &message).await;

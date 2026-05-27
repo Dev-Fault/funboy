@@ -3,10 +3,7 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use fsl_core::{FslInterpreter, error::RuntimeError};
 use funboy_core::{
     Funboy,
-    interpreter::{
-        ASK, ASK_RULES, ASK_TO, ASK_TO_RULES, Interactor, InterpreterContext, InterpreterLimits,
-        Messenger, SAY, SAY_RULES, SAY_TO, SAY_TO_RULES,
-    },
+    interpreter::{Interactor, InterpreterContext, InterpreterLimits, Messenger},
 };
 use matrix_sdk::{
     Room,
@@ -175,57 +172,18 @@ async fn user_name_to_id(user_name: &str, room: Room) -> Result<OwnedUserId, Run
 pub async fn create_interpreter(
     funboy: Arc<Funboy<MatrixUser>>,
     matrix_ctx: MatrixCtx,
-) -> Arc<Mutex<FslInterpreter>> {
-    let mut interpreter = FslInterpreter::new();
-    let ictx = InterpreterContext::new(
+) -> FslInterpreter {
+    let mut ictx = InterpreterContext::new(
         matrix_ctx.clone().sender,
         funboy.clone(),
         matrix_ctx.clone(),
         matrix_ctx.interpreter_limits,
-    );
-    interpreter.register(
-        SAY,
-        SAY_RULES,
-        funboy_core::interpreter::say_command(ictx.clone()),
-    );
-    interpreter.register(
-        SAY_TO,
-        SAY_TO_RULES,
-        funboy_core::interpreter::say_to_command(ictx.clone()),
-    );
-    interpreter.register(
-        ASK,
-        ASK_RULES,
-        funboy_core::interpreter::ask_command(ictx.clone()),
-    );
-    interpreter.register(
-        ASK_TO,
-        ASK_TO_RULES,
-        funboy_core::interpreter::ask_to_command(ictx.clone()),
-    );
+    )
+    .await;
+    ictx.register_interactive_funboy_commands().await;
 
     #[cfg(all(target_os = "linux", feature = "sh_exec"))]
-    {
-        use funboy_core::interpreter::sh_exec::*;
-        let permissions = funboy
-            .users
-            .get_permissions(matrix_ctx.sender.clone())
-            .await;
+    ictx.register_shell_commands().await;
 
-        match permissions {
-            Ok(permissions) => {
-                if permissions.can_exec() {
-                    interpreter.register(SANDBOXED_SH, SANDBOXED_SH_RULES, sandboxed_sh_command());
-                    interpreter.register(
-                        INTERACTIVE_SH,
-                        INTERACTIVE_SH_RULES,
-                        interactive_sh_command(ictx),
-                    );
-                }
-            }
-            Err(e) => eprintln!("{e}"),
-        }
-    }
-
-    Arc::new(Mutex::new(interpreter))
+    ictx.interpreter.clone()
 }

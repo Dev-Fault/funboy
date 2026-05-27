@@ -1,4 +1,4 @@
-use std::{str::FromStr, sync::Arc};
+use std::str::FromStr;
 
 use clap::Parser;
 use fsl_core::FslInterpreter;
@@ -15,7 +15,6 @@ use matrix_sdk::{
     Room, attachment::AttachmentConfig, reqwest::header::CONTENT_TYPE, ruma::OwnedUserId,
 };
 use mime::Mime;
-use tokio::sync::Mutex;
 
 use crate::{MatrixUser, send_msg_with_mixed_content};
 
@@ -137,7 +136,7 @@ pub async fn attach_url(
 
 pub async fn interpret_matrix_commands(
     funboy: &Funboy<MatrixUser>,
-    interpreter: Arc<Mutex<FslInterpreter>>,
+    interpreter: &FslInterpreter,
     matrix_user: MatrixUser,
     room: Room,
     input: &str,
@@ -176,7 +175,7 @@ pub async fn interpret_matrix_commands(
                         .generate_command(
                             Platform::Matrix,
                             user_id,
-                            interpreter,
+                            &interpreter,
                             input,
                             false,
                             ollama,

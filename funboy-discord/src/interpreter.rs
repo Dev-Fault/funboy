@@ -3,10 +3,7 @@ use std::{sync::Arc, time::Duration};
 use fsl_core::{FslInterpreter, error::RuntimeError};
 use funboy_core::{
     format::{TWO_THOUSAND, split_message},
-    interpreter::{
-        ASK, ASK_RULES, ASK_TO, ASK_TO_RULES, Interactor, InterpreterContext, Messenger, SAY,
-        SAY_RULES, SAY_TO, SAY_TO_RULES,
-    },
+    interpreter::{Interactor, InterpreterContext, Messenger},
 };
 use serenity::{
     all::{Cache, ChannelId, GuildId, Http, Member, Mentionable, Message, ShardMessenger, UserId},
@@ -15,7 +12,7 @@ use serenity::{
 
 use crate::{Context, Data, DiscordUserId, context_extension::BOT_MAX_MESSAGE_SIZE};
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct DiscordContext {
     pub http: Arc<Http>,
     #[allow(dead_code)]
@@ -203,76 +200,34 @@ impl DiscordContext {
     }
 }
 
-pub fn interpreter_from_poise(ctx: &Context<'_>) -> Arc<tokio::sync::Mutex<FslInterpreter>> {
-    let mut interpreter = FslInterpreter::new();
-
+pub async fn interpreter_from_poise(ctx: &Context<'_>) -> FslInterpreter {
     let dctx = DiscordContext::from_poise(ctx);
-    let ictx = InterpreterContext::new(
+    let mut ictx = InterpreterContext::new(
         DiscordUserId(ctx.author().id),
         ctx.data().funboy.clone(),
         dctx,
         ctx.data().interpreter_limits.clone(),
-    );
+    )
+    .await;
 
-    interpreter.register(
-        SAY,
-        SAY_RULES,
-        funboy_core::interpreter::say_command(ictx.clone()),
-    );
-    interpreter.register(
-        SAY_TO,
-        SAY_TO_RULES,
-        funboy_core::interpreter::say_to_command(ictx.clone()),
-    );
-    interpreter.register(
-        ASK,
-        ASK_RULES,
-        funboy_core::interpreter::ask_command(ictx.clone()),
-    );
-    interpreter.register(
-        ASK_TO,
-        ASK_TO_RULES,
-        funboy_core::interpreter::ask_to_command(ictx.clone()),
-    );
-
-    Arc::new(tokio::sync::Mutex::new(interpreter))
+    ictx.register_interactive_funboy_commands().await;
+    ictx.interpreter.clone()
 }
 
-pub fn interpreter_from_serenity(
+pub async fn interpreter_from_serenity(
     ctx: &serenity::prelude::Context,
     data: &Data,
     message: &Message,
-) -> Arc<tokio::sync::Mutex<FslInterpreter>> {
-    let mut interpreter = FslInterpreter::new();
-
+) -> FslInterpreter {
     let dctx = DiscordContext::from_serenity(ctx, message);
-    let ictx = InterpreterContext::new(
+    let mut ictx = InterpreterContext::new(
         DiscordUserId(message.author.id),
         data.funboy.clone(),
         dctx,
         data.interpreter_limits.clone(),
-    );
+    )
+    .await;
 
-    interpreter.register(
-        SAY,
-        SAY_RULES,
-        funboy_core::interpreter::say_command(ictx.clone()),
-    );
-    interpreter.register(
-        SAY_TO,
-        SAY_TO_RULES,
-        funboy_core::interpreter::say_to_command(ictx.clone()),
-    );
-    interpreter.register(
-        ASK,
-        ASK_RULES,
-        funboy_core::interpreter::ask_command(ictx.clone()),
-    );
-    interpreter.register(
-        ASK_TO,
-        ASK_TO_RULES,
-        funboy_core::interpreter::ask_to_command(ictx.clone()),
-    );
-
-    Arc::new(tokio::sync::Mutex::new(interpreter))
+    ictx.register_interactive_funboy_commands().await;
+    ictx.interpreter.clone()
 }

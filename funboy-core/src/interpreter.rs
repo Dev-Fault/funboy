@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use fsl_core::data::InterpreterData;
 use fsl_core::error::{ExecutionError, RuntimeError, Span, ToExecutionError};
-use fsl_core::libraries::standard::MAYBE_INDEXABLE;
+use fsl_core::libraries::standard::{MAYBE_INDEXABLE, NOT_NONE};
 use fsl_core::types::FslType;
 use fsl_core::types::value::FslValue;
 use fsl_core::{
@@ -49,7 +49,7 @@ pub trait Interactor: Clone + Sync + Send + 'static {
     ) -> impl std::future::Future<Output = Result<String, RuntimeError>> + Send;
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct InterpreterLimits<U: FunboyUserId> {
     pub rate_limit: Option<Arc<Mutex<RateLimit<U>>>>,
     pub message_limit: Option<u16>,
@@ -88,18 +88,18 @@ impl<U: FunboyUserId> Default for InterpreterLimits<U> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct InterpreterContext<U: FunboyUserId, M: Messenger> {
     pub user_id: U,
     pub funboy: Arc<Funboy<U>>,
     pub messages_sent: Arc<Mutex<u16>>,
     pub messenger: M,
     pub limits: InterpreterLimits<U>,
-    interpreter: Arc<Mutex<FslInterpreter>>,
+    pub interpreter: FslInterpreter,
 }
 
 impl<U: FunboyUserId, M: Messenger> InterpreterContext<U, M> {
-    pub fn new(
+    pub async fn new(
         user_id: U,
         funboy: Arc<Funboy<U>>,
         messenger: M,
@@ -111,8 +111,27 @@ impl<U: FunboyUserId, M: Messenger> InterpreterContext<U, M> {
             messages_sent: Arc::new(Mutex::new(0)),
             messenger,
             limits,
-            interpreter: Arc::new(Mutex::new(FslInterpreter::new())),
+            interpreter: FslInterpreter::new().await,
         }
+    }
+
+    pub async fn register_default_funboy_commands(&mut self) {
+        self.interpreter
+            .register(
+                ADD_SUBS,
+                ADD_SUBS_RULES,
+                add_subs_command(self.funboy.clone()),
+            )
+            .await;
+        self.interpreter
+            .register(ASK_AI, ASK_AI_RULES, ask_ai_command(self.funboy.clone()))
+            .await;
+        self.interpreter
+            .register(SAY, SAY_RULES, say_command(self.clone()))
+            .await;
+        self.interpreter
+            .register(ASK, ASK_RULES, ask_command(self.clone()))
+            .await;
     }
 
     pub async fn generate_message<'c>(
@@ -120,14 +139,55 @@ impl<U: FunboyUserId, M: Messenger> InterpreterContext<U, M> {
         message: &str,
         span: Span<'c>,
     ) -> Result<String, ExecutionError<'c>> {
-        match self
-            .funboy
-            .generate(message, self.interpreter.clone())
-            .await
-        {
+        match self.funboy.generate(message, &self.interpreter).await {
             Ok(gen_msg) => Ok(gen_msg),
             Err(e) => {
-                return Err(RuntimeError::Custom(e.to_string()).to_exec(span));
+                let e = e.to_string();
+                let e = e.replace("```", "");
+                return Err(RuntimeError::Custom(e).to_exec(span));
+            }
+        }
+    }
+}
+
+impl<U: FunboyUserId, M: Messenger + Interactor> InterpreterContext<U, M> {
+    pub async fn register_interactive_funboy_commands(&mut self) {
+        self.register_default_funboy_commands().await;
+        self.interpreter
+            .register(GET_SUB, GET_SUB_RULES, get_sub_command(self.clone()))
+            .await;
+        self.interpreter
+            .register(SAY_TO, SAY_TO_RULES, say_to_command(self.clone()))
+            .await;
+        self.interpreter
+            .register(ASK_TO, ASK_TO_RULES, ask_to_command(self.clone()))
+            .await;
+    }
+
+    pub async fn register_shell_commands(&mut self) {
+        {
+            use sh_exec::*;
+            let permissions = self
+                .funboy
+                .users
+                .get_permissions(self.user_id.clone())
+                .await;
+            match permissions {
+                Ok(permissions) => {
+                    if permissions.can_exec() {
+                        self.interpreter
+                            .register(SANDBOXED_SH, SANDBOXED_SH_RULES, sandboxed_sh_command())
+                            .await;
+                        self.interpreter
+                            .register(
+                                INTERACTIVE_SH,
+                                INTERACTIVE_SH_RULES,
+                                interactive_sh_command(self.clone()),
+                            )
+                            .await;
+                    }
+                }
+                Err(e) => eprintln!("{e}"),
             }
         }
     }
@@ -164,7 +224,7 @@ async fn check_limits<'c, U: FunboyUserId, M: Messenger>(
 }
 
 pub const SAY: &str = "say";
-pub const SAY_RULES: &'static [ArgRule] = &[ArgRule::new(ArgPos::Index(0), MAYBE_TEXT)];
+pub const SAY_RULES: &'static [ArgRule] = &[ArgRule::new(ArgPos::AnyFrom(0), NOT_NONE)];
 pub const FIVE_HUNDRED_MS: u64 = 500;
 pub const TWO_THOUSAND_MESSAGES: u16 = 2000;
 pub const SAY_MAX_OUTPUT_LENGTH: usize = 8000;
@@ -173,12 +233,16 @@ pub fn say_command<U: FunboyUserId, M: Messenger>(ictx: InterpreterContext<U, M>
         let ictx = ictx.clone();
         async move {
             let mut command = command;
-            let mut args = command.take_args();
-            let arg = args.pop_front().unwrap();
-            let message_span = arg.span;
-            let message = arg.as_text(data).await?;
+            let args = command.take_args();
 
-            let message = ictx.generate_message(&message, message_span).await?;
+            let mut message = String::new();
+
+            for arg in args {
+                let text = arg.as_text(data.clone()).await?;
+                message.push_str(&text);
+            }
+
+            let message = ictx.generate_message(&message, command.span).await?;
 
             if message.len() < SAY_MAX_OUTPUT_LENGTH {
                 for m in split_message(&message, TWO_THOUSAND) {
@@ -206,40 +270,43 @@ pub fn say_command<U: FunboyUserId, M: Messenger>(ictx: InterpreterContext<U, M>
 pub const SAY_TO: &str = "say_to";
 pub const SAY_TO_RULES: &'static [ArgRule] = &[
     ArgRule::new(ArgPos::Index(0), MAYBE_TEXT),
-    ArgRule::new(ArgPos::Index(1), MAYBE_TEXT),
+    ArgRule::new(ArgPos::AnyFrom(1), NOT_NONE),
 ];
 pub fn say_to_command<U: FunboyUserId, M: Messenger + Interactor>(
     ictx: InterpreterContext<U, M>,
 ) -> Handler {
-    Handler::new(
-        move |command: Command, interpreter_data: Arc<InterpreterData>| {
-            let ictx = ictx.clone();
-            async move {
-                let mut command = command;
-                check_limits(ictx.clone(), command.span).await?;
+    Handler::new(move |command: Command, data: Arc<InterpreterData>| {
+        let ictx = ictx.clone();
+        async move {
+            let mut command = command;
+            check_limits(ictx.clone(), command.span).await?;
 
-                let mut args = command.take_args();
-                let user_name = args.pop_front().unwrap();
-                let user_name = user_name.as_text(interpreter_data.clone()).await?;
-                let message = args.pop_front().unwrap();
-                let message_span = message.span;
-                let message = message.as_text(interpreter_data).await?;
+            let mut args = command.take_args();
+            let user_name = args.pop_front().unwrap();
+            let user_name = user_name.as_text(data.clone()).await?;
 
-                let message = ictx.generate_message(&message, message_span).await?;
-                ictx.messenger
-                    .say_to_user(&user_name, &message)
-                    .await
-                    .map_err(|e| e.to_exec(command.span))?;
+            let mut message = String::new();
 
-                if let Some(delay) = ictx.limits.message_delay_ms {
-                    sleep(Duration::from_millis(delay)).await;
-                }
-
-                Ok(Value::None)
+            for arg in args {
+                let text = arg.as_text(data.clone()).await?;
+                message.push_str(&text);
             }
-            .boxed()
-        },
-    )
+
+            let message = ictx.generate_message(&message, command.span).await?;
+
+            ictx.messenger
+                .say_to_user(&user_name, &message)
+                .await
+                .map_err(|e| e.to_exec(command.span))?;
+
+            if let Some(delay) = ictx.limits.message_delay_ms {
+                sleep(Duration::from_millis(delay)).await;
+            }
+
+            Ok(Value::None)
+        }
+        .boxed()
+    })
 }
 
 pub const DEFAULT_TIMEOUT_SECS: f64 = 60.0 * 30.0;
@@ -390,7 +457,6 @@ pub fn validate_time_out<'c>(
     Ok(())
 }
 
-#[cfg(all(target_os = "linux", feature = "sh_exec"))]
 pub mod sh_exec {
     use fsl_core::error::ToExecutionError;
     use fsl_core::libraries::standard::MAYBE_TEXT;
@@ -542,9 +608,11 @@ pub mod sh_exec {
 
 pub const GET_SUB: &str = "get_sub";
 pub const GET_SUB_RULES: &[ArgRule] = &[ArgRule::new(ArgPos::Index(0), MAYBE_TEXT)];
-pub fn get_sub_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
+pub fn get_sub_command<U: FunboyUserId, M: Messenger + Interactor>(
+    ictx: InterpreterContext<U, M>,
+) -> Handler {
     Handler::new(move |command: Command, data: Arc<InterpreterData>| {
-        let funboy = funboy.clone();
+        let ictx = ictx.clone();
         async move {
                 let mut command = command;
                 let mut args = command.take_args();
@@ -552,9 +620,13 @@ pub fn get_sub_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
                 let regex = TemplateDelimiter::BackTick.to_regex().await;
                 if regex.is_match(&template) {
                     let template = template.trim_matches('`');
-                    let sub = funboy.get_random_substitute(template).await;
+                    let sub = ictx.funboy.get_random_substitute(template).await;
                     match sub {
-                        Ok(sub) => Ok(Value::from(sub.name)),
+                        Ok(sub) => {
+                            let sub = sub.name;
+                            let text = ictx.generate_message(&sub, command.span).await?;
+                            Ok(Value::from(text))
+                        },
                         Err(e) => Err(RuntimeError::Custom(e.to_string()).to_exec(command.span)),
                     }
                 } else {

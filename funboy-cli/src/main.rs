@@ -37,7 +37,7 @@ async fn main() -> rustyline::Result<()> {
                 match interpret_bot_commands(
                     Id(0),
                     &funboy,
-                    create_interpreter(funboy.clone(), rl.clone()).await,
+                    &create_interpreter(funboy.clone(), rl.clone()).await,
                     &line,
                 )
                 .await

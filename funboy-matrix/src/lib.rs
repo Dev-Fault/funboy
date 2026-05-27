@@ -192,7 +192,7 @@ pub async fn on_room_message(
     let permissions = funboy.users.get_permissions(matrix_user.clone()).await;
 
     let mut pending_requests = user_ctx.pending_requests.lock().await;
-    let interpreter = create_interpreter(
+    let mut interpreter = create_interpreter(
         funboy.clone(),
         MatrixCtx::new(
             funboy.clone(),
@@ -206,8 +206,9 @@ pub async fn on_room_message(
     match permissions {
         Ok(permissions) => {
             if permissions.is_owner() {
-                let mut interpreter_lock = interpreter.lock().await;
-                interpreter_lock.register_library(fsl_core::libraries::Library::Exec)
+                interpreter
+                    .register_library(fsl_core::libraries::Library::Exec)
+                    .await
             }
         }
         Err(e) => eprintln!("{e}"),
@@ -217,7 +218,7 @@ pub async fn on_room_message(
 
     if let Some(request) = pending_requests.pop() {
         tokio::spawn(async move {
-            handle_request(request, client, event, room, funboy, interpreter).await;
+            handle_request(request, client, event, room, funboy, &interpreter).await;
         });
     } else {
         let MessageType::Text(text_content) = event.content.msgtype.clone() else {
@@ -251,7 +252,7 @@ pub async fn on_room_message(
                     ""
                 };
                 let result = funboy
-                    .user_chat(matrix_user, input.to_string(), interpreter)
+                    .user_chat(matrix_user, input.to_string(), &interpreter)
                     .await;
                 match result {
                     Ok(response) => {
@@ -276,7 +277,7 @@ pub async fn handle_request(
     event: OriginalSyncRoomMessageEvent,
     room: Room,
     funboy: Arc<Funboy<MatrixUser>>,
-    interpreter: Arc<Mutex<FslInterpreter>>,
+    interpreter: &FslInterpreter,
 ) {
     let user_id = MatrixUser::new(room.room_id().to_owned(), event.sender.clone());
     match request {
@@ -391,7 +392,7 @@ pub async fn handle_bot_command(
 
     let result = interpret_matrix_commands(
         &funboy,
-        interpreter,
+        &interpreter,
         MatrixUser::new(room.room_id().to_owned(), event.sender),
         room.clone(),
         &message,

@@ -32,7 +32,7 @@ pub async fn enter_interactive_generation(
             Ok(input) => {
                 rl.add_history_entry(&input)?;
                 drop(rl);
-                match funboy.generate(&input, interpreter.clone()).await {
+                match funboy.generate(&input, &interpreter).await {
                     Ok(output) => println!("{}", output),
                     Err(e) => {
                         eprint!("{}", e);
@@ -62,11 +62,9 @@ pub async fn enter_interpreter(
             Ok(input) => {
                 rl.add_history_entry(&input)?;
                 drop(rl);
-                let interpreter_lock = interpreter.lock().await;
-                let result = interpreter_lock
+                let result = interpreter
                     .interpret(&input, InterpreterData::default())
                     .await;
-                drop(interpreter_lock);
                 match result {
                     Ok(output) => println!("{}", output),
                     Err(e) => {
@@ -96,7 +94,7 @@ pub async fn enter_chat(
         match readline {
             Ok(input) => {
                 rl.add_history_entry(&input)?;
-                match funboy.user_chat(Id(0), input, interpreter.clone()).await {
+                match funboy.user_chat(Id(0), input, &interpreter).await {
                     Ok(response) => {
                         println!("{response}");
                     }
@@ -260,7 +258,7 @@ impl Into<CliCommandResult> for CommandResult {
 pub async fn interpret_bot_commands<U: FunboyUserId>(
     user_id: U,
     funboy: &Funboy<U>,
-    interpreter: Arc<Mutex<FslInterpreter>>,
+    interpreter: &FslInterpreter,
     input: &str,
 ) -> Result<CliCommandResult, CommandError> {
     let input = input.trim();

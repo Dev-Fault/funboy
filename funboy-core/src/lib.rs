@@ -24,10 +24,6 @@ use crate::{
         FunboyDatabase, KeySize, Limit, OrderBy, Platform, Substitute, SubstituteReceipt, Template,
         TemplateReceipt,
     },
-    interpreter::{
-        ADD_SUBS, ADD_SUBS_RULES, ASK_AI, ASK_AI_RULES, GET_SUB, GET_SUB_RULES, add_subs_command,
-        ask_ai_command, get_sub_command,
-    },
     ollama::{OllamaGenerator, OllamaResponse, OllamaSettings},
     permissions::{Permission, PermissionError, Permissions, Role},
     template_substitutor::{TemplateDelimiter, TemplateSubstitutor, VALID_TEMPLATE_CHARS},
@@ -341,10 +337,10 @@ impl<U: FunboyUserId> Funboy<U> {
     async fn interpret_input(
         &self,
         input: String,
-        interpreter: Arc<Mutex<FslInterpreter>>,
+        interpreter: &FslInterpreter,
     ) -> Result<String, FunboyError> {
         let mut substituted_text = self
-            .substitute_register_templates(input, interpreter.clone())
+            .substitute_register_templates(input, interpreter)
             .await?;
 
         substituted_text = TemplateSubstitutor::new(TemplateDelimiter::Caret)
@@ -357,7 +353,6 @@ impl<U: FunboyUserId> Funboy<U> {
             })
             .await;
 
-        let interpreter = interpreter.lock().await;
         let interpreter_result = interpreter
             .interpret_embedded_code(
                 &substituted_text,
@@ -375,7 +370,7 @@ impl<U: FunboyUserId> Funboy<U> {
     async fn substitute_register_templates(
         &self,
         input: String,
-        interpreter: Arc<Mutex<FslInterpreter>>,
+        interpreter: &FslInterpreter,
     ) -> Result<String, FunboyError> {
         let sub_map: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
         let funboy_error: Arc<Mutex<Option<FunboyError>>> = Arc::new(Mutex::new(None));
@@ -383,7 +378,6 @@ impl<U: FunboyUserId> Funboy<U> {
             .await
             .substitute_recursively(input, |template: String| {
                 let sub_map = sub_map.clone();
-                let interpreter = interpreter.clone();
                 let funboy_error = funboy_error.clone();
 
                 async move {
@@ -419,14 +413,6 @@ impl<U: FunboyUserId> Funboy<U> {
         }
     }
 
-    async fn register_funboy_interpreter_commands(&self, interpreter: Arc<Mutex<FslInterpreter>>) {
-        let mut modified_interpreter = interpreter.lock().await;
-        let funboy = Arc::new(self.clone());
-        modified_interpreter.register(GET_SUB, GET_SUB_RULES, get_sub_command(funboy.clone()));
-        modified_interpreter.register(ADD_SUBS, ADD_SUBS_RULES, add_subs_command(funboy.clone()));
-        modified_interpreter.register(ASK_AI, ASK_AI_RULES, ask_ai_command(funboy));
-    }
-
     /* PROFILE CODE
         let before = SystemTime::now();
 
@@ -443,13 +429,10 @@ impl<U: FunboyUserId> Funboy<U> {
     pub async fn generate(
         &self,
         input: impl Into<String>,
-        interpreter: Arc<Mutex<FslInterpreter>>,
+        interpreter: &FslInterpreter,
     ) -> Result<String, FunboyError> {
         let mut output: String = input.into();
         let mut prev_hashes = HashSet::new();
-
-        self.register_funboy_interpreter_commands(interpreter.clone())
-            .await;
 
         for _ in 0..u8::MAX {
             let mut hasher = DefaultHasher::new();
@@ -459,7 +442,7 @@ impl<U: FunboyUserId> Funboy<U> {
             if !prev_hashes.insert(hash) {
                 break;
             } else {
-                output = self.interpret_input(output, interpreter.clone()).await?;
+                output = self.interpret_input(output, interpreter).await?;
             }
         }
 
@@ -469,13 +452,8 @@ impl<U: FunboyUserId> Funboy<U> {
     pub async fn interpret_fsl(
         &self,
         input: String,
-        interpreter: Arc<Mutex<FslInterpreter>>,
+        interpreter: &FslInterpreter,
     ) -> Result<String, FunboyError> {
-        self.register_funboy_interpreter_commands(interpreter.clone())
-            .await;
-
-        let interpreter = interpreter.lock().await;
-
         let output = interpreter
             .interpret(
                 &input,
@@ -509,7 +487,7 @@ impl<U: FunboyUserId> Funboy<U> {
         model: Option<String>,
         ollama_settings: &OllamaSettings,
         prompt: impl Into<String>,
-        interpreter: Arc<Mutex<FslInterpreter>>,
+        interpreter: &FslInterpreter,
     ) -> Result<OllamaResponse, FunboyError> {
         let prompt = self.generate(prompt, interpreter).await?;
         match self
@@ -529,7 +507,7 @@ impl<U: FunboyUserId> Funboy<U> {
         &self,
         user_id: U,
         input: impl Into<String>,
-        interpreter: Arc<Mutex<FslInterpreter>>,
+        interpreter: &FslInterpreter,
     ) -> Result<String, FunboyError> {
         let user_ctx = self.users.get_or_insert(user_id).await?;
         let Some(_guard) = FlagGuard::new(user_ctx.is_generating.clone()) else {
@@ -560,7 +538,7 @@ impl<U: FunboyUserId> Funboy<U> {
         &self,
         user_id: U,
         input: String,
-        interpreter: Arc<Mutex<FslInterpreter>>,
+        interpreter: &FslInterpreter,
     ) -> Result<String, FunboyError> {
         let user_ctx = self.users.get_or_insert(user_id).await?;
         let Some(_guard) = FlagGuard::new(user_ctx.is_generating.clone()) else {
@@ -591,7 +569,7 @@ impl<U: FunboyUserId> Funboy<U> {
         &self,
         user_id: U,
         prompt: impl Into<String>,
-        interpreter: Arc<Mutex<FslInterpreter>>,
+        interpreter: &FslInterpreter,
     ) -> Result<OllamaResponse, FunboyError> {
         let user_ctx = self.users.get_or_insert(user_id).await?;
         let Some(_guard) = FlagGuard::new(user_ctx.is_generating.clone()) else {
@@ -628,7 +606,7 @@ impl<U: FunboyUserId> Funboy<U> {
         &self,
         user_id: U,
         input: String,
-        interpreter: Arc<Mutex<FslInterpreter>>,
+        interpreter: &FslInterpreter,
     ) -> Result<String, FunboyError> {
         let user_ctx = self.users.get_or_insert(user_id).await?;
         let Some(_guard) = FlagGuard::new(user_ctx.is_generating.clone()) else {
@@ -831,7 +809,7 @@ mod core {
         let funboy = get_funboy(pool).await;
 
         let output = funboy
-            .generate("^sentence", Arc::new(Mutex::new(FslInterpreter::new())))
+            .generate("^sentence", &FslInterpreter::new().await)
             .await
             .unwrap();
 
@@ -851,7 +829,7 @@ mod core {
         funboy.add_substitutes("gtverb", &["jump"]).await.unwrap();
 
         let output = funboy
-            .generate("^sentence", Arc::new(Mutex::new(FslInterpreter::new())))
+            .generate("^sentence", &FslInterpreter::new().await)
             .await
             .unwrap();
 
@@ -878,7 +856,7 @@ mod core {
                     "{0}noun {0}noun {0}noun {0}noun {0}noun",
                     TemplateDelimiter::Plus.to_char()
                 ),
-                Arc::new(Mutex::new(FslInterpreter::new())),
+                &FslInterpreter::new().await,
             )
             .await
             .unwrap();
@@ -908,7 +886,7 @@ mod core {
             .generate(&format!(
                 "{0}noun-1 {0}noun-1 {0}noun-2 {0}noun-2 {0}noun-2 {0}noun-999 {0}noun-999 {0}noun-999{0}noun-999{0}",
                 TemplateDelimiter::Plus.to_char()),
-                Arc::new(Mutex::new(FslInterpreter::new())),
+                &FslInterpreter::new().await,
             )
             .await
             .unwrap();
@@ -931,7 +909,7 @@ mod core {
         let output = funboy
             .generate(
                 "{repeat(5, print(\"again\"))}",
-                Arc::new(Mutex::new(FslInterpreter::new())),
+                &FslInterpreter::new().await,
             )
             .await
             .unwrap();
@@ -988,7 +966,7 @@ mod core {
                 Some("tinyllama".to_string()),
                 &OllamaSettings::default(),
                 "{print(\"You are very ^adj you know that?\")}",
-                Arc::new(Mutex::new(FslInterpreter::new())),
+                &FslInterpreter::new().await,
             )
             .await
             .unwrap();

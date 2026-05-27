@@ -3,9 +3,7 @@ use std::sync::Arc;
 use fsl_core::{FslInterpreter, error::RuntimeError};
 use funboy_core::{
     Funboy,
-    interpreter::{
-        ASK, ASK_RULES, InterpreterContext, InterpreterLimits, Messenger, SAY, SAY_RULES,
-    },
+    interpreter::{InterpreterContext, InterpreterLimits, Messenger},
 };
 use rustyline::DefaultEditor;
 use tokio::sync::Mutex;
@@ -54,22 +52,14 @@ impl Messenger for CliContext {
 pub async fn create_interpreter(
     funboy: Arc<Funboy<Id>>,
     rl: Arc<Mutex<DefaultEditor>>,
-) -> Arc<Mutex<FslInterpreter>> {
-    let mut interpreter = FslInterpreter::new();
+) -> FslInterpreter {
     let cli_context = CliContext::new(rl);
-    let ictx = InterpreterContext::new(Id(0), funboy, cli_context, InterpreterLimits::none());
-    interpreter.register(
-        SAY,
-        SAY_RULES,
-        funboy_core::interpreter::say_command(ictx.clone()),
-    );
-    interpreter.register(
-        ASK,
-        ASK_RULES,
-        funboy_core::interpreter::ask_command(ictx.clone()),
-    );
+    let mut ictx =
+        InterpreterContext::new(Id(0), funboy, cli_context, InterpreterLimits::none()).await;
+    ictx.register_default_funboy_commands().await;
+    ictx.interpreter
+        .register_library(fsl_core::libraries::Library::Exec)
+        .await;
 
-    interpreter.register_library(fsl_core::libraries::Library::Exec);
-
-    Arc::new(Mutex::new(interpreter))
+    ictx.interpreter.clone()
 }

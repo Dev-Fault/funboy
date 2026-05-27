@@ -27,7 +27,7 @@ pub async fn generate_message(
     let http = ctx.http();
     let channel_id = ctx.channel_id();
     let funboy = ctx.data().funboy.clone();
-    let interpreter = interpreter_from_poise(&ctx);
+    let interpreter = interpreter_from_poise(&ctx).await;
 
     ctx.defer().await?;
 
@@ -35,7 +35,7 @@ pub async fn generate_message(
         .generate_command(
             Platform::Discord,
             DiscordUserId(user_id),
-            interpreter,
+            &interpreter,
             vec![message],
             false,
             ollama,

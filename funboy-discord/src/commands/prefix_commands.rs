@@ -98,13 +98,13 @@ pub async fn handle_request(
     message: &Message,
 ) -> Result<CommandResult, CommandError> {
     let funboy = data.funboy.clone();
-    let interpreter = interpreter_from_serenity(ctx, data, message);
+    let interpreter = interpreter_from_serenity(ctx, data, message).await;
     let user_id = DiscordUserId(message.author.id);
 
     match request {
         Request::GenerateFile => {
             let input = get_input_from_attatchment(message.attachments.get(0)).await?;
-            let output = funboy.generate(input, interpreter).await?;
+            let output = funboy.generate(input, &interpreter).await?;
             Ok(CommandResult::Text(output))
         }
         Request::UploadSub(template) => {
@@ -138,7 +138,7 @@ pub async fn handle_prefix_command(
     message: &Message,
 ) -> Result<CommandResult, CommandError> {
     let funboy = data.funboy.clone();
-    let interpreter = interpreter_from_serenity(ctx, data, message);
+    let interpreter = interpreter_from_serenity(ctx, data, message).await;
     let user_id = DiscordUserId(message.author.id);
     let user_ctx = funboy.users.get_or_insert(user_id.clone()).await?;
     let user_permissions = funboy.users.get_permissions(user_id.clone()).await?;
@@ -172,7 +172,7 @@ pub async fn handle_prefix_command(
                         .generate_command(
                             Platform::Matrix,
                             user_id,
-                            interpreter,
+                            &interpreter,
                             input,
                             false,
                             ollama,
@@ -299,7 +299,7 @@ pub async fn handle_prefix_command(
             }
             DiscordCommand::Fsl { args } => {
                 let FslArgs { input } = args;
-                funboy.fsl_command(user_id, input, interpreter).await
+                funboy.fsl_command(user_id, input, &interpreter).await
             }
         },
         Err(e) => Err(CommandError::UnknownCommand(e.to_string())),
