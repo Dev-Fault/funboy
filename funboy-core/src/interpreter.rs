@@ -2,6 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use fsl_core::data::InterpreterData;
 use fsl_core::error::{ExecutionError, RuntimeError, Span, ToExecutionError};
+use fsl_core::libraries::Library;
 use fsl_core::libraries::standard::{MAYBE_INDEXABLE, NOT_NONE};
 use fsl_core::types::FslType;
 use fsl_core::types::value::FslValue;
@@ -117,6 +118,7 @@ impl<U: FunboyUserId, M: Messenger> InterpreterContext<U, M> {
     }
 
     pub async fn register_default_funboy_commands(&mut self) {
+        self.interpreter.register_library(Library::Async).await;
         self.interpreter
             .register(
                 GET_SUBS,
