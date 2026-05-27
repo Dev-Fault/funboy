@@ -15,6 +15,7 @@ use fsl_core::{
 };
 use tokio::{sync::Mutex, time::sleep};
 
+use crate::database::{self, OrderBy};
 use crate::format::AsStrs;
 use crate::{
     Funboy,
@@ -116,6 +117,13 @@ impl<U: FunboyUserId, M: Messenger> InterpreterContext<U, M> {
     }
 
     pub async fn register_default_funboy_commands(&mut self) {
+        self.interpreter
+            .register(
+                GET_SUBS,
+                GET_SUBS_RULES,
+                get_subs_command(self.funboy.clone()),
+            )
+            .await;
         self.interpreter
             .register(
                 ADD_SUBS,
@@ -640,6 +648,40 @@ pub fn get_sub_command<U: FunboyUserId, M: Messenger + Interactor>(
                     return Err(RuntimeError::Custom(format!(
                         "template name must be preceeded by a single ` (backtick)\nThis ensures if the template is renamed this {} will not be invalid",
                         GET_SUB
+                    )).to_exec(command.span));
+                }
+            }.boxed()
+    })
+}
+
+pub const GET_SUBS: &str = "get_subs";
+pub const GET_SUBS_RULES: &[ArgRule] = &[ArgRule::new(ArgPos::Index(0), MAYBE_TEXT)];
+pub fn get_subs_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
+    Handler::new(move |command: Command, data: Arc<InterpreterData>| {
+        let funboy = funboy.clone();
+        async move {
+                let mut command = command;
+                let mut args = command.take_args();
+                let template = args.pop_front().unwrap().as_text(data).await?;
+                let regex = TemplateDelimiter::BackTick.to_regex().await;
+                if regex.is_match(&template) {
+                    let template = template.trim_matches('`');
+                    let subs = funboy.get_substitutes(template, None, OrderBy::Default, database::Limit::None).await;
+                    match subs {
+                        Ok(subs) => {
+                            let mut values = Vec::with_capacity(subs.len());
+                            for sub in subs {
+                                let sub = Value::from(sub.name);
+                                values.push(sub);
+                            }
+                            Ok(Value::from(values))
+                        },
+                        Err(e) => Err(RuntimeError::Custom(e.to_string()).to_exec(command.span)),
+                    }
+                } else {
+                    return Err(RuntimeError::Custom(format!(
+                        "template name must be preceeded by a single ` (backtick)\nThis ensures if the template is renamed this {} will not be invalid",
+                        GET_SUBS
                     )).to_exec(command.span));
                 }
             }.boxed()
