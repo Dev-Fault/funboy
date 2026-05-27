@@ -124,6 +124,13 @@ impl<U: FunboyUserId, M: Messenger> InterpreterContext<U, M> {
             )
             .await;
         self.interpreter
+            .register(
+                DELETE_SUBS,
+                DELETE_SUBS_RULES,
+                delete_subs_command(self.funboy.clone()),
+            )
+            .await;
+        self.interpreter
             .register(ASK_AI, ASK_AI_RULES, ask_ai_command(self.funboy.clone()))
             .await;
         self.interpreter
@@ -675,6 +682,59 @@ pub fn add_subs_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
                 if regex.is_match(&template) {
                     let template = template.trim_matches('`');
                     let result = funboy.add_substitutes(template, &subs.as_strs()).await;
+                    match result {
+                        Ok(receipt) => Ok(Value::from(receipt.updated_to_string())),
+                        Err(e) => Err(RuntimeError::Custom(format!(
+                            "{}",
+                            e.to_string()
+                        )).to_exec(command.span)),
+                    }
+                } else {
+                    return Err(RuntimeError::Custom(format!(
+                        "template name must be preceeded by a single ` (backtick)\nThis ensures if the template is renamed this {} will not be invalid",
+                        ADD_SUBS
+                    )).to_exec(command.span));
+                }
+            }.boxed()
+    })
+}
+
+pub const DELETE_SUBS: &str = "delete_subs";
+pub const DELETE_SUBS_RULES: &[ArgRule] = &[
+    ArgRule::new(ArgPos::Index(0), MAYBE_TEXT),
+    ArgRule::new(ArgPos::Index(1), MAYBE_INDEXABLE),
+];
+pub fn delete_subs_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
+    Handler::new(move |command: Command, data: Arc<InterpreterData>| {
+        let funboy = funboy.clone();
+        async move {
+                let mut command = command;
+                let mut args = command.take_args();
+                let template = args.pop_front().unwrap().as_text(data.clone()).await?;
+                let subs = args
+                    .pop_front()
+                    .unwrap()
+                    .as_raw(data.clone(), &[FslType::Text, FslType::List])
+                    .await?;
+                let regex = TemplateDelimiter::BackTick.to_regex().await;
+
+                let subs = match subs.value {
+                    Value::Text(sub) => vec![sub.into_owned()],
+                    Value::List(values) => {
+                        let span = subs.span;
+                        let mut subs = vec![];
+                        for value in values {
+                            let value = value.as_text(data.clone()).await.map_err(|e| e.to_exec(span))?;
+                            subs.push(value.into_owned());
+                        }
+                        subs
+                    }
+                    _ => unreachable!("as raw should have verified type"),
+                };
+
+                if regex.is_match(&template) {
+                    let template = template.trim_matches('`');
+                    let result = funboy.delete_substitutes(template, &subs.as_strs()).await;
                     match result {
                         Ok(receipt) => Ok(Value::from(receipt.updated_to_string())),
                         Err(e) => Err(RuntimeError::Custom(format!(
