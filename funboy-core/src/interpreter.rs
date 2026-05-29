@@ -705,7 +705,7 @@ pub fn add_subs_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
                 let subs = args
                     .pop_front()
                     .unwrap()
-                    .as_raw(data.clone(), &[FslType::Text, FslType::List])
+                    .as_raw_checked(data.clone(), &[FslType::Text, FslType::List])
                     .await?;
                 let regex = TemplateDelimiter::BackTick.to_regex().await;
 
@@ -758,7 +758,7 @@ pub fn delete_subs_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
                 let subs = args
                     .pop_front()
                     .unwrap()
-                    .as_raw(data.clone(), &[FslType::Text, FslType::List])
+                    .as_raw_checked(data.clone(), &[FslType::Text, FslType::List])
                     .await?;
                 let regex = TemplateDelimiter::BackTick.to_regex().await;
 
