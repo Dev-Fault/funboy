@@ -3,13 +3,11 @@ use std::{sync::Arc, time::Duration};
 use fsl_core::data::InterpreterData;
 use fsl_core::error::{ExecutionError, RuntimeError, ToExecutionError};
 use fsl_core::libraries::Library;
-use fsl_core::libraries::standard::{MAYBE_INDEXABLE, NOT_NONE};
 use fsl_core::span::Span;
-use fsl_core::types::FslType;
 use fsl_core::types::value::FslValue;
+use fsl_core::types::{FslType, MAYBE_INDEXABLE, MAYBE_INT, MAYBE_NUMBER, MAYBE_TEXT, NOT_NONE};
 use fsl_core::{
     FslInterpreter,
-    libraries::standard::{MAYBE_INT, MAYBE_NUMBER, MAYBE_TEXT},
     types::{
         command::{ArgPos, ArgRule, Command, Handler},
         value::Value,
@@ -163,7 +161,7 @@ impl<U: FunboyUserId, M: Messenger> InterpreterContext<U, M> {
             Err(e) => {
                 let e = e.to_string();
                 let e = e.replace("```", "");
-                return Err(RuntimeError::Custom(e).to_exec(span, data.source.clone()));
+                return Err(RuntimeError::Custom(e).to_exec(span, data.clone()));
             }
         }
     }
@@ -222,7 +220,7 @@ async fn check_limits<'c, U: FunboyUserId, M: Messenger>(
         if *call_count >= limit {
             *call_count = 0;
             return Err(RuntimeError::Custom(format!("message limit exceeded",))
-                .to_exec(span, data.source.clone()));
+                .to_exec(span, data.clone()));
         }
         *call_count = call_count.saturating_add(1);
     }
@@ -234,7 +232,7 @@ async fn check_limits<'c, U: FunboyUserId, M: Messenger>(
                 return Err(RuntimeError::Custom(format!(
                     "exceeded rate limit too many times, please wait a bit before trying again",
                 ))
-                .to_exec(span, data.source.clone()));
+                .to_exec(span, data.clone()));
             }
             RateLimitResult::UsesPerIntervalreached => Ok(()),
             RateLimitResult::Ok => Ok(()),
@@ -251,18 +249,18 @@ pub fn validate_time_out(
     data: Arc<InterpreterData>,
 ) -> Result<(), ExecutionError> {
     if !time_out.is_finite() {
-        return Err(RuntimeError::NonFiniteValue.to_exec(span, data.source.clone()));
+        return Err(RuntimeError::NonFiniteValue.to_exec(span, data.clone()));
     } else if time_out.is_sign_negative() {
         return Err(
             RuntimeError::Custom(format!("time_out cannot be a negative number"))
-                .to_exec(span, data.source.clone()),
+                .to_exec(span, data.clone()),
         );
     } else if time_out > max {
         return Err(RuntimeError::Custom(format!(
             "timeout cannot be greater than {} seconds",
             max
         ))
-        .to_exec(span, data.source.clone()));
+        .to_exec(span, data.clone()));
     }
     Ok(())
 }
@@ -306,7 +304,7 @@ pub fn say_command<U: FunboyUserId, M: Messenger>(ictx: InterpreterContext<U, M>
                     "Message exceeded max length of {} characters",
                     SAY_MAX_OUTPUT_LENGTH,
                 ))
-                .to_exec(command.span, data.source.clone()));
+                .to_exec(command.span, data.clone()));
             }
         }
         .boxed()
@@ -345,7 +343,7 @@ pub fn say_to_command<U: FunboyUserId, M: Messenger + Interactor>(
             ictx.messenger
                 .say_to_user(&user_name, &message)
                 .await
-                .map_err(|e| e.to_exec(command.span, data.source.clone()))?;
+                .map_err(|e| e.to_exec(command.span, data.clone()))?;
 
             if let Some(delay) = ictx.limits.message_delay_ms {
                 sleep(Duration::from_millis(delay)).await;
@@ -404,16 +402,16 @@ pub fn ask_command<U: FunboyUserId, M: Messenger>(ictx: InterpreterContext<U, M>
                     "Message exceeded max length of {} characters",
                     SAY_MAX_OUTPUT_LENGTH,
                 ))
-                .to_exec(command.span, data.source.clone()));
+                .to_exec(command.span, data.clone()));
             }
 
             let response = ictx
                 .messenger
                 .await_response(timeout)
                 .await
-                .map_err(|e| e.to_exec(command.span, data.source.clone()))?;
+                .map_err(|e| e.to_exec(command.span, data.clone()))?;
             if response == STOP {
-                return Err(RuntimeError::ProgramExited.to_exec(command.span, data.source.clone()));
+                return Err(RuntimeError::ProgramExited.to_exec(command.span, data.clone()));
             }
             let response = ictx
                 .generate_message(&response, command.span, data.clone())
@@ -471,16 +469,16 @@ pub fn ask_to_command<U: FunboyUserId, M: Messenger + Interactor>(
                         .await?,
                 )
                 .await
-                .map_err(|e| e.to_exec(command.span, data.source.clone()))?;
+                .map_err(|e| e.to_exec(command.span, data.clone()))?;
 
             let response = ictx
                 .messenger
                 .await_user_response(&user_name, timeout)
                 .await
-                .map_err(|e| e.to_exec(command.span, data.source.clone()))?;
+                .map_err(|e| e.to_exec(command.span, data.clone()))?;
 
             if response == STOP {
-                return Err(RuntimeError::ProgramExited.to_exec(command.span, data.source.clone()));
+                return Err(RuntimeError::ProgramExited.to_exec(command.span, data.clone()));
             }
             let response = ictx
                 .generate_message(&response, command.span, data.clone())
@@ -494,7 +492,7 @@ pub fn ask_to_command<U: FunboyUserId, M: Messenger + Interactor>(
 
 pub mod sh_exec {
     use fsl_core::error::ToExecutionError;
-    use fsl_core::libraries::standard::MAYBE_TEXT;
+    use fsl_core::types::MAYBE_TEXT;
     use fsl_core::types::command::Handler;
     use fsl_core::types::command::{ArgPos, ArgRule};
     use fsl_core::types::value::FslValue;
@@ -529,7 +527,7 @@ pub mod sh_exec {
                         RuntimeError::FailedToRun {
                             process: "sh".into(),
                         }
-                        .to_exec(command.span, data.source.clone())
+                        .to_exec(command.span, data.clone())
                     })?;
 
                 if !output.status.success() {
@@ -580,7 +578,7 @@ pub mod sh_exec {
                     Ok(child) => child,
                     Err(e) => {
                         return Err(fsl_core::error::RuntimeError::Custom(format!("{e}"))
-                            .to_exec(command.span, data.source.clone()));
+                            .to_exec(command.span, data.clone()));
                     }
                 };
 
@@ -596,7 +594,7 @@ pub mod sh_exec {
                         Ok(n) => n,
                         Err(e) => {
                             return Err(fsl_core::error::RuntimeError::Custom(format!("{e}"))
-                                .to_exec(command.span, data.source.clone()));
+                                .to_exec(command.span, data.clone()));
                         }
                     };
 
@@ -609,12 +607,12 @@ pub mod sh_exec {
                     ictx.messenger
                         .say_to_user(&user_name, &output)
                         .await
-                        .map_err(|e| e.to_exec(command.span, data.source.clone()))?;
+                        .map_err(|e| e.to_exec(command.span, data.clone()))?;
                     let response = ictx
                         .messenger
                         .await_user_response(&user_name, 60.0)
                         .await
-                        .map_err(|e| e.to_exec(command.span, data.source.clone()))?;
+                        .map_err(|e| e.to_exec(command.span, data.clone()))?;
 
                     if response == STOP {
                         break;
@@ -626,11 +624,11 @@ pub mod sh_exec {
 
                     if let Err(e) = stdin.write_all(response.as_bytes()).await {
                         return Err(fsl_core::error::RuntimeError::Custom(format!("{e}"))
-                            .to_exec(command.span, data.source.clone()));
+                            .to_exec(command.span, data.clone()));
                     }
                     if let Err(e) = stdin.write_all(b"\n").await {
                         return Err(fsl_core::error::RuntimeError::Custom(format!("{e}"))
-                            .to_exec(command.span, data.source.clone()));
+                            .to_exec(command.span, data.clone()));
                     }
                 }
 
@@ -664,13 +662,13 @@ pub fn get_sub_command<U: FunboyUserId, M: Messenger + Interactor>(
                             let text = ictx.generate_message(&sub, command.span, data.clone()).await?;
                             Ok(Value::from(text))
                         },
-                        Err(e) => Err(RuntimeError::Custom(e.to_string()).to_exec(command.span, data.source.clone())),
+                        Err(e) => Err(RuntimeError::Custom(e.to_string()).to_exec(command.span, data.clone())),
                     }
                 } else {
                     return Err(RuntimeError::Custom(format!(
                         "template name must be preceeded by a single ` (backtick)\nThis ensures if the template is renamed this {} will not be invalid",
                         GET_SUB
-                    )).to_exec(command.span, data.source.clone()));
+                    )).to_exec(command.span, data.clone()));
                 }
             }.boxed()
     })
@@ -698,13 +696,13 @@ pub fn get_subs_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
                             }
                             Ok(Value::from(values))
                         },
-                        Err(e) => Err(RuntimeError::Custom(e.to_string()).to_exec(command.span, data.source.clone())),
+                        Err(e) => Err(RuntimeError::Custom(e.to_string()).to_exec(command.span, data.clone())),
                     }
                 } else {
                     return Err(RuntimeError::Custom(format!(
                         "template name must be preceeded by a single ` (backtick)\nThis ensures if the template is renamed this {} will not be invalid",
                         GET_SUBS
-                    )).to_exec(command.span, data.source.clone()));
+                    )).to_exec(command.span, data.clone()));
                 }
             }.boxed()
     })
@@ -735,7 +733,7 @@ pub fn add_subs_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
                         let span = subs.span;
                         let mut subs = vec![];
                         for value in values {
-                            let value = value.as_text(data.clone()).await.map_err(|e| e.to_exec(span, data.source.clone()))?;
+                            let value = value.as_text(data.clone()).await.map_err(|e| e.to_exec(span, data.clone()))?;
                             subs.push(value.to_string());
                         }
                         subs
@@ -751,13 +749,13 @@ pub fn add_subs_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
                         Err(e) => Err(RuntimeError::Custom(format!(
                             "{}",
                             e.to_string()
-                        )).to_exec(command.span, data.source.clone())),
+                        )).to_exec(command.span, data.clone())),
                     }
                 } else {
                     return Err(RuntimeError::Custom(format!(
                         "template name must be preceeded by a single ` (backtick)\nThis ensures if the template is renamed this {} will not be invalid",
                         ADD_SUBS
-                    )).to_exec(command.span, data.source.clone()));
+                    )).to_exec(command.span, data.clone()));
                 }
             }.boxed()
     })
@@ -788,7 +786,7 @@ pub fn delete_subs_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
                         let span = subs.span;
                         let mut subs = vec![];
                         for value in values {
-                            let value = value.as_text(data.clone()).await.map_err(|e| e.to_exec(span, data.source.clone()))?;
+                            let value = value.as_text(data.clone()).await.map_err(|e| e.to_exec(span, data.clone()))?;
                             subs.push(value.to_string());
                         }
                         subs
@@ -804,13 +802,13 @@ pub fn delete_subs_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
                         Err(e) => Err(RuntimeError::Custom(format!(
                             "{}",
                             e.to_string()
-                        )).to_exec(command.span, data.source.clone())),
+                        )).to_exec(command.span, data.clone())),
                     }
                 } else {
                     return Err(RuntimeError::Custom(format!(
                         "template name must be preceeded by a single ` (backtick)\nThis ensures if the template is renamed this {} will not be invalid",
                         ADD_SUBS
-                    )).to_exec(command.span, data.source.clone()));
+                    )).to_exec(command.span, data.clone()));
                 }
             }.boxed()
     })
@@ -838,13 +836,13 @@ pub fn ask_ai_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
                     "word limit `{}` must be greater than zero",
                     word_limit
                 ))
-                .to_exec(word_limit_span, data.source.clone()));
+                .to_exec(word_limit_span, data.clone()));
             } else if word_limit > MAX_WORD_LIMIT {
                 return Err(RuntimeError::Custom(format!(
                     "word limit `{}` cannot be greater than {}",
                     word_limit, MAX_WORD_LIMIT
                 ))
-                .to_exec(word_limit_span, data.source.clone()));
+                .to_exec(word_limit_span, data.clone()));
             }
 
             let mut ollama_settings = OllamaSettings::default();
@@ -861,8 +859,7 @@ pub fn ask_ai_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
                     Ok(Value::from(response))
                 }
                 Err(e) => {
-                    Err(RuntimeError::Custom(e.to_string())
-                        .to_exec(command.span, data.source.clone()))
+                    Err(RuntimeError::Custom(e.to_string()).to_exec(command.span, data.clone()))
                 }
             }
         }
