@@ -355,7 +355,7 @@ impl<U: FunboyUserId> Funboy<U> {
 
         let interpreter_result = interpreter
             .interpret_embedded_code(
-                &substituted_text,
+                substituted_text,
                 InterpreterData::default().with_limits(InterpreterLimits::default_limits()),
             )
             .await;
@@ -456,7 +456,7 @@ impl<U: FunboyUserId> Funboy<U> {
     ) -> Result<String, FunboyError> {
         let output = interpreter
             .interpret(
-                &input,
+                input,
                 InterpreterData::default().with_limits(InterpreterLimits::default_limits()),
             )
             .await;

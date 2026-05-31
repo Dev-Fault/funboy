@@ -1,9 +1,10 @@
 use std::{sync::Arc, time::Duration};
 
 use fsl_core::data::InterpreterData;
-use fsl_core::error::{ExecutionError, RuntimeError, Span, ToExecutionError};
+use fsl_core::error::{ExecutionError, RuntimeError, ToExecutionError};
 use fsl_core::libraries::Library;
 use fsl_core::libraries::standard::{MAYBE_INDEXABLE, NOT_NONE};
+use fsl_core::span::Span;
 use fsl_core::types::FslType;
 use fsl_core::types::value::FslValue;
 use fsl_core::{
@@ -151,17 +152,18 @@ impl<U: FunboyUserId, M: Messenger> InterpreterContext<U, M> {
             .await;
     }
 
-    pub async fn generate_message<'c>(
+    pub async fn generate_message(
         &self,
         message: &str,
-        span: Span<'c>,
-    ) -> Result<String, ExecutionError<'c>> {
+        span: Span,
+        data: Arc<InterpreterData>,
+    ) -> Result<String, ExecutionError> {
         match self.funboy.generate(message, &self.interpreter).await {
             Ok(gen_msg) => Ok(gen_msg),
             Err(e) => {
                 let e = e.to_string();
                 let e = e.replace("```", "");
-                return Err(RuntimeError::Custom(e).to_exec(span));
+                return Err(RuntimeError::Custom(e).to_exec(span, data.source.clone()));
             }
         }
     }
@@ -212,13 +214,15 @@ impl<U: FunboyUserId, M: Messenger + Interactor> InterpreterContext<U, M> {
 
 async fn check_limits<'c, U: FunboyUserId, M: Messenger>(
     ictx: InterpreterContext<U, M>,
-    span: Span<'c>,
-) -> Result<(), ExecutionError<'c>> {
+    span: Span,
+    data: Arc<InterpreterData>,
+) -> Result<(), ExecutionError> {
     if let Some(limit) = ictx.limits.message_limit {
         let mut call_count = ictx.messages_sent.lock().await;
         if *call_count >= limit {
             *call_count = 0;
-            return Err(RuntimeError::Custom(format!("message limit exceeded",)).to_exec(span));
+            return Err(RuntimeError::Custom(format!("message limit exceeded",))
+                .to_exec(span, data.source.clone()));
         }
         *call_count = call_count.saturating_add(1);
     }
@@ -230,7 +234,7 @@ async fn check_limits<'c, U: FunboyUserId, M: Messenger>(
                 return Err(RuntimeError::Custom(format!(
                     "exceeded rate limit too many times, please wait a bit before trying again",
                 ))
-                .to_exec(span));
+                .to_exec(span, data.source.clone()));
             }
             RateLimitResult::UsesPerIntervalreached => Ok(()),
             RateLimitResult::Ok => Ok(()),
@@ -238,6 +242,29 @@ async fn check_limits<'c, U: FunboyUserId, M: Messenger>(
     } else {
         Ok(())
     }
+}
+
+pub fn validate_time_out(
+    time_out: f64,
+    max: f64,
+    span: Span,
+    data: Arc<InterpreterData>,
+) -> Result<(), ExecutionError> {
+    if !time_out.is_finite() {
+        return Err(RuntimeError::NonFiniteValue.to_exec(span, data.source.clone()));
+    } else if time_out.is_sign_negative() {
+        return Err(
+            RuntimeError::Custom(format!("time_out cannot be a negative number"))
+                .to_exec(span, data.source.clone()),
+        );
+    } else if time_out > max {
+        return Err(RuntimeError::Custom(format!(
+            "timeout cannot be greater than {} seconds",
+            max
+        ))
+        .to_exec(span, data.source.clone()));
+    }
+    Ok(())
 }
 
 pub const SAY: &str = "say";
@@ -259,11 +286,13 @@ pub fn say_command<U: FunboyUserId, M: Messenger>(ictx: InterpreterContext<U, M>
                 message.push_str(&text);
             }
 
-            let message = ictx.generate_message(&message, command.span).await?;
+            let message = ictx
+                .generate_message(&message, command.span, data.clone())
+                .await?;
 
             if message.len() < SAY_MAX_OUTPUT_LENGTH {
                 for m in split_message(&message, TWO_THOUSAND) {
-                    check_limits(ictx.clone(), command.span).await?;
+                    check_limits(ictx.clone(), command.span, data.clone()).await?;
                     ictx.messenger.say(m);
                 }
 
@@ -277,7 +306,7 @@ pub fn say_command<U: FunboyUserId, M: Messenger>(ictx: InterpreterContext<U, M>
                     "Message exceeded max length of {} characters",
                     SAY_MAX_OUTPUT_LENGTH,
                 ))
-                .to_exec(command.span));
+                .to_exec(command.span, data.source.clone()));
             }
         }
         .boxed()
@@ -296,7 +325,7 @@ pub fn say_to_command<U: FunboyUserId, M: Messenger + Interactor>(
         let ictx = ictx.clone();
         async move {
             let mut command = command;
-            check_limits(ictx.clone(), command.span).await?;
+            check_limits(ictx.clone(), command.span, data.clone()).await?;
 
             let mut args = command.take_args();
             let user_name = args.pop_front().unwrap();
@@ -309,12 +338,14 @@ pub fn say_to_command<U: FunboyUserId, M: Messenger + Interactor>(
                 message.push_str(&text);
             }
 
-            let message = ictx.generate_message(&message, command.span).await?;
+            let message = ictx
+                .generate_message(&message, command.span, data.clone())
+                .await?;
 
             ictx.messenger
                 .say_to_user(&user_name, &message)
                 .await
-                .map_err(|e| e.to_exec(command.span))?;
+                .map_err(|e| e.to_exec(command.span, data.source.clone()))?;
 
             if let Some(delay) = ictx.limits.message_delay_ms {
                 sleep(Duration::from_millis(delay)).await;
@@ -340,7 +371,7 @@ pub fn ask_command<U: FunboyUserId, M: Messenger>(ictx: InterpreterContext<U, M>
         let ictx = ictx.clone();
         async move {
             let mut command = command;
-            check_limits(ictx.clone(), command.span).await?;
+            check_limits(ictx.clone(), command.span, data.clone()).await?;
 
             let mut args = command.take_args();
 
@@ -351,7 +382,7 @@ pub fn ask_command<U: FunboyUserId, M: Messenger>(ictx: InterpreterContext<U, M>
                 Some(timeout) => {
                     let timeout_span = timeout.span;
                     let timeout = timeout.as_float(data.clone()).await?;
-                    validate_time_out(timeout, MAX_TIMEOUT_SECS, timeout_span)?;
+                    validate_time_out(timeout, MAX_TIMEOUT_SECS, timeout_span, data.clone())?;
                     timeout
                 }
                 None => DEFAULT_TIMEOUT_SECS,
@@ -359,7 +390,9 @@ pub fn ask_command<U: FunboyUserId, M: Messenger>(ictx: InterpreterContext<U, M>
 
             let question = format!("{}\n\n{}", ictx.messenger.mention(), question);
             let question = format!("{}\n\n{}", question, "(enter -STOP- to quit)");
-            let question = ictx.generate_message(&question, question_span).await?;
+            let question = ictx
+                .generate_message(&question, question_span, data.clone())
+                .await?;
 
             if question.len() < SAY_MAX_OUTPUT_LENGTH {
                 for m in split_message(&question, TWO_THOUSAND) {
@@ -371,18 +404,20 @@ pub fn ask_command<U: FunboyUserId, M: Messenger>(ictx: InterpreterContext<U, M>
                     "Message exceeded max length of {} characters",
                     SAY_MAX_OUTPUT_LENGTH,
                 ))
-                .to_exec(command.span));
+                .to_exec(command.span, data.source.clone()));
             }
 
             let response = ictx
                 .messenger
                 .await_response(timeout)
                 .await
-                .map_err(|e| e.to_exec(command.span))?;
+                .map_err(|e| e.to_exec(command.span, data.source.clone()))?;
             if response == STOP {
-                return Err(RuntimeError::ProgramExited.to_exec(command.span));
+                return Err(RuntimeError::ProgramExited.to_exec(command.span, data.source.clone()));
             }
-            let response = ictx.generate_message(&response, command.span).await?;
+            let response = ictx
+                .generate_message(&response, command.span, data.clone())
+                .await?;
 
             Ok(Value::from(response))
         }
@@ -404,7 +439,7 @@ pub fn ask_to_command<U: FunboyUserId, M: Messenger + Interactor>(
         let ictx = ictx.clone();
         async move {
             let mut command = command;
-            check_limits(ictx.clone(), command.span).await?;
+            check_limits(ictx.clone(), command.span, data.clone()).await?;
 
             sleep(Duration::from_millis(FIVE_HUNDRED_MS)).await;
 
@@ -422,7 +457,7 @@ pub fn ask_to_command<U: FunboyUserId, M: Messenger + Interactor>(
                 Some(timeout) => {
                     let timeout_span = timeout.span;
                     let timeout = timeout.as_float(data.clone()).await?;
-                    validate_time_out(timeout, MAX_TIMEOUT_SECS, timeout_span)?;
+                    validate_time_out(timeout, MAX_TIMEOUT_SECS, timeout_span, data.clone())?;
                     timeout
                 }
                 None => DEFAULT_TIMEOUT_SECS,
@@ -431,47 +466,30 @@ pub fn ask_to_command<U: FunboyUserId, M: Messenger + Interactor>(
             ictx.messenger
                 .say_to_user(
                     &user_name,
-                    &ictx.generate_message(&question, question_span).await?,
+                    &ictx
+                        .generate_message(&question, question_span, data.clone())
+                        .await?,
                 )
                 .await
-                .map_err(|e| e.to_exec(command.span))?;
+                .map_err(|e| e.to_exec(command.span, data.source.clone()))?;
 
             let response = ictx
                 .messenger
                 .await_user_response(&user_name, timeout)
                 .await
-                .map_err(|e| e.to_exec(command.span))?;
+                .map_err(|e| e.to_exec(command.span, data.source.clone()))?;
 
             if response == STOP {
-                return Err(RuntimeError::ProgramExited.to_exec(command.span));
+                return Err(RuntimeError::ProgramExited.to_exec(command.span, data.source.clone()));
             }
-            let response = ictx.generate_message(&response, command.span).await?;
+            let response = ictx
+                .generate_message(&response, command.span, data.clone())
+                .await?;
 
             Ok(Value::from(response))
         }
         .boxed()
     })
-}
-
-pub fn validate_time_out<'c>(
-    time_out: f64,
-    max: f64,
-    span: Span<'c>,
-) -> Result<(), ExecutionError<'c>> {
-    if !time_out.is_finite() {
-        return Err(RuntimeError::NonFiniteValue.to_exec(span));
-    } else if time_out.is_sign_negative() {
-        return Err(
-            RuntimeError::Custom(format!("time_out cannot be a negative number")).to_exec(span),
-        );
-    } else if time_out > max {
-        return Err(RuntimeError::Custom(format!(
-            "timeout cannot be greater than {} seconds",
-            max
-        ))
-        .to_exec(span));
-    }
-    Ok(())
 }
 
 pub mod sh_exec {
@@ -501,7 +519,7 @@ pub mod sh_exec {
 
                 let mut command = command;
                 let mut args = command.take_args();
-                let script = args.pop_front().unwrap().as_text(data).await?;
+                let script = args.pop_front().unwrap().as_text(data.clone()).await?;
                 let output = tokio::process::Command::new("sudo")
                     .args(["-u", "sandbox", "sh", "-c", &script])
                     .current_dir("/home/sandbox")
@@ -511,7 +529,7 @@ pub mod sh_exec {
                         RuntimeError::FailedToRun {
                             process: "sh".into(),
                         }
-                        .to_exec(command.span)
+                        .to_exec(command.span, data.source.clone())
                     })?;
 
                 if !output.status.success() {
@@ -562,7 +580,7 @@ pub mod sh_exec {
                     Ok(child) => child,
                     Err(e) => {
                         return Err(fsl_core::error::RuntimeError::Custom(format!("{e}"))
-                            .to_exec(command.span));
+                            .to_exec(command.span, data.source.clone()));
                     }
                 };
 
@@ -571,14 +589,14 @@ pub mod sh_exec {
                 let mut buf = vec![0u8; INTERACTIVE_BUF_SIZE];
 
                 for _ in 0..INTERACTIVE_LOOP_LIMIT {
-                    check_limits(ictx.clone(), command.span).await?;
+                    check_limits(ictx.clone(), command.span, data.clone()).await?;
 
                     let result = stdout.read(&mut buf).await;
                     let n = match result {
                         Ok(n) => n,
                         Err(e) => {
                             return Err(fsl_core::error::RuntimeError::Custom(format!("{e}"))
-                                .to_exec(command.span));
+                                .to_exec(command.span, data.source.clone()));
                         }
                     };
 
@@ -591,26 +609,28 @@ pub mod sh_exec {
                     ictx.messenger
                         .say_to_user(&user_name, &output)
                         .await
-                        .map_err(|e| e.to_exec(command.span))?;
+                        .map_err(|e| e.to_exec(command.span, data.source.clone()))?;
                     let response = ictx
                         .messenger
                         .await_user_response(&user_name, 60.0)
                         .await
-                        .map_err(|e| e.to_exec(command.span))?;
+                        .map_err(|e| e.to_exec(command.span, data.source.clone()))?;
 
                     if response == STOP {
                         break;
                     }
 
-                    let response = ictx.generate_message(&response, command.span).await?;
+                    let response = ictx
+                        .generate_message(&response, command.span, data.clone())
+                        .await?;
 
                     if let Err(e) = stdin.write_all(response.as_bytes()).await {
                         return Err(fsl_core::error::RuntimeError::Custom(format!("{e}"))
-                            .to_exec(command.span));
+                            .to_exec(command.span, data.source.clone()));
                     }
                     if let Err(e) = stdin.write_all(b"\n").await {
                         return Err(fsl_core::error::RuntimeError::Custom(format!("{e}"))
-                            .to_exec(command.span));
+                            .to_exec(command.span, data.source.clone()));
                     }
                 }
 
@@ -633,7 +653,7 @@ pub fn get_sub_command<U: FunboyUserId, M: Messenger + Interactor>(
         async move {
                 let mut command = command;
                 let mut args = command.take_args();
-                let template = args.pop_front().unwrap().as_text(data).await?;
+                let template = args.pop_front().unwrap().as_text(data.clone()).await?;
                 let regex = TemplateDelimiter::BackTick.to_regex().await;
                 if regex.is_match(&template) {
                     let template = template.trim_matches('`');
@@ -641,16 +661,16 @@ pub fn get_sub_command<U: FunboyUserId, M: Messenger + Interactor>(
                     match sub {
                         Ok(sub) => {
                             let sub = sub.name;
-                            let text = ictx.generate_message(&sub, command.span).await?;
+                            let text = ictx.generate_message(&sub, command.span, data.clone()).await?;
                             Ok(Value::from(text))
                         },
-                        Err(e) => Err(RuntimeError::Custom(e.to_string()).to_exec(command.span)),
+                        Err(e) => Err(RuntimeError::Custom(e.to_string()).to_exec(command.span, data.source.clone())),
                     }
                 } else {
                     return Err(RuntimeError::Custom(format!(
                         "template name must be preceeded by a single ` (backtick)\nThis ensures if the template is renamed this {} will not be invalid",
                         GET_SUB
-                    )).to_exec(command.span));
+                    )).to_exec(command.span, data.source.clone()));
                 }
             }.boxed()
     })
@@ -664,7 +684,7 @@ pub fn get_subs_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
         async move {
                 let mut command = command;
                 let mut args = command.take_args();
-                let template = args.pop_front().unwrap().as_text(data).await?;
+                let template = args.pop_front().unwrap().as_text(data.clone()).await?;
                 let regex = TemplateDelimiter::BackTick.to_regex().await;
                 if regex.is_match(&template) {
                     let template = template.trim_matches('`');
@@ -678,13 +698,13 @@ pub fn get_subs_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
                             }
                             Ok(Value::from(values))
                         },
-                        Err(e) => Err(RuntimeError::Custom(e.to_string()).to_exec(command.span)),
+                        Err(e) => Err(RuntimeError::Custom(e.to_string()).to_exec(command.span, data.source.clone())),
                     }
                 } else {
                     return Err(RuntimeError::Custom(format!(
                         "template name must be preceeded by a single ` (backtick)\nThis ensures if the template is renamed this {} will not be invalid",
                         GET_SUBS
-                    )).to_exec(command.span));
+                    )).to_exec(command.span, data.source.clone()));
                 }
             }.boxed()
     })
@@ -710,13 +730,13 @@ pub fn add_subs_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
                 let regex = TemplateDelimiter::BackTick.to_regex().await;
 
                 let subs = match subs.value {
-                    Value::Text(sub) => vec![sub.into_owned()],
+                    Value::Text(sub) => vec![sub.to_string()],
                     Value::List(values) => {
                         let span = subs.span;
                         let mut subs = vec![];
                         for value in values {
-                            let value = value.as_text(data.clone()).await.map_err(|e| e.to_exec(span))?;
-                            subs.push(value.into_owned());
+                            let value = value.as_text(data.clone()).await.map_err(|e| e.to_exec(span, data.source.clone()))?;
+                            subs.push(value.to_string());
                         }
                         subs
                     }
@@ -731,13 +751,13 @@ pub fn add_subs_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
                         Err(e) => Err(RuntimeError::Custom(format!(
                             "{}",
                             e.to_string()
-                        )).to_exec(command.span)),
+                        )).to_exec(command.span, data.source.clone())),
                     }
                 } else {
                     return Err(RuntimeError::Custom(format!(
                         "template name must be preceeded by a single ` (backtick)\nThis ensures if the template is renamed this {} will not be invalid",
                         ADD_SUBS
-                    )).to_exec(command.span));
+                    )).to_exec(command.span, data.source.clone()));
                 }
             }.boxed()
     })
@@ -763,13 +783,13 @@ pub fn delete_subs_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
                 let regex = TemplateDelimiter::BackTick.to_regex().await;
 
                 let subs = match subs.value {
-                    Value::Text(sub) => vec![sub.into_owned()],
+                    Value::Text(sub) => vec![sub.to_string()],
                     Value::List(values) => {
                         let span = subs.span;
                         let mut subs = vec![];
                         for value in values {
-                            let value = value.as_text(data.clone()).await.map_err(|e| e.to_exec(span))?;
-                            subs.push(value.into_owned());
+                            let value = value.as_text(data.clone()).await.map_err(|e| e.to_exec(span, data.source.clone()))?;
+                            subs.push(value.to_string());
                         }
                         subs
                     }
@@ -784,13 +804,13 @@ pub fn delete_subs_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
                         Err(e) => Err(RuntimeError::Custom(format!(
                             "{}",
                             e.to_string()
-                        )).to_exec(command.span)),
+                        )).to_exec(command.span, data.source.clone())),
                     }
                 } else {
                     return Err(RuntimeError::Custom(format!(
                         "template name must be preceeded by a single ` (backtick)\nThis ensures if the template is renamed this {} will not be invalid",
                         ADD_SUBS
-                    )).to_exec(command.span));
+                    )).to_exec(command.span, data.source.clone()));
                 }
             }.boxed()
     })
@@ -812,19 +832,19 @@ pub fn ask_ai_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
 
             let word_limit = args.pop_front().unwrap();
             let word_limit_span = word_limit.span;
-            let word_limit = word_limit.as_int(data).await?;
+            let word_limit = word_limit.as_int(data.clone()).await?;
             if word_limit <= 0 {
                 return Err(RuntimeError::Custom(format!(
                     "word limit `{}` must be greater than zero",
                     word_limit
                 ))
-                .to_exec(word_limit_span));
+                .to_exec(word_limit_span, data.source.clone()));
             } else if word_limit > MAX_WORD_LIMIT {
                 return Err(RuntimeError::Custom(format!(
                     "word limit `{}` cannot be greater than {}",
                     word_limit, MAX_WORD_LIMIT
                 ))
-                .to_exec(word_limit_span));
+                .to_exec(word_limit_span, data.source.clone()));
             }
 
             let mut ollama_settings = OllamaSettings::default();
@@ -840,7 +860,10 @@ pub fn ask_ai_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
                     let response = response.response;
                     Ok(Value::from(response))
                 }
-                Err(e) => Err(RuntimeError::Custom(e.to_string()).to_exec(command.span)),
+                Err(e) => {
+                    Err(RuntimeError::Custom(e.to_string())
+                        .to_exec(command.span, data.source.clone()))
+                }
             }
         }
         .boxed()

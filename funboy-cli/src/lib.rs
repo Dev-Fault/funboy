@@ -63,7 +63,7 @@ pub async fn enter_interpreter(
                 rl.add_history_entry(&input)?;
                 drop(rl);
                 let result = interpreter
-                    .interpret(&input, InterpreterData::default())
+                    .interpret(input, InterpreterData::default())
                     .await;
                 match result {
                     Ok(output) => println!("{}", output),
