@@ -8,7 +8,8 @@ ollama-rs.workspace = true
 reqwest.workspace = true
 fsl-core.workspace = true
 dotenvy = "0.15.7"
-matrix-sdk = { version = "0.16.0", features = ["markdown"] }
+matrix-sdk = { version = "0.18.0", features = ["markdown"] }
+time = "=0.3.47" 
 funboy-core = { path = "../funboy-core" }
 funboy-cli = { path = "../funboy-cli" }
 sqlx = {version = "0.9.0-alpha.1", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls", "macros", "migrate"]}

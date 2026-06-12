@@ -206,9 +206,7 @@ pub async fn on_room_message(
     match permissions {
         Ok(permissions) => {
             if permissions.is_owner() {
-                interpreter
-                    .register_library(fsl_core::libraries::Library::Exec)
-                    .await
+                interpreter.register_library(fsl_core::libraries::Library::Exec);
             }
         }
         Err(e) => eprintln!("{e}"),

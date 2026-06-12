@@ -178,9 +178,8 @@ pub async fn create_interpreter(
         funboy.clone(),
         matrix_ctx.clone(),
         matrix_ctx.interpreter_limits,
-    )
-    .await;
-    ictx.register_interactive_funboy_commands().await;
+    );
+    ictx.register_interactive_funboy_commands();
 
     #[cfg(all(target_os = "linux", feature = "sh_exec"))]
     ictx.register_shell_commands().await;
