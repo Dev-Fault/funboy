@@ -207,10 +207,9 @@ pub async fn interpreter_from_poise(ctx: &Context<'_>) -> FslInterpreter {
         ctx.data().funboy.clone(),
         dctx,
         ctx.data().interpreter_limits.clone(),
-    )
-    .await;
+    );
 
-    ictx.register_interactive_funboy_commands().await;
+    ictx.register_interactive_funboy_commands();
     ictx.interpreter.clone()
 }
 
@@ -225,9 +224,8 @@ pub async fn interpreter_from_serenity(
         data.funboy.clone(),
         dctx,
         data.interpreter_limits.clone(),
-    )
-    .await;
+    );
 
-    ictx.register_interactive_funboy_commands().await;
+    ictx.register_interactive_funboy_commands();
     ictx.interpreter.clone()
 }

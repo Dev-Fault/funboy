@@ -3,8 +3,10 @@ use std::{sync::Arc, time::Duration};
 use fsl_core::data::InterpreterData;
 use fsl_core::error::{RuntimeError, SpanError, SpannedError, ToSpannedError};
 use fsl_core::libraries::Library;
+use fsl_core::potential_future;
+use fsl_core::potential_futures::SpannedPotentialFutureResult;
 use fsl_core::span::Span;
-use fsl_core::types::FslType;
+use fsl_core::types::ValueType;
 use fsl_core::types::command::{CommandSignature, ExpectedArgs};
 use fsl_core::{
     FslInterpreter,
@@ -100,7 +102,7 @@ pub struct InterpreterContext<U: FunboyUserId, M: Messenger> {
 }
 
 impl<U: FunboyUserId, M: Messenger> InterpreterContext<U, M> {
-    pub async fn new(
+    pub fn new(
         user_id: U,
         funboy: Arc<Funboy<U>>,
         messenger: M,
@@ -112,42 +114,33 @@ impl<U: FunboyUserId, M: Messenger> InterpreterContext<U, M> {
             messages_sent: Arc::new(Mutex::new(0)),
             messenger,
             limits,
-            interpreter: FslInterpreter::new().await,
+            interpreter: FslInterpreter::new(),
         }
     }
 
-    pub async fn register_default_funboy_commands(&mut self) {
-        self.interpreter.register_library(Library::Async).await;
+    pub fn register_default_funboy_commands(&mut self) {
+        self.interpreter.register_library(Library::Async);
+        self.interpreter.register(
+            GET_SUBS,
+            GET_SUBS_RULES,
+            get_subs_command(self.funboy.clone()),
+        );
+        self.interpreter.register(
+            ADD_SUBS,
+            ADD_SUBS_RULES,
+            add_subs_command(self.funboy.clone()),
+        );
+        self.interpreter.register(
+            DELETE_SUBS,
+            DELETE_SUBS_RULES,
+            delete_subs_command(self.funboy.clone()),
+        );
         self.interpreter
-            .register(
-                GET_SUBS,
-                GET_SUBS_RULES,
-                get_subs_command(self.funboy.clone()),
-            )
-            .await;
+            .register(ASK_AI, ASK_AI_RULES, ask_ai_command(self.funboy.clone()));
         self.interpreter
-            .register(
-                ADD_SUBS,
-                ADD_SUBS_RULES,
-                add_subs_command(self.funboy.clone()),
-            )
-            .await;
+            .register(SAY, SAY_RULES, say_command(self.clone()));
         self.interpreter
-            .register(
-                DELETE_SUBS,
-                DELETE_SUBS_RULES,
-                delete_subs_command(self.funboy.clone()),
-            )
-            .await;
-        self.interpreter
-            .register(ASK_AI, ASK_AI_RULES, ask_ai_command(self.funboy.clone()))
-            .await;
-        self.interpreter
-            .register(SAY, SAY_RULES, say_command(self.clone()))
-            .await;
-        self.interpreter
-            .register(ASK, ASK_RULES, ask_command(self.clone()))
-            .await;
+            .register(ASK, ASK_RULES, ask_command(self.clone()));
     }
 
     pub async fn generate_message(
@@ -167,17 +160,14 @@ impl<U: FunboyUserId, M: Messenger> InterpreterContext<U, M> {
 }
 
 impl<U: FunboyUserId, M: Messenger + Interactor> InterpreterContext<U, M> {
-    pub async fn register_interactive_funboy_commands(&mut self) {
-        self.register_default_funboy_commands().await;
+    pub fn register_interactive_funboy_commands(&mut self) {
+        self.register_default_funboy_commands();
         self.interpreter
-            .register(GET_SUB, GET_SUB_RULES, get_sub_command(self.clone()))
-            .await;
+            .register(GET_SUB, GET_SUB_RULES, get_sub_command(self.clone()));
         self.interpreter
-            .register(SAY_TO, SAY_TO_RULES, say_to_command(self.clone()))
-            .await;
+            .register(SAY_TO, SAY_TO_RULES, say_to_command(self.clone()));
         self.interpreter
-            .register(ASK_TO, ASK_TO_RULES, ask_to_command(self.clone()))
-            .await;
+            .register(ASK_TO, ASK_TO_RULES, ask_to_command(self.clone()));
     }
 
     pub async fn register_shell_commands(&mut self) {
@@ -191,16 +181,16 @@ impl<U: FunboyUserId, M: Messenger + Interactor> InterpreterContext<U, M> {
             match permissions {
                 Ok(permissions) => {
                     if permissions.can_exec() {
-                        self.interpreter
-                            .register(SANDBOXED_SH, SANDBOXED_SH_RULES, sandboxed_sh_command())
-                            .await;
-                        self.interpreter
-                            .register(
-                                INTERACTIVE_SH,
-                                INTERACTIVE_SH_RULES,
-                                interactive_sh_command(self.clone()),
-                            )
-                            .await;
+                        self.interpreter.register(
+                            SANDBOXED_SH,
+                            SANDBOXED_SH_RULES,
+                            sandboxed_sh_command(),
+                        );
+                        self.interpreter.register(
+                            INTERACTIVE_SH,
+                            INTERACTIVE_SH_RULES,
+                            interactive_sh_command(self.clone()),
+                        );
                     }
                 }
                 Err(e) => eprintln!("{e}"),
@@ -262,16 +252,16 @@ pub const FIVE_HUNDRED_MS: u64 = 500;
 pub const TWO_THOUSAND_MESSAGES: u16 = 2000;
 pub const SAY_MAX_OUTPUT_LENGTH: usize = 8000;
 pub fn say_command<U: FunboyUserId, M: Messenger>(ictx: InterpreterContext<U, M>) -> Handler {
-    Handler::new(move |command, data| {
+    Handler::new_async(move |command: Command, data| {
         let ictx = ictx.clone();
         async move {
             let mut command = command;
-            let args = command.take_args();
+            let args = command.args.iter_mut();
 
             let mut message = String::new();
 
             for arg in args {
-                let text = arg.to_text(data.clone()).await?;
+                let text = potential_future!(arg.to_text(data.clone())?);
                 message.push_str(&text);
             }
 
@@ -296,7 +286,6 @@ pub fn say_command<U: FunboyUserId, M: Messenger>(ictx: InterpreterContext<U, M>
                 .span(command.span));
             }
         }
-        .boxed()
     })
 }
 
@@ -305,20 +294,20 @@ pub const SAY_TO_RULES: &CommandSignature = &CommandSignature::Count(ExpectedArg
 pub fn say_to_command<U: FunboyUserId, M: Messenger + Interactor>(
     ictx: InterpreterContext<U, M>,
 ) -> Handler {
-    Handler::new(move |command: Command, data: Arc<InterpreterData>| {
+    Handler::new_async(move |command: Command, data: Arc<InterpreterData>| {
         let ictx = ictx.clone();
         async move {
             let mut command = command;
             check_limits(ictx.clone(), command.span).await?;
 
-            let mut args = command.take_args();
-            let user_name = args.pop_front().unwrap();
-            let user_name = user_name.to_text(data.clone()).await?;
+            let mut args = command.args.iter_mut();
+            let user_name = args.next().unwrap();
+            let user_name = potential_future!(user_name.to_text(data.clone())?);
 
             let mut message = String::new();
 
             for arg in args {
-                let text = arg.to_text(data.clone()).await?;
+                let text = potential_future!(arg.to_text(data.clone())?);
                 message.push_str(&text);
             }
 
@@ -327,7 +316,7 @@ pub fn say_to_command<U: FunboyUserId, M: Messenger + Interactor>(
             ictx.messenger
                 .say_to_user(&user_name, &message)
                 .await
-                .span_err(command.span)?;
+                .span(command.span)?;
 
             if let Some(delay) = ictx.limits.message_delay_ms {
                 sleep(Duration::from_millis(delay)).await;
@@ -335,7 +324,6 @@ pub fn say_to_command<U: FunboyUserId, M: Messenger + Interactor>(
 
             Ok(Value::None)
         }
-        .boxed()
     })
 }
 
@@ -346,21 +334,21 @@ const MAX_TIMEOUT_SECS: f64 = 60.0 * 60.0;
 const STOP: &str = "-STOP-";
 
 pub fn ask_command<U: FunboyUserId, M: Messenger>(ictx: InterpreterContext<U, M>) -> Handler {
-    Handler::new(move |command: Command, data: Arc<InterpreterData>| {
+    Handler::new_async(move |command: Command, data: Arc<InterpreterData>| {
         let ictx = ictx.clone();
         async move {
             let mut command = command;
             check_limits(ictx.clone(), command.span).await?;
 
-            let mut args = command.take_args();
+            let mut args = command.args.iter_mut();
 
-            let question = args.pop_front().unwrap();
+            let question = args.next().unwrap();
             let question_span = question.span;
-            let question = question.to_text(data.clone()).await?;
-            let timeout = match args.pop_front() {
+            let question = potential_future!(question.to_text(data.clone())?);
+            let timeout = match args.next() {
                 Some(timeout) => {
                     let timeout_span = timeout.span;
-                    let timeout = timeout.to_float(data.clone()).await?;
+                    let timeout = potential_future!(timeout.to_float(data.clone())?);
                     validate_time_out(timeout, MAX_TIMEOUT_SECS, timeout_span)?;
                     timeout
                 }
@@ -388,7 +376,7 @@ pub fn ask_command<U: FunboyUserId, M: Messenger>(ictx: InterpreterContext<U, M>
                 .messenger
                 .await_response(timeout)
                 .await
-                .span_err(command.span)?;
+                .span(command.span)?;
             if response == STOP {
                 return Err(RuntimeError::ProgramExited.span(command.span));
             }
@@ -405,7 +393,7 @@ pub const ASK_TO_RULES: &CommandSignature = &CommandSignature::Count(ExpectedArg
 pub fn ask_to_command<U: FunboyUserId, M: Messenger + Interactor>(
     ictx: InterpreterContext<U, M>,
 ) -> Handler {
-    Handler::new(move |command: Command, data: Arc<InterpreterData>| {
+    Handler::new_async(move |command: Command, data: Arc<InterpreterData>| {
         let ictx = ictx.clone();
         async move {
             let mut command = command;
@@ -413,20 +401,20 @@ pub fn ask_to_command<U: FunboyUserId, M: Messenger + Interactor>(
 
             sleep(Duration::from_millis(FIVE_HUNDRED_MS)).await;
 
-            let mut args = command.take_args();
+            let mut args = command.args.iter_mut();
 
-            let user_name = args.pop_front().unwrap();
-            let user_name = user_name.to_text(data.clone()).await?;
-            let question = args.pop_front().unwrap();
+            let user_name = args.next().unwrap();
+            let user_name = potential_future!(user_name.to_text(data.clone())?);
+            let question = args.next().unwrap();
             let question_span = question.span;
-            let question = question.to_text(data.clone()).await?;
+            let question = potential_future!(question.to_text(data.clone())?);
 
             let question = format!("{}\n\n{}", question, "(enter -STOP- to quit)");
 
-            let timeout = match args.pop_front() {
+            let timeout = match args.next() {
                 Some(timeout) => {
                     let timeout_span = timeout.span;
-                    let timeout = timeout.to_float(data.clone()).await?;
+                    let timeout = potential_future!(timeout.to_float(data.clone())?);
                     validate_time_out(timeout, MAX_TIMEOUT_SECS, timeout_span)?;
                     timeout
                 }
@@ -439,13 +427,13 @@ pub fn ask_to_command<U: FunboyUserId, M: Messenger + Interactor>(
                     &ictx.generate_message(&question, question_span).await?,
                 )
                 .await
-                .span_err(command.span)?;
+                .span(command.span)?;
 
             let response = ictx
                 .messenger
                 .await_user_response(&user_name, timeout)
                 .await
-                .span_err(command.span)?;
+                .span(command.span)?;
 
             if response == STOP {
                 return Err(RuntimeError::ProgramExited.span(command.span));
@@ -460,6 +448,7 @@ pub fn ask_to_command<U: FunboyUserId, M: Messenger + Interactor>(
 
 pub mod sh_exec {
     use fsl_core::error::{SpanError, ToSpannedError};
+    use fsl_core::potential_future;
     use fsl_core::types::command::{CommandSignature, ExpectedArgs, Handler};
     use fsl_core::types::value::Value;
     use fsl_core::{data::InterpreterData, types::command::Command};
@@ -477,13 +466,11 @@ pub mod sh_exec {
     pub const SANDBOXED_SH: &str = "sh";
     #[cfg(target_os = "linux")]
     pub fn sandboxed_sh_command() -> Handler {
-        Handler::new(move |command: Command, data: Arc<InterpreterData>| {
+        Handler::new_async(move |command: Command, data: Arc<InterpreterData>| {
             async move {
-                use fsl_core::error::ToSpannedError;
-
                 let mut command = command;
-                let mut args = command.take_args();
-                let script = args.pop_front().unwrap().to_text(data.clone()).await?;
+                let mut args = command.args.iter_mut();
+                let script = potential_future!(args.next().unwrap().to_text(data.clone())?);
                 let output = tokio::process::Command::new("sudo")
                     .args(["-u", "sandbox", "sh", "-c", &script])
                     .current_dir("/home/sandbox")
@@ -520,15 +507,15 @@ pub mod sh_exec {
     pub fn interactive_sh_command<U: FunboyUserId, M: Messenger + Interactor>(
         ictx: InterpreterContext<U, M>,
     ) -> Handler {
-        Handler::new(move |command: Command, data: Arc<InterpreterData>| {
+        Handler::new_async(move |command: Command, data: Arc<InterpreterData>| {
             let ictx = ictx.clone();
             async move {
                 let mut command = command;
                 // interactive_sh("python game.py", optional_user)
-                let mut args = command.take_args();
-                let child_process = args.pop_front().unwrap().to_text(data.clone()).await?;
-                let user_name = match args.pop_front() {
-                    Some(user_name) => &*user_name.to_text(data.clone()).await?,
+                let mut args = command.args.iter_mut();
+                let child_process = potential_future!(args.next().unwrap().to_text(data.clone())?);
+                let user_name = match args.next() {
+                    Some(user_name) => &*potential_future!(user_name.to_text(data.clone())?),
                     None => &ictx.messenger.mention(),
                 };
                 let child = tokio::process::Command::new("sudo")
@@ -571,12 +558,12 @@ pub mod sh_exec {
                     ictx.messenger
                         .say_to_user(&user_name, &output)
                         .await
-                        .span_err(command.span)?;
+                        .span(command.span)?;
                     let response = ictx
                         .messenger
                         .await_user_response(&user_name, 60.0)
                         .await
-                        .span_err(command.span)?;
+                        .span(command.span)?;
 
                     if response == STOP {
                         break;
@@ -608,12 +595,12 @@ pub const GET_SUB_RULES: &CommandSignature = &CommandSignature::Count(ExpectedAr
 pub fn get_sub_command<U: FunboyUserId, M: Messenger + Interactor>(
     ictx: InterpreterContext<U, M>,
 ) -> Handler {
-    Handler::new(move |command: Command, data: Arc<InterpreterData>| {
+    Handler::new_async(move |command: Command, data: Arc<InterpreterData>| {
         let ictx = ictx.clone();
         async move {
                 let mut command = command;
-                let mut args = command.take_args();
-                let template = args.pop_front().unwrap().to_text(data.clone()).await?;
+                let mut args = command.args.iter_mut();
+                let template = potential_future!(args.next().unwrap().to_text(data.clone())?);
                 let regex = TemplateDelimiter::BackTick.to_regex().await;
                 if regex.is_match(&template) {
                     let template = template.trim_matches('`');
@@ -639,12 +626,12 @@ pub fn get_sub_command<U: FunboyUserId, M: Messenger + Interactor>(
 pub const GET_SUBS: &str = "get_subs";
 pub const GET_SUBS_RULES: &CommandSignature = &CommandSignature::Count(ExpectedArgs::Exactly(1));
 pub fn get_subs_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
-    Handler::new(move |command: Command, data: Arc<InterpreterData>| {
+    Handler::new_async(move |command: Command, data: Arc<InterpreterData>| {
         let funboy = funboy.clone();
         async move {
                 let mut command = command;
-                let mut args = command.take_args();
-                let template = args.pop_front().unwrap().to_text(data.clone()).await?;
+                let mut args = command.args.iter_mut();
+                let template = potential_future!(args.next().unwrap().to_text(data.clone())?);
                 let regex = TemplateDelimiter::BackTick.to_regex().await;
                 if regex.is_match(&template) {
                     let template = template.trim_matches('`');
@@ -673,19 +660,19 @@ pub fn get_subs_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
 pub const ADD_SUBS: &str = "add_subs";
 pub const ADD_SUBS_RULES: &CommandSignature = &CommandSignature::Count(ExpectedArgs::Exactly(2));
 pub fn add_subs_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
-    Handler::new(move |command: Command, data: Arc<InterpreterData>| {
+    Handler::new_async(move |command: Command, data: Arc<InterpreterData>| {
         let funboy = funboy.clone();
         async move {
                 let mut command = command;
-                let mut args = command.take_args();
-                let template = args.pop_front().unwrap().to_text(data.clone()).await?;
+                let mut args = command.args.iter_mut();
+                let template = potential_future!(args.next().unwrap().to_text(data.clone())?);
                 let subs = args
-                    .pop_front()
+                    .next()
                     .unwrap();
                 let subs_span = subs.span;
-                    let subs = subs
-                    .as_raw_checked(&[FslType::Text, FslType::List], data.clone())
-                    .await?;
+                    let subs = potential_future!(subs
+                    .to_inner_checked(&[ValueType::Text, ValueType::List], data.clone())
+                    ?);
                 let regex = TemplateDelimiter::BackTick.to_regex().await;
 
                 let subs = match subs {
@@ -694,7 +681,7 @@ pub fn add_subs_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
                         let span = subs_span;
                         let mut subs = vec![];
                         for value in values {
-                            let value = value.to_text(data.clone()).await.span_err( span, )?;
+                            let value = potential_future!(value.to_text(data.clone()).span_future(span)?);
                             subs.push(value.to_string());
                         }
                         subs
@@ -725,18 +712,18 @@ pub fn add_subs_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
 pub const DELETE_SUBS: &str = "delete_subs";
 pub const DELETE_SUBS_RULES: &CommandSignature = &CommandSignature::Count(ExpectedArgs::Exactly(2));
 pub fn delete_subs_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
-    Handler::new(move |command: Command, data: Arc<InterpreterData>| {
+    Handler::new_async(move |command: Command, data: Arc<InterpreterData>| {
         let funboy = funboy.clone();
         async move {
                 let mut command = command;
-                let mut args = command.take_args();
-                let template = args.pop_front().unwrap().to_text(data.clone()).await?;
+                let mut args = command.args.iter_mut();
+                let template = potential_future!(args.next().unwrap().to_text(data.clone())?);
                 let subs = args
-                    .pop_front()
+                    .next()
                     .unwrap();
                 let subs_span = subs.span;
-                    let subs = subs.as_raw_checked( &[FslType::Text, FslType::List], data.clone())
-                    .await?;
+                    let subs = potential_future!(subs.to_inner_checked( &[ValueType::Text, ValueType::List], data.clone())
+                    ?);
                 let regex = TemplateDelimiter::BackTick.to_regex().await;
 
                 let subs = match subs {
@@ -745,7 +732,7 @@ pub fn delete_subs_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
                         let span = subs_span;
                         let mut subs = vec![];
                         for value in values {
-                            let value = value.to_text(data.clone()).await.span_err( span, )?;
+                            let value = potential_future!(value.to_text(data.clone()).span_future( span )?);
                             subs.push(value.to_string());
                         }
                         subs
@@ -777,16 +764,16 @@ pub const ASK_AI: &str = "ask_ai";
 pub const ASK_AI_RULES: &CommandSignature = &CommandSignature::Count(ExpectedArgs::Exactly(2));
 pub const MAX_WORD_LIMIT: i64 = 2000;
 pub fn ask_ai_command<U: FunboyUserId>(funboy: Arc<Funboy<U>>) -> Handler {
-    Handler::new(move |command: Command, data: Arc<InterpreterData>| {
+    Handler::new_async(move |command: Command, data: Arc<InterpreterData>| {
         let funboy = funboy.clone();
         async move {
             let mut command = command;
-            let mut args = command.take_args();
-            let prompt = args.pop_front().unwrap().to_text(data.clone()).await?;
+            let mut args = command.args.iter_mut();
+            let prompt = potential_future!(args.next().unwrap().to_text(data.clone())?);
 
-            let word_limit = args.pop_front().unwrap();
+            let word_limit = args.next().unwrap();
             let word_limit_span = word_limit.span;
-            let word_limit = word_limit.to_int(data.clone()).await?;
+            let word_limit = potential_future!(word_limit.to_int(data.clone())?);
             if word_limit <= 0 {
                 return Err(RuntimeError::Custom(format!(
                     "word limit `{}` must be greater than zero",

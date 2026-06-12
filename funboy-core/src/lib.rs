@@ -809,7 +809,7 @@ mod core {
         let funboy = get_funboy(pool).await;
 
         let output = funboy
-            .generate("^sentence", &FslInterpreter::new().await)
+            .generate("^sentence", &FslInterpreter::new())
             .await
             .unwrap();
 
@@ -829,7 +829,7 @@ mod core {
         funboy.add_substitutes("gtverb", &["jump"]).await.unwrap();
 
         let output = funboy
-            .generate("^sentence", &FslInterpreter::new().await)
+            .generate("^sentence", &FslInterpreter::new())
             .await
             .unwrap();
 
@@ -856,7 +856,7 @@ mod core {
                     "{0}noun {0}noun {0}noun {0}noun {0}noun",
                     TemplateDelimiter::Plus.to_char()
                 ),
-                &FslInterpreter::new().await,
+                &FslInterpreter::new(),
             )
             .await
             .unwrap();
@@ -886,7 +886,7 @@ mod core {
             .generate(&format!(
                 "{0}noun-1 {0}noun-1 {0}noun-2 {0}noun-2 {0}noun-2 {0}noun-999 {0}noun-999 {0}noun-999{0}noun-999{0}",
                 TemplateDelimiter::Plus.to_char()),
-                &FslInterpreter::new().await,
+                &FslInterpreter::new(),
             )
             .await
             .unwrap();
@@ -907,10 +907,7 @@ mod core {
         let funboy = get_funboy(pool).await;
 
         let output = funboy
-            .generate(
-                "{repeat(5, print(\"again\"))}",
-                &FslInterpreter::new().await,
-            )
+            .generate("{repeat(5, print(\"again\"))}", &FslInterpreter::new())
             .await
             .unwrap();
 
@@ -966,7 +963,7 @@ mod core {
                 Some("tinyllama".to_string()),
                 &OllamaSettings::default(),
                 "{print(\"You are very ^adj you know that?\")}",
-                &FslInterpreter::new().await,
+                &FslInterpreter::new(),
             )
             .await
             .unwrap();

@@ -1,4 +1,4 @@
-use clap::{Parser, arg};
+use clap::Parser;
 use funboy_core::{
     Request,
     commands::{

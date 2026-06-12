@@ -54,12 +54,10 @@ pub async fn create_interpreter(
     rl: Arc<Mutex<DefaultEditor>>,
 ) -> FslInterpreter {
     let cli_context = CliContext::new(rl);
-    let mut ictx =
-        InterpreterContext::new(Id(0), funboy, cli_context, InterpreterLimits::none()).await;
-    ictx.register_default_funboy_commands().await;
+    let mut ictx = InterpreterContext::new(Id(0), funboy, cli_context, InterpreterLimits::none());
+    ictx.register_default_funboy_commands();
     ictx.interpreter
-        .register_library(fsl_core::libraries::Library::Exec)
-        .await;
+        .register_library(fsl_core::libraries::Library::Exec);
 
     ictx.interpreter.clone()
 }
